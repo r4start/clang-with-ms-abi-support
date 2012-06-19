@@ -87,6 +87,11 @@ namespace clang {
       Gen->Initialize(Ctx);
 
       TheModule.reset(Gen->GetModule());
+      // r4start
+      /*llvm::Triple Abi;
+      Abi.setEnvironmentName(TargetOpts.CXXABI);
+
+      TheModule->setEnviromentType(Abi.getEnvironment());*/
 
       if (llvm::TimePassesIsEnabled)
         LLVMIRGeneration.stopTimer();

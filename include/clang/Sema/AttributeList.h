@@ -26,6 +26,7 @@ namespace clang {
   class ASTContext;
   class IdentifierInfo;
   class Expr;
+  class RecordDecl;
 
 /// \brief Represents information about a change in availability for
 /// an entity, which is part of the encoding of the 'availability'
@@ -94,6 +95,11 @@ private:
 
   unsigned AttrKind : 8;
 
+  /// DAEMON
+  /// \brief Represents information about dynamically-describable (by RecordDecl)
+  /// Microsoft attribute
+  RecordDecl* RD;
+
   /// \brief The location of the 'unavailable' keyword in an
   /// availability attribute.
   SourceLocation UnavailableLoc;
@@ -147,6 +153,7 @@ private:
 
   size_t allocated_size() const;
 
+  /// DAEMON
   /// Constructor for attributes with expression arguments.
   AttributeList(IdentifierInfo *attrName, SourceRange attrRange,
                 IdentifierInfo *scopeName, SourceLocation scopeLoc,
@@ -156,8 +163,8 @@ private:
     : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
       NumArgs(numArgs), SyntaxUsed(syntaxUsed), Invalid(false),
-      UsedAsTypeAttr(false), IsAvailability(false),
-      IsTypeTagForDatatype(false), NextInPosition(0), NextInPool(0) {
+      UsedAsTypeAttr(false), IsAvailability(false), RD(NULL),
+      NextInPosition(0), NextInPool(0) {
     if (numArgs) memcpy(getArgsBuffer(), args, numArgs * sizeof(Expr*));
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
   }
@@ -175,7 +182,7 @@ private:
     : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
       NumArgs(0), SyntaxUsed(syntaxUsed),
-      Invalid(false), UsedAsTypeAttr(false), IsAvailability(true),
+      Invalid(false), UsedAsTypeAttr(false), IsAvailability(true), RD(NULL),
       IsTypeTagForDatatype(false),
       UnavailableLoc(unavailable), MessageExpr(messageExpr),
       NextInPosition(0), NextInPool(0) {
@@ -194,7 +201,7 @@ private:
                 bool mustBeNull, Syntax syntaxUsed)
     : AttrName(attrName), ScopeName(scopeName), ParmName(argumentKindName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(argumentKindLoc),
-      NumArgs(0), SyntaxUsed(syntaxUsed),
+      NumArgs(0), SyntaxUsed(syntaxUsed), RD(NULL)
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
       IsTypeTagForDatatype(true), NextInPosition(NULL), NextInPool(NULL) {
     TypeTagForDatatypeData &ExtraData = getTypeTagForDatatypeDataSlot();
@@ -231,11 +238,16 @@ public:
   /// declspec representing a type specification (like __w64 or __ptr32).
   bool isDeclspecAttribute() const { return SyntaxUsed == AS_Declspec ||
                                             SyntaxUsed == AS_MSTypespec; }
+  bool isMicrosoftAttribute() const { return RD != NULL; }
   bool isCXX0XAttribute() const { return SyntaxUsed == AS_CXX11; }
   bool isMSTypespecAttribute() const { return SyntaxUsed == AS_MSTypespec; }
 
   bool isInvalid() const { return Invalid; }
   void setInvalid(bool b = true) const { Invalid = b; }
+
+  /// DAEMON
+  RecordDecl* getMsAttributeRecordDecl() const { return RD; }
+  void setMsAttributeRecordDecl(RecordDecl* RD) { this->RD = RD; }
 
   bool isUsedAsTypeAttr() const { return UsedAsTypeAttr; }
   void setUsedAsTypeAttr() { UsedAsTypeAttr = true; }

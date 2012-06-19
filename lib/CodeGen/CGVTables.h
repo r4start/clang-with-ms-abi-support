@@ -21,6 +21,7 @@
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/GlobalDecl.h"
 #include "clang/AST/VTableBuilder.h"
+#include "clang/AST/VBTableBuilder.h"
 
 namespace clang {
   class CXXRecordDecl;
@@ -33,8 +34,18 @@ class CodeGenVTables {
 
   VTableContext VTContext;
 
+  VBTableContext VBTContext;
+
+  typedef llvm::DenseMap<const CXXRecordDecl *, llvm::GlobalVariable *> 
+  VTablesMapTy;
+
   /// VTables - All the vtables which have been defined.
-  llvm::DenseMap<const CXXRecordDecl *, llvm::GlobalVariable *> VTables;
+  VTablesMapTy VTables;
+
+  typedef llvm::DenseMap<const CXXRecordDecl *, VTablesMapTy > MSVTablesTy;
+
+  MSVTablesTy MSVFTables;
+  MSVTablesTy MSVBTables;
   
   /// VTableAddressPointsMapTy - Address points for a single vtable.
   typedef llvm::DenseMap<BaseSubobject, uint64_t> VTableAddressPointsMapTy;
@@ -54,7 +65,8 @@ class CodeGenVTables {
 
   /// EmitThunk - Emit a single thunk.
   void EmitThunk(GlobalDecl GD, const ThunkInfo &Thunk, 
-                 bool UseAvailableExternallyLinkage);
+                 bool UseAvailableExternallyLinkage,
+                 const CXXRecordDecl *MostDerived = 0);
 
   /// MaybeEmitThunkAvailableExternally - Try to emit the given thunk with
   /// available_externally linkage to allow for inlining of thunks.
@@ -72,10 +84,21 @@ class CodeGenVTables {
                                 const VTableLayout::VTableThunkTy *VTableThunks,
                                           unsigned NumVTableThunks);
 
+  /// r4start
+  /// CreateVFTableInitializer
+  llvm::Constant *CreateVFTableInitializer(const CXXRecordDecl *RD,
+                                           const CXXRecordDecl *Base,
+                                           const VTableComponent *Components, 
+                                           unsigned NumComponents,
+                               const VTableLayout::VTableThunkTy *VTableThunks,
+                                           unsigned NumVTableThunks);
+
 public:
   CodeGenVTables(CodeGenModule &CGM);
 
   VTableContext &getVTableContext() { return VTContext; }
+
+  VBTableContext &getVBTableContext() { return VBTContext; }
 
   /// \brief True if the VTable of this record must be emitted in the
   /// translation unit.
@@ -107,6 +130,25 @@ public:
                             llvm::GlobalVariable::LinkageTypes Linkage,
                             const CXXRecordDecl *RD);
   
+  /// r4start
+  llvm::GlobalVariable *GetAddrOfVFTable(const CXXRecordDecl *RD,
+                                         const CXXRecordDecl *Base);
+
+  llvm::GlobalVariable *GetAddrOfVBTable(const CXXRecordDecl *RD,
+                                         const CXXRecordDecl *Base);
+
+  /// r4start
+  void EmitVFTableDefinition(llvm::GlobalVariable *VFTable,
+                             llvm::GlobalVariable::LinkageTypes Linkage,
+                             const CXXRecordDecl *RD,
+                             const CXXRecordDecl *Base);
+
+  /// r4start
+  void BuildVFTables(const CXXRecordDecl *MostDerived,
+                     const CXXRecordDecl *RD,
+                     const CXXRecordDecl *Base,
+                     llvm::GlobalVariable::LinkageTypes Linkage);
+  
   /// GenerateConstructionVTable - Generate a construction vtable for the given 
   /// base subobject.
   llvm::GlobalVariable *
@@ -134,6 +176,14 @@ public:
   /// \param Linkage - The desired linkage of the vtable, the RTTI and the VTT.
   void GenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
                          const CXXRecordDecl *RD);
+
+  /// GenerateClassData - Generate all the class data required to be generated
+  /// upon definition of a KeyFunction.  This includes the vtable, the
+  /// rtti data structure and the vbtable. Specific for MS ABI.
+  ///
+  /// \param Linkage - The desired linkage of the vtable, the RTTI and the VTT.
+  void MSGenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
+                           const CXXRecordDecl *RD);
 };
 
 } // end namespace CodeGen

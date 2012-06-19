@@ -125,7 +125,9 @@ public:
                           raw_ostream &);
   void mangleReferenceTemporary(const VarDecl *D,
                                 raw_ostream &);
+  // r4start
   void mangleCXXVTable(const CXXRecordDecl *RD,
+                       const CXXRecordDecl *Base,
                        raw_ostream &);
   void mangleCXXVTT(const CXXRecordDecl *RD,
                     raw_ostream &);
@@ -143,6 +145,11 @@ public:
 
   void mangleInitDiscriminator() {
     Discriminator = 0;
+  }
+
+  // r4start
+  MSMangleContextExtensions* getMsExtensions() {
+    return 0;
   }
 
   bool getNextDiscriminator(const NamedDecl *ND, unsigned &disc) {
@@ -3545,6 +3552,7 @@ void ItaniumMangleContext::mangleReferenceTemporary(const VarDecl *D,
 }
 
 void ItaniumMangleContext::mangleCXXVTable(const CXXRecordDecl *RD,
+                                           const CXXRecordDecl *Base,
                                            raw_ostream &Out) {
   // <special-name> ::= TV <type>  # virtual table
   CXXNameMangler Mangler(*this, Out);

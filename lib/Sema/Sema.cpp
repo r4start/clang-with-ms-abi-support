@@ -102,7 +102,8 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
     AccessCheckingSFINAE(false), InNonInstantiationSFINAEContext(false),
     NonInstantiationEntries(0), ArgumentPackSubstitutionIndex(-1),
     CurrentInstantiationScope(0), TyposCorrected(0),
-    AnalysisWarnings(*this)
+    AnalysisWarnings(*this),
+    MicrosoftVcAttributesNamespace(NULL)
 {
   TUScope = 0;
   

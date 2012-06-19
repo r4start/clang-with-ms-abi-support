@@ -37,3 +37,12 @@ const char *tok::getTokenSimpleSpelling(enum TokenKind Kind) {
 
   return 0;
 }
+
+const char *tok::getKeywordIdentifier(enum TokenKind Kind) {
+  switch (Kind) {
+#define KEYWORD(X,Y) case kw_##X: return #X;
+#include "clang/Basic/TokenKinds.def"
+  default: break;
+  }
+  return 0;
+}

@@ -401,6 +401,45 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
                          tok::r_paren))
     return;
 
+  // DAEMON!!!
+#if 0
+  while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {
+      
+    IdentifierInfo *AttrName;
+    SourceLocation AttrNameLoc;
+    
+    // DAEMON!!!
+    if (Tok.is(tok::string_literal))
+    {
+        llvm::SmallString<64> NameBuffer;
+        // Parse the non-empty comma-separated list of expressions.
+        ExprResult ArgExpr(ParseAssignmentExpression());
+        if (ArgExpr.isInvalid()) {
+            SkipUntil(tok::r_paren, false);
+            continue;
+        }
+        Expr *ExprList = ArgExpr.take();
+        ExprList = ExprList->IgnoreParenCasts();
+        StringLiteral *Str = dyn_cast<StringLiteral>(ExprList);
+        if (!Str) {
+            SkipUntil(tok::r_paren, false);
+            continue;
+        }
+        AttrName = PP.getIdentifierInfo(Str->getString());
+        AttrNameLoc = Str->getLocStart();
+
+    }
+    else
+    {
+        AttrName = Tok.getIdentifierInfo();
+        AttrNameLoc = ConsumeToken();
+    }
+    // FIXME: Remove this when we have proper __declspec(property()) support.
+    // Just skip everything inside property().
+    if (AttrName->getName() == "property") {
+      ConsumeParen();
+      SkipUntil(tok::r_paren);
+#endif
   // An empty declspec is perfectly legal and should not warn.  Additionally,
   // you can specify multiple attributes per declspec.
   while (Tok.getKind() != tok::r_paren) {

@@ -555,6 +555,45 @@ Parser::isCXX11AttributeSpecifier(bool Disambiguate,
   return CAK_NotAttributeSpecifier;
 }
 
+
+bool Parser::isMicrosoftAttributeSpecifier(bool FullLookahead, 
+                                           tok::TokenKind *After)
+{
+  if (Tok.isNot(tok::l_square))
+    return false;
+
+  // C++0x attributes i.e. [[attr]]
+  if (NextToken().is(tok::l_square))
+      return false;
+  
+  // No tentative parsing if we don't need to look for ]
+  if (!FullLookahead && !getLangOpts().ObjC1)
+    return true;
+  
+  struct TentativeReverter {
+    TentativeParsingAction PA;
+
+    TentativeReverter (Parser& P)
+      : PA(P)
+    {}
+    ~TentativeReverter () {
+      PA.Revert();
+    }
+  } R(*this);
+
+  // Opening brackets were checked for above.
+  ConsumeBracket();
+
+  // SkipUntil will handle balanced tokens, which are guaranteed in attributes.
+  if (!SkipUntil(tok::r_square, false))
+      return false;
+  
+  if (After)
+    *After = Tok.getKind();
+
+  return true;
+}
+
 ///         declarator:
 ///           direct-declarator
 ///           ptr-operator declarator

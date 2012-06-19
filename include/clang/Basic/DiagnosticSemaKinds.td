@@ -2046,6 +2046,22 @@ def warn_ns_attribute_wrong_parameter_type : Warning<
 def err_ns_bridged_not_interface : Error<
   "parameter of 'ns_bridged' attribute does not name an Objective-C class">;
 
+// Microsoft-Specific Attributes
+def err_ms_attribute_ambigous_symbol : Error<
+  "%0 : ambiguous symbol">;
+def err_ms_attribute_ambigous_symbol_first_symbol : Note<
+  "could be %0">;
+def err_ms_attribute_ambigous_symbol_other_symbols : Note<
+  "or %0">;
+def err_ms_attribute_argument_redefinition : Error<
+  "'%0' field already initialized">;
+def err_ms_attribute_wrong_decl_type : Error<
+  "'%0' attribute is not allowed on '%1'">;
+def err_ms_attribute_allowed_on_data_members_of_attribute : Error<
+  "'%0' attribute is allowed on data members of attribute classes only">;
+def err_ms_attribute_arg_not_found : Error<
+  "'%0' attribute requires '%1' argument">;
+
 // Function Parameter Semantic Analysis.
 def err_param_with_void_type : Error<"argument may not have 'void' type">;
 def err_void_only_param : Error<

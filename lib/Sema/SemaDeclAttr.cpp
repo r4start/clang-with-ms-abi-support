@@ -4187,6 +4187,291 @@ static void handleForceInlineAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     S.Diag(Attr.getLoc(), diag::warn_attribute_ignored) << Attr.getName();
 }
 
+// DAEMON
+enum MsAttributeValidOn
+{
+    MsAttr_All = 0x7FFF,
+    MsAttr_Assembly = 0x1,
+    MsAttr_Class = 0x4,
+    MsAttr_Constructor = 0x20,
+    MsAttr_Delegate = 0x1000,
+    MsAttr_Enum = 0x10,
+    MsAttr_Event = 0x200,
+    MsAttr_Field = 0x100,
+    MsAttr_GenericParameter = 0x4000,
+    MsAttr_Interface = 0x400,
+    MsAttr_Method = 0x40,
+    MsAttr_Module = 0x2,
+    MsAttr_Parameter = 0x800,
+    MsAttr_Property = 0x80,
+    MsAttr_ReturnValue = 0x2000,
+    MsAttr_Struct = 0x8,
+};
+
+static int getValidOn(const AttributeList &Attr)
+{
+    RecordDecl* RD = Attr.getMsAttributeRecordDecl();
+    if (RD->hasAttr<MsAttributeAttributeAttr>()) {
+        MsAttributeAttributeAttr* RDAttr = RD->getAttr<MsAttributeAttributeAttr>();
+        return RDAttr->getValidOn();
+    }
+    else if (RD->hasAttr<MsSourceAnnotationAttributeAttributeAttr>()) {
+        MsSourceAnnotationAttributeAttributeAttr* RDAttr = 
+            RD->getAttr<MsSourceAnnotationAttributeAttributeAttr>();
+        return RDAttr->getValidOn();
+    }
+    return llvm::StringSwitch<int>(Attr.getName()->getName())
+        .Case("default_value", MsAttr_Field)
+        .Case("attribute", MsAttr_Struct | MsAttr_Class)
+        .Case("source_annotation_attribute", MsAttr_Struct | MsAttr_Class)
+        .Default(MsAttr_All);
+}
+
+static bool checkValidOn(Sema& S, const AttributeList &Attr, Decl* D)
+{
+    int validOn = getValidOn(Attr);
+    TagDecl* TD = dyn_cast<TagDecl>(D);
+    bool isClass = TD && TD->getTagKind() == TTK_Class;
+    bool isStruct = TD && TD->getTagKind() == TTK_Struct;
+    bool isEnum = TD && TD->getTagKind() == TTK_Enum;
+    bool isCXXConstructor = dyn_cast<CXXConstructorDecl>(D) != NULL;
+    bool isCXXMethod = !isCXXConstructor && dyn_cast<CXXMethodDecl>(D) != NULL;
+    bool isParm = dyn_cast<ParmVarDecl>(D) != NULL;
+    bool isField = dyn_cast<FieldDecl>(D) != NULL;
+    bool isFunction = !isCXXMethod && dyn_cast<FunctionDecl>(D) != NULL;
+    bool isReturnValue = (isFunction || isCXXMethod) && (Attr.getScopeName()->getName() == "returnvalue");
+    if (isClass && (validOn & MsAttr_Class))
+        return true;
+    if (isStruct && (validOn & MsAttr_Struct))
+        return true;
+    if (isEnum && (validOn & MsAttr_Enum))
+        return true;
+    if (isField && (validOn & MsAttr_Field))
+        return true;
+    if (isCXXConstructor && (validOn & MsAttr_Constructor))
+        return true;
+    if ((isCXXMethod || isFunction) && (validOn & MsAttr_Method))
+        return true;
+    if (isParm && (validOn & MsAttr_Parameter))
+        return true;
+    if (isReturnValue && (validOn & MsAttr_ReturnValue))
+        return true;
+    NamedDecl* ND = dyn_cast<NamedDecl>(D);
+    if (ND) {
+        S.Diag(Attr.getLoc(), diag::err_ms_attribute_wrong_decl_type)
+            << Attr.getName() << ND->getName();
+    }
+    else {
+        S.Diag(Attr.getLoc(), diag::err_ms_attribute_wrong_decl_type)
+            << Attr.getName() << D->getDeclKindName();
+    }
+    return false;
+}
+
+static bool getNamedArg(Sema &S, const char* ArgName, const AttributeList &Attr, Expr*& E, bool Optional = false)
+{
+    for (size_t i = 0; i != Attr.getNumArgs(); ++i)
+    {
+        Expr* Arg = Attr.getArg(i);
+        BinaryOperator* BinOp = dyn_cast<BinaryOperator>(Arg);
+        if (BinOp && BinOp->isAssignmentOp(BO_Assign))
+        {
+            MemberExpr* LHS = dyn_cast<MemberExpr>(BinOp->getLHS());
+            if (LHS->getMemberNameInfo().getAsString() == ArgName) {
+                E = BinOp->getRHS();
+                return true;
+            }
+        }
+    }
+    if (!Optional)
+        S.Diag(Attr.getLoc(), diag::err_ms_attribute_arg_not_found)
+            << Attr.getName() << ArgName;
+    return false;
+}
+
+static bool getNamedIntArg(Sema &S, const char* ArgName, const AttributeList &Attr, llvm::APSInt& Value, bool Optional = false)
+{
+    Expr *ArgExpr;
+    bool found = getNamedArg(S, ArgName, Attr, ArgExpr, Optional);
+    if (found) {
+        if (!ArgExpr->isIntegerConstantExpr(Value, S.Context)) {
+            S.Diag(ArgExpr->getLocStart(), diag::err_attribute_argument_not_int)
+                << ArgName;
+            Attr.setInvalid();
+            return false;
+        }
+    }
+    return found;
+}
+
+static bool getNamedStringArg(Sema &S, const char* ArgName, const AttributeList &Attr, StringRef& Value, bool Optional = false)
+{
+    Expr *ArgExpr;
+    bool found = getNamedArg(S, ArgName, Attr, ArgExpr, Optional);
+    if (found) {
+        Expr::EvalResult Eval;
+        ArgExpr->EvaluateAsRValue(Eval, S.Context);
+        APValue::LValueBase LVBase = Eval.Val.getLValueBase();
+        Expr *E = const_cast<Expr*>(LVBase.get<const Expr*>());
+        StringLiteral *Str = dyn_cast_or_null<StringLiteral>(E);
+        if (!Str) {
+            S.Diag(ArgExpr->getLocStart(), diag::err_attribute_argument_n_not_string)
+                << Attr.getName() << ArgName;
+            Attr.setInvalid();
+            return false;
+        }
+        Value = Str->getBytes().substr(Eval.Val.getLValueOffset().getQuantity());
+    }
+    return found;
+}
+
+static StringRef getAttrScope(const AttributeList &Attr) {
+    IdentifierInfo* I = Attr.getScopeName();
+    if (!I)
+        return StringRef();
+    return I->getName();
+}
+
+static void handleMsDefaultValueAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+    // check the attribute arguments.
+    if (!checkAttributeNumArgs(S, Attr, 1))
+      return;
+
+    Expr *Arg = Attr.getArg(0);
+    FieldDecl* FD = dyn_cast<FieldDecl>(D);
+    assert(FD && "Can't apply default_value to non-field decl");
+    if (!S.isMsAttr(FD->getParent())) {
+        S.Diag(Attr.getLoc(), diag::err_ms_attribute_allowed_on_data_members_of_attribute)
+            << "default_value";
+        return;
+    }
+    D->addAttr(::new (S.Context) MsDefaultValueAttributeAttr(Attr.getRange(), S.Context,
+                                          Arg));
+}
+
+static void handleMsAttributeAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+    llvm::APSInt ValidOn(32);
+    llvm::APSInt AllowMultiple(1);
+    if (!getNamedIntArg(S, "ValidOn", Attr, ValidOn))
+        return;
+    if (!getNamedIntArg(S, "AllowMultiple", Attr, AllowMultiple))
+        return;
+
+    D->addAttr(::new (S.Context) MsAttributeAttributeAttr(Attr.getRange(), S.Context,
+                                          ValidOn.getZExtValue(), AllowMultiple.getZExtValue()));
+}
+
+static void handleMsSourceAnnotationAttributeAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+    llvm::APSInt ValidOn(32);
+    llvm::APSInt AllowMultiple(1);
+    if (!getNamedIntArg(S, "ValidOn", Attr, ValidOn))
+        return;
+    if (!getNamedIntArg(S, "AllowMultiple", Attr, AllowMultiple))
+        return;
+
+    D->addAttr(::new (S.Context) MsSourceAnnotationAttributeAttributeAttr(Attr.getRange(), S.Context,
+                                          ValidOn.getZExtValue(), AllowMultiple.getZExtValue()));
+}
+
+static void handleMsSAPre(Sema &S, Decl *D, const AttributeList &Attr) {
+    llvm::SmallVector<Expr*, 4> Args;
+    for (AttributeList::arg_iterator i = Attr.arg_begin(); i != Attr.arg_end(); ++i)
+        Args.push_back(*i);
+    D->addAttr(::new (S.Context) MsSAPreAttr(Attr.getRange(), S.Context,
+                                             &Args[0], Args.size()));
+}
+
+static void handleMsSAPost(Sema &S, Decl *D, const AttributeList &Attr) {
+    llvm::SmallVector<Expr*, 4> Args;
+    for (AttributeList::arg_iterator i = Attr.arg_begin(); i != Attr.arg_end(); ++i)
+        Args.push_back(*i);
+    bool ReturnValue = (getAttrScope(Attr) == "returnvalue");
+
+    D->addAttr(::new (S.Context) MsSAPostAttr(Attr.getRange(), S.Context,
+                                             &Args[0], Args.size(), ReturnValue));
+}
+
+static void handleMsSAFormatString(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    StringRef Style;
+    StringRef UnformattedAlternative;
+    if (!getNamedStringArg(S, "Style", Attr, Style))
+        return;
+    getNamedStringArg(S, "UnformattedAlternative", Attr, UnformattedAlternative, true);
+
+    D->addAttr(::new (S.Context) MsSAFormatStringAttr(Attr.getRange(), S.Context,
+                                             Style, UnformattedAlternative));
+}
+
+static void handleMsSAInvalidCheck(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    llvm::APSInt Value(32);
+    if (!getNamedIntArg(S, "Value", Attr, Value))
+        return;
+    D->addAttr(::new (S.Context) MsSAInvalidCheckAttr(Attr.getRange(), S.Context,
+                                             Value.getZExtValue()));
+}
+
+static void handleMsSASuccess(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    StringRef Condition;
+    getNamedStringArg(S, "Value", Attr, Condition, true);
+    D->addAttr(::new (S.Context) MsSASuccessAttr(Attr.getRange(), S.Context,
+                                             Condition));
+}
+
+static void handleMsSAPreBound(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    llvm::APSInt Deref(32);
+    if (!getNamedIntArg(S, "Deref", Attr, Deref))
+        return;
+    D->addAttr(::new (S.Context) MsSAPreBoundAttr(Attr.getRange(), S.Context,
+                                             Deref.getZExtValue()));
+}
+
+static void handleMsSAPostBound(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    llvm::APSInt Deref(32);
+    if (!getNamedIntArg(S, "Deref", Attr, Deref))
+        return;
+    bool ReturnValue = (getAttrScope(Attr) == "returnvalue");
+    D->addAttr(::new (S.Context) MsSAPostBoundAttr(Attr.getRange(), S.Context,
+                                             Deref.getZExtValue(), ReturnValue));
+}
+
+static void handleMsSAPreRange(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    llvm::APSInt Deref(32);
+    StringRef MinVal;
+    StringRef MaxVal;
+    if (!getNamedIntArg(S, "Deref", Attr, Deref))
+        return;
+    if (!getNamedStringArg(S, "MinVal", Attr, MinVal))
+        return;
+    if (!getNamedStringArg(S, "MaxVal", Attr, MaxVal))
+        return;
+    
+    D->addAttr(::new (S.Context) MsSAPreRangeAttr(Attr.getRange(), S.Context,
+                                             Deref.getZExtValue(), MinVal, MaxVal));
+}
+
+static void handleMsSAPostRange(Sema &S, Decl *D, const AttributeList &Attr) {
+    
+    llvm::APSInt Deref(32);
+    StringRef MinVal;
+    StringRef MaxVal;
+    if (!getNamedIntArg(S, "Deref", Attr, Deref))
+        return;
+    if (!getNamedStringArg(S, "MinVal", Attr, MinVal))
+        return;
+    if (!getNamedStringArg(S, "MaxVal", Attr, MaxVal))
+        return;
+    bool ReturnValue = (getAttrScope(Attr) == "returnvalue");
+    
+    D->addAttr(::new (S.Context) MsSAPostRangeAttr(Attr.getRange(), S.Context,
+                                             Deref.getZExtValue(), MinVal, MaxVal, ReturnValue));
+}
+
 //===----------------------------------------------------------------------===//
 // Top Level Sema Entry Points
 //===----------------------------------------------------------------------===//
@@ -4465,6 +4750,71 @@ static void ProcessInheritableDeclAttr(Sema &S, Scope *scope, Decl *D,
   }
 }
 
+// DAEMON
+static void ProcessMicrosoftAttribute(Sema &S, Scope *scope, Decl *D,
+                                 const AttributeList &Attr,
+                                 bool NonInheritable, bool Inheritable) {
+  assert(Attr.isMicrosoftAttribute() && "Non-Microsoft attribute?");
+  RecordDecl* RD = Attr.getMsAttributeRecordDecl();
+
+  if (!S.LangOpts.MicrosoftExt) {
+    S.Diag(Attr.getLoc(), diag::warn_attribute_ignored) << Attr.getName()->getName();
+    return;
+  }
+
+  if (!checkValidOn(S, Attr, D))
+      return;
+
+  typedef void (*HandlerTy)(Sema &S, Decl *D, const AttributeList &Attr);
+
+  StringRef AttrName = Attr.getName()->getName();
+  if (RD->hasAttr<MsSourceAnnotationAttributeAttributeAttr>()) {
+      HandlerTy handler = llvm::StringSwitch<HandlerTy>(AttrName)
+        .Case("SA_Pre", handleMsSAPre)
+        .Case("SA_Post", handleMsSAPost)
+        .Case("SA_FormatString", handleMsSAFormatString)
+        .Case("SA_InvalidCheck", handleMsSAInvalidCheck)
+        .Case("SA_Success", handleMsSASuccess)
+        .Case("SA_PreBound", handleMsSAPreBound)
+        .Case("SA_PostBound", handleMsSAPostBound)
+        .Case("SA_PreRange", handleMsSAPreRange)
+        .Case("SA_PostRange", handleMsSAPostRange)
+        .Default(NULL);
+      if (handler == NULL)
+        S.Diag(Attr.getLoc(), diag::warn_attribute_ignored) << AttrName;
+      else
+        handler(S, D, Attr);
+      return;
+  }
+
+  // Act like Microsft, i.e. treat arguments just by their names
+  enum MSAttrKind {
+      AT_default_value,
+      AT_attribute,
+      AT_source_annotation_attribute,
+      AT_unknown,
+  };
+  MSAttrKind kind = llvm::StringSwitch<MSAttrKind>(AttrName)
+        .Case("default_value", AT_default_value)
+        .Case("attribute", AT_attribute)
+        .Case("source_annotation_attribute", AT_source_annotation_attribute)
+        .Default(AT_unknown);
+  switch(kind)
+  {
+  case AT_default_value:
+      handleMsDefaultValueAttr(S, D, Attr);
+      break;
+  case AT_attribute:
+      handleMsAttributeAttr(S, D, Attr);
+      break;
+  case AT_source_annotation_attribute:
+      handleMsSourceAnnotationAttributeAttr(S, D, Attr);
+      break;
+  default:
+      break;
+  }  
+}
+
 /// ProcessDeclAttribute - Apply the specific attribute to the specified decl if
 /// the attribute applies to decls.  If the attribute is a type attribute, just
 /// silently ignore it if a GNU attribute. FIXME: Applying a C++0x attribute to
@@ -4480,6 +4830,22 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   // want to process them, however, because we will simply warn about ignoring 
   // them.  So instead, we will bail out early.
   if (Attr.isMSTypespecAttribute())
+#if 0
+  if (Attr.isMicrosoftAttribute())
+  {
+      ProcessMicrosoftAttribute(S, scope, D, Attr, NonInheritable, Inheritable);      
+      return;
+  }
+
+  if (Attr.isDeclspecAttribute() && !isKnownDeclSpecAttr(Attr))
+  {
+    if (Attr.getKind() == AttributeList::UnknownAttribute)
+    {
+        D->addAttr(::new (S.Context) UnknownDeclspecAttr(Attr.getRange(), S.Context,
+            Attr.getName()->getName()));
+    }
+    // FIXME: Try to deal with other __declspec attributes!
+#endif
     return;
 
   if (NonInheritable)
@@ -4819,3 +5185,354 @@ void Sema::EmitDeprecationWarning(NamedDecl *D, StringRef Message,
     return;
   DoEmitDeprecationWarning(*this, D, Message, Loc, UnknownObjCClass);
 }
+
+// DAEMON!
+RecordDecl* Sema::FindMsAttributeInVcAttrs(IdentifierInfo *II)
+{
+    if (!MicrosoftVcAttributesNamespace)
+        return NULL;
+    for (DeclContext::lookup_result res = MicrosoftVcAttributesNamespace->lookup(II);
+        res.first != res.second; ++res.first)
+    {
+        NamedDecl* decl = (*res.first);
+        if (decl->isInIdentifierNamespace(Decl::IDNS_Tag))
+        {
+            return cast<RecordDecl>(decl);
+        }
+    }
+    return NULL;
+}
+
+static RecordDecl* getAsRecordDecl(ParsedType PT)
+{
+    if (!PT) return NULL;
+    const Type* T = PT.get().getTypePtr();
+    if (const RecordType *RT = T->getAs<RecordType>())
+        return dyn_cast<RecordDecl>(RT->getDecl());
+    return NULL;
+}
+
+bool Sema::isPredefinedMsAttribute(RecordDecl* RD)
+{
+    assert(RD && "Wrong RD argument!");
+    struct AttrDesc {
+        const char* Name;
+        RecordDecl* RD;
+    };
+    static AttrDesc Attrs[] = { 
+        { "attributeAttribute", NULL },
+        { "source_annotation_attributeAttribute", NULL},
+        { "default_valueAttribute", NULL},
+    };
+    static const char* nsNames[] = { 
+            "helper_attributes",
+            "__vc_attributes",
+            NULL
+    };
+    for (int i = 0; i != sizeof(Attrs)/sizeof(Attrs[0]); ++i) {
+        if (Attrs[i].RD == RD) return true;
+        if (RD->getNameAsString() == Attrs[i].Name) {
+            DeclContext* DC = RD->getDeclContext();
+            for (int j = 0; nsNames[j]; ++j)
+            {
+                if (!DC || !DC->isNamespace() || 
+                    (dyn_cast<NamespaceDecl>(DC)->getNameAsString() != nsNames[j]))
+                    return false;
+                DC = DC->getParent();
+            }
+            if (!DC || !DC->isTranslationUnit())
+                return false;
+            Attrs[i].RD = RD;
+            if (!MicrosoftVcAttributesNamespace)
+                MicrosoftVcAttributesNamespace = dyn_cast<NamespaceDecl>(RD->getDeclContext());
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Sema::isMsAttr(RecordDecl* RD)
+{
+    if (isPredefinedMsAttribute(RD))
+        return true;
+    if (!RD->hasAttrs())
+        return false;
+    return RD->hasAttr<MsAttributeAttributeAttr>() || 
+           RD->hasAttr<MsSourceAnnotationAttributeAttributeAttr>();
+}
+
+void Sema::WarnAmbiguousAttr(Sema& S, IdentifierInfo &II, SourceLocation NameLoc, RecordDecl** RD, size_t RDCount)
+{
+    S.Diag(NameLoc, diag::err_ms_attribute_ambigous_symbol) << II.getName();
+    bool first = true;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (RD[i] && isMsAttr(RD[i]))
+        {
+            if (first) {
+                S.Diag(RD[i]->getLocation(), diag::err_ms_attribute_ambigous_symbol_first_symbol) << RD[i];
+                first = false;
+            }
+            else 
+                S.Diag(RD[i]->getLocation(), diag::err_ms_attribute_ambigous_symbol_other_symbols) << RD[i];
+        }
+                    
+    }
+}
+
+static const StringRef MsAttributeSuffix("Attribute");
+
+IdentifierInfo* Sema::CorrectMsAttributeName(IdentifierInfo* II, RecordDecl* RD)
+{
+    StringRef rdName = RD->getName();
+    if (rdName.size() < MsAttributeSuffix.size())
+        return II;
+    if (rdName.endswith(MsAttributeSuffix))
+    {
+        StringRef rdNameNoSuffix = rdName.substr(0, rdName.size() - MsAttributeSuffix.size());
+        if (II->getName() == rdName)
+            return PP.getIdentifierInfo(rdNameNoSuffix);
+    }
+    return II;
+}
+
+RecordDecl* Sema::FindMsAttribute(
+                    IdentifierInfo* &II, SourceLocation NameLoc,
+                    Scope *S, CXXScopeSpec *SS)
+{
+    IdentifierInfo *ExtendedII = PP.getIdentifierInfo(II->getName().str() + MsAttributeSuffix.str());
+
+    RecordDecl* RD[4];
+    RD[0] = getAsRecordDecl(getTypeName(*II, NameLoc, S, SS, true));
+    RD[1] = getAsRecordDecl(getTypeName(*ExtendedII, NameLoc, S, SS, true));
+    if (!SS || SS->isEmpty())
+    {
+        RD[2] = FindMsAttributeInVcAttrs(II);
+        RD[3] = FindMsAttributeInVcAttrs(ExtendedII);
+    }
+    
+    RecordDecl* Found = NULL;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (RD[i] && Found != RD[i] && isMsAttr(RD[i])) {
+            if (Found) {
+                WarnAmbiguousAttr(*this, *II, NameLoc, RD, 4);
+                return NULL;
+            }            
+            Found = RD[i];
+        }
+    }
+    if (Found)
+        II = CorrectMsAttributeName(II, Found);
+    return Found;
+}
+
+static ExprResult ConvertStringLiteral(Sema& S, const StringLiteral& Literal, QualType CharType)
+{
+  QualType UCT = CharType.getUnqualifiedType();   
+  if ((Literal.getCharByteWidth() == 1) && (S.Context.getTypeSize(UCT) == 16)) 
+  {
+      StringRef String = Literal.getBytes();
+      unsigned int NumBytes = String.size();
+
+      // Otherwise, convert the UTF8 literals into a byte string.
+      SmallVector<UTF16, 128> ToBuf(NumBytes);
+      const UTF8 *FromPtr = (UTF8 *)String.data();
+      UTF16 *ToPtr = &ToBuf[0];
+
+      ConversionResult Res = ConvertUTF8toUTF16(&FromPtr, FromPtr + NumBytes,
+                                  &ToPtr, ToPtr + NumBytes,
+                                  strictConversion);
+      if (Res != conversionOK) {
+          // TODO! Make error report
+          return ExprResult();
+      }
+      size_t StrSize = (char*)ToPtr - (char*)&ToBuf[0];
+
+      QualType StrTy = S.Context.getConstantArrayType(CharType,
+                                                    llvm::APInt(32, Literal.getLength()),
+                                                    ArrayType::Normal, 0);
+      return S.Owned(StringLiteral::Create(S.Context, 
+          StringRef((char*)&ToBuf[0], StrSize),
+          (UCT->isWideCharType() ? StringLiteral::Wide : StringLiteral::UTF16), 
+          false, StrTy,
+          Literal.getLocStart()));
+  }
+  // TODO! Add another posible conversions
+  return ExprResult();
+}
+
+bool Sema::AddNamedAttributeArg(const UnqualifiedId& Id, 
+                                 RecordDecl* RD,
+                                 ExprVector &ArgExprs, 
+                                 UsedNamesMap& UsedNames,
+                                 Expr* ValueExpr)
+{
+    TemplateArgumentListInfo TemplateArgsBuffer;
+
+    // Decompose the UnqualifiedId into the following data.
+    DeclarationNameInfo NameInfo;
+    const TemplateArgumentListInfo *TemplateArgs;
+    DecomposeUnqualifiedId(Id, TemplateArgsBuffer, NameInfo, TemplateArgs);
+
+    LookupResult R(*this, NameInfo, LookupOrdinaryName);
+
+    if (!LookupQualifiedName(R, RD, true)) {
+        Diag(Id.StartLocation, diag::err_field_designator_unknown)
+            << Id.Identifier << RD;
+        return false;
+    }
+
+    if (!R.getAsSingle<FieldDecl>()) {
+        Diag(Id.StartLocation, diag::err_field_designator_nonfield)
+            << Id.Identifier;
+        return false;
+    }
+
+    if (!UsedNames.insert(R.getFoundDecl()).second) {
+        Diag(Id.StartLocation, diag::err_ms_attribute_argument_redefinition)
+            << Id.Identifier;
+        //assert(0);
+        return false;
+    }
+
+    CXXScopeSpec ScopeSpec;
+    ExprResult LHS = BuildImplicitMemberExpr(ScopeSpec, Id.StartLocation, R, TemplateArgs, true);
+
+    QualType LHSType = LHS.get()->getType();
+    if (LHSType->isPointerType() && LHSType->getPointeeType()->isAnyCharacterType())
+    {
+        StringLiteral* Literal = dyn_cast<StringLiteral>(ValueExpr);
+        if (Literal)
+        {
+            const ConstantArrayType *RHSCAType = cast<ConstantArrayType>(ValueExpr->getType().getTypePtr());
+            QualType LHSCharType = LHSType->getPointeeType();
+            if (LHSCharType != RHSCAType->getElementType())
+            {
+                ExprResult ConvertedString = ConvertStringLiteral(*this, *Literal, LHSCharType);
+                if (!ConvertedString.isInvalid())
+                    ValueExpr = ConvertedString.take();
+            }
+        }
+    }
+
+    ExprResult AssignExpr = ActOnBinOp(getCurScope(), Id.StartLocation,
+        tok::equal, LHS.take(), ValueExpr);
+    ArgExprs.push_back(AssignExpr.release());
+}
+
+
+bool Sema::CheckMsAttributeArgs(SourceLocation ArgLocation, 
+                                RecordDecl* RD,
+                                ExprVector &UnnamedArgs, 
+                                NamedArgsMap& NamedArgs,
+                                ExprVector &ArgExprs)
+{
+    UsedNamesMap UsedNames;
+    ExprVector NamedArgExprs(*this);
+    ExprVector NotMappedUnnamedArgs(*this);
+
+    if (!RD->hasAttr<MsSourceAnnotationAttributeAttributeAttr>()) {
+
+        OverloadCandidateSet CandidateSet(ArgLocation);
+        DeclContext::lookup_iterator Con, ConEnd;
+        for (llvm::tie(Con, ConEnd) = LookupConstructors(cast<CXXRecordDecl>(RD));
+            Con != ConEnd; ++Con) {
+                NamedDecl *D = *Con;
+                DeclAccessPair FoundDecl = DeclAccessPair::make(D, D->getAccess());
+                bool SuppressUserConversions = false;
+
+                // Find the constructor (which may be a template).
+                if (dyn_cast<FunctionTemplateDecl>(D))
+                    continue;
+
+                CXXConstructorDecl *Constructor = cast<CXXConstructorDecl>(D);
+                if (!Constructor->isInvalidDecl()) {
+                    AddOverloadCandidate(Constructor, FoundDecl,
+                        UnnamedArgs, CandidateSet,
+                        true /*SuppressUserConversions*/);
+                }
+        }
+
+        // Perform overload resolution. If it fails, return the failed result.
+        OverloadCandidateSet::iterator Best;
+        if (OverloadingResult Result
+            = CandidateSet.BestViableFunction(*this, ArgLocation, Best)) {
+                // TODO! Ругнуться, что не найден конструктор
+                return false;
+        }
+        FunctionDecl* Constructor = Best->Function;
+        
+        ExprVector::iterator ArgI = UnnamedArgs.begin();
+        for (FunctionDecl::param_iterator i = Constructor->param_begin();
+            i != Constructor->param_end(); ++i)
+        {   
+            Expr* ValueExpr = NULL;
+            if (ArgI != UnnamedArgs.end()) {
+                ValueExpr = *ArgI;
+                ++ArgI;
+            }
+            else {
+                assert((*i)->hasDefaultArg());
+                ValueExpr = (*i)->getInit();
+            }
+            
+            UnqualifiedId Id;
+            Id.setIdentifier((*i)->getIdentifier(), (*i)->getLocation());
+
+            AddNamedAttributeArg(Id, RD, NamedArgExprs, UsedNames, ValueExpr);
+        }
+        if (Constructor->isVariadic() && ArgI != UnnamedArgs.end())
+            NotMappedUnnamedArgs.append(ArgI, UnnamedArgs.end());
+    }   
+
+    for (NamedArgsMap::iterator i = NamedArgs.begin();
+            i != NamedArgs.end(); ++i)
+    {
+        AddNamedAttributeArg(i->first, RD, NamedArgExprs, UsedNames, i->second);
+    }
+
+    for (DeclContext::decl_iterator i = RD->decls_begin(); 
+        i != RD->decls_end(); ++i)
+    {
+        NamedDecl* Decl = dyn_cast<NamedDecl>(*i);
+        if (!Decl || UsedNames.count(Decl))
+            continue;
+
+        if (Decl->hasAttr<MsDefaultValueAttributeAttr>())
+        {
+            MsDefaultValueAttributeAttr* Attr = Decl->getAttr<MsDefaultValueAttributeAttr>();
+            UnqualifiedId Id;
+            Id.setIdentifier(Decl->getIdentifier(), Decl->getLocation());
+            AddNamedAttributeArg(Id, RD, NamedArgExprs, UsedNames, Attr->getValue());
+        }
+    }
+
+    ArgExprs.swap(NotMappedUnnamedArgs);
+    ArgExprs.append(NamedArgExprs.begin(), NamedArgExprs.end());
+    return true;
+}
+
+void Sema::AddMsAttributeDefaultValues(RecordDecl* RD, ExprVector &ArgExprs)
+{
+    UsedNamesMap UsedNames;
+    for (DeclContext::decl_iterator i = RD->decls_begin(); 
+        i != RD->decls_end(); ++i)
+    {
+        NamedDecl* Decl = dyn_cast<NamedDecl>(*i);
+        if (!Decl) continue;
+
+        if (Decl->hasAttr<MsDefaultValueAttributeAttr>())
+        {
+            MsDefaultValueAttributeAttr* Attr = Decl->getAttr<MsDefaultValueAttributeAttr>();
+            UnqualifiedId Id;
+            Id.setIdentifier(Decl->getIdentifier(), Decl->getLocation());
+            AddNamedAttributeArg(Id, RD, ArgExprs, UsedNames, Attr->getValue());
+        }
+    }
+}
+
+Sema::MicrosoftAttributeDescriptor::MicrosoftAttributeDescriptor(RecordDecl* Decl)
+{
+}
+

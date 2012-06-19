@@ -22,6 +22,9 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 
+// r4start
+#include <algorithm>
+
 using namespace clang;
 
 namespace {
@@ -1245,6 +1248,54 @@ static bool overridesMethodRequiringVtorDisp(const ASTContext &Context,
   return false;
 }                                             
 
+static const CXXRecordDecl *getFirstDeclarationClass(const CXXMethodDecl *M) {
+  if (!M->size_overridden_methods())
+    return M->getParent();
+
+  for (CXXMethodDecl::method_iterator I = M->begin_overridden_methods(),
+       E = M->end_overridden_methods(); I != E; ++I) {
+    const CXXMethodDecl *MD = *I;
+    const CXXRecordDecl *base = MD->getParent();
+    if (!MD->size_overridden_methods()) {
+      return MD->getParent();
+    }
+  }
+
+  for (CXXMethodDecl::method_iterator I = M->begin_overridden_methods(),
+       E = M->end_overridden_methods(); I != E; ++I) {
+    const CXXRecordDecl *base = getFirstDeclarationClass(*I);
+    if (base)
+      return base;
+  }
+
+  return 0;
+}
+#if 0
+static const CXXRecordDecl *classNeedsVtordisp(const ASTContext &Ctx, 
+                                               const CXXMethodDecl *Overrider,
+                                               const CXXMethodDecl *Overridden) {
+  const CXXRecordDecl *overriderBase = Overrider->getParent();
+  const CXXRecordDecl *firstDeclClass = getFirstDeclarationClass(Overrider);
+
+  /*if (!overriderBase->isVirtuallyDerivedFrom(
+                                   const_cast<CXXRecordDecl *>(firstDeclClass)))
+    return nullptr;*/
+
+  CXXBasePaths InhPaths;
+
+  InhPaths.setOrigin(const_cast<CXXRecordDecl *>(overriderBase));
+  overriderBase->lookupInBases(&CXXRecordDecl::FindBaseClass, 
+    const_cast<CXXRecordDecl *>(firstDeclClass), InhPaths);
+
+  assert(InhPaths.begin() != InhPaths.end() && "Fuck!");
+
+  auto virtrecord = InhPaths.getDetectedVirtual();
+  if (!virtrecord)
+    return 0;
+  else
+    return virtrecord->getAsCXXRecordDecl();
+}
+#endif
 /// In the Microsoft ABI, decide which of the virtual bases require a
 /// vtordisp field.
 void RecordLayoutBuilder::computeVtordisps(const CXXRecordDecl *RD,
@@ -1255,7 +1306,7 @@ void RecordLayoutBuilder::computeVtordisps(const CXXRecordDecl *RD,
   // Build up the set of virtual bases that we haven't decided yet.
   ClassSetTy undecidedVBases;
   for (CXXRecordDecl::base_class_const_iterator
-         I = RD->vbases_begin(), E = RD->vbases_end(); I != E; ++I) {
+       I = RD->vbases_begin(), E = RD->vbases_end(); I != E; ++I) {
     const CXXRecordDecl *vbase = I->getType()->getAsCXXRecordDecl();
     undecidedVBases.insert(vbase);
   }
@@ -1307,7 +1358,7 @@ void RecordLayoutBuilder::computeVtordisps(const CXXRecordDecl *RD,
   // and so we should already have collected it in the loop above.
   ClassSetTy overriddenBases;
   for (CXXRecordDecl::method_iterator
-         M = RD->method_begin(), E = RD->method_end(); M != E; ++M) {
+       M = RD->method_begin(), E = RD->method_end(); M != E; ++M) {
     // Ignore non-virtual methods and destructors.
     if (isa<CXXDestructorDecl>(*M) || !M->isVirtual())
       continue;
@@ -1315,7 +1366,8 @@ void RecordLayoutBuilder::computeVtordisps(const CXXRecordDecl *RD,
     for (CXXMethodDecl::method_iterator I = M->begin_overridden_methods(),
           E = M->end_overridden_methods(); I != E; ++I) {
       const CXXMethodDecl *overriddenMethod = (*I);
-
+      /*const CXXRecordDecl *overriddenBase = classNeedsVtordisp(Context, &*M,
+                                                              overriddenMethod);*/
       // Ignore methods that override methods from vbases that require
       // require vtordisps.
       if (overridesMethodRequiringVtorDisp(Context, overriddenMethod))
@@ -1323,7 +1375,14 @@ void RecordLayoutBuilder::computeVtordisps(const CXXRecordDecl *RD,
 
       // As an optimization, check immediately whether we're overriding
       // something from the undecided set.
-      const CXXRecordDecl *overriddenBase = overriddenMethod->getParent();
+      const CXXRecordDecl *overriddenBase = getFirstDeclarationClass(overriddenMethod);
+      
+      // If in code wasn`t declared ctor or dtor then we don`t need vtordisp.
+      if (!RD->hasUserDeclaredConstructor() && 
+          !RD->hasUserDeclaredDestructor()) {
+        continue;
+      }
+
       if (undecidedVBases.erase(overriddenBase)) {
         vtordispVBases.insert(overriddenBase);
         if (undecidedVBases.empty()) return;
@@ -1347,7 +1406,7 @@ void RecordLayoutBuilder::computeVtordisps(const CXXRecordDecl *RD,
   // virtual links because the vtordisp inheres to the layout
   // subobject containing the base.
   for (ClassSetTy::const_iterator
-         I = undecidedVBases.begin(), E = undecidedVBases.end(); I != E; ++I) {
+       I = undecidedVBases.begin(), E = undecidedVBases.end(); I != E; ++I) {
     if (hasNonVirtualBaseInSet(*I, overriddenBases))
       vtordispVBases.insert(*I);
   }

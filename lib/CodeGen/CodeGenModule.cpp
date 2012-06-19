@@ -1017,7 +1017,14 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD) {
       if (const CXXConstructorDecl *CD = dyn_cast<CXXConstructorDecl>(Method))
         EmitCXXConstructor(CD, GD.getCtorType());
       else if (const CXXDestructorDecl *DD =dyn_cast<CXXDestructorDecl>(Method))
+      {
+        // r4start
+        if (Context.getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+          EmitCXXDestructor(DD, Dtor_Base);
+        } else {
         EmitCXXDestructor(DD, GD.getDtorType());
+        }
+      }
       else
         EmitGlobalFunctionDefinition(GD);
 
@@ -1353,6 +1360,11 @@ llvm::GlobalVariable::LinkageTypes
 CodeGenModule::getVTableLinkage(const CXXRecordDecl *RD) {
   if (RD->getLinkage() != ExternalLinkage)
     return llvm::GlobalVariable::InternalLinkage;
+
+  // r4start
+  /*if (getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    return llvm::GlobalVariable::WeakODRLinkage;
+  }*/
 
   if (const CXXMethodDecl *KeyFunction
                                     = RD->getASTContext().getKeyFunction(RD)) {

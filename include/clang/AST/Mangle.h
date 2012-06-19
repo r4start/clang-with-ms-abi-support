@@ -61,6 +61,39 @@ private:
   SmallString<256> Buffer;
 };
 
+// r4start
+class MSMangleContextExtensions
+{
+public:
+  virtual void mangleCXXRTTICompleteObjectLocator(const CXXRecordDecl *,
+                                                  const CXXRecordDecl *,
+                                                  raw_ostream &) = 0;
+
+  virtual void mangleCXXRTTICompleteObjectLocator(const CXXRecordDecl *,
+                                                  StringRef ,
+                                                  raw_ostream &) = 0;
+
+  virtual void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *,
+                                           raw_ostream &) = 0;
+
+  virtual void mangleCXXRTTIClassHierarhyDescriptor(const CXXRecordDecl *,
+                                                    raw_ostream &) = 0;
+
+  virtual void mangleCXXRTTIBaseClassArray(const CXXRecordDecl *,
+                                           raw_ostream &) = 0;
+
+  virtual void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
+                                                int64_t MemberOffset,
+                                                int64_t OffsetInVBTable,
+                                                int64_t IndexInVBTable,
+                                                int64_t Attributes,
+                                                raw_ostream &Out) = 0;
+
+  virtual void mangleCXXVBTable(const CXXRecordDecl *,
+                                const CXXRecordDecl *,
+                                raw_ostream &) = 0;
+};
+
 /// MangleContext - Context for tracking state which persists across multiple
 /// calls to the C++ name mangler.
 class MangleContext {
@@ -107,10 +140,12 @@ public:
   virtual void mangleReferenceTemporary(const VarDecl *D,
                                         raw_ostream &) = 0;
   virtual void mangleCXXVTable(const CXXRecordDecl *RD,
+                               const CXXRecordDecl *BaseClass,
                                raw_ostream &) = 0;
   virtual void mangleCXXVTT(const CXXRecordDecl *RD,
                             raw_ostream &) = 0;
-  virtual void mangleCXXCtorVTable(const CXXRecordDecl *RD, int64_t Offset,
+  virtual void mangleCXXCtorVTable(const CXXRecordDecl *RD, 
+                                   int64_t Offset,
                                    const CXXRecordDecl *Type,
                                    raw_ostream &) = 0;
   virtual void mangleCXXRTTI(QualType T, raw_ostream &) = 0;
@@ -135,6 +170,9 @@ public:
 
   void mangleObjCMethodName(const ObjCMethodDecl *MD,
                             raw_ostream &);
+
+  // r4start
+  virtual MSMangleContextExtensions* getMsExtensions() = 0;
 
   // This is pretty lame.
   virtual void mangleItaniumGuardVariable(const VarDecl *D,

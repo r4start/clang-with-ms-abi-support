@@ -173,7 +173,12 @@ bool CodeGenModule::TryEmitDefinitionAsAlias(GlobalDecl AliasDecl,
   return false;
 }
 
+// r4start
 void CodeGenModule::EmitCXXConstructors(const CXXConstructorDecl *D) {
+  if (Context.getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    EmitGlobal(GlobalDecl(D, Ctor_Base));
+    return;
+  }
   // The constructor used for constructing this as a complete class;
   // constucts the virtual bases, then calls the base constructor.
   if (!D->getParent()->isAbstract()) {
@@ -227,7 +232,13 @@ CodeGenModule::GetAddrOfCXXConstructor(const CXXConstructorDecl *ctor,
                                                       /*ForVTable=*/false));
 }
 
-void CodeGenModule::EmitCXXDestructors(const CXXDestructorDecl *D) {
+// r4start
+void CodeGenModule::EmitCXXDestructors(const CXXDestructorDecl *D)
+{
+  if (Context.getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    EmitGlobal(GlobalDecl(D, Dtor_Base));
+    return;
+  } else {
   // The destructor in a virtual table is always a 'deleting'
   // destructor, which calls the complete destructor and then uses the
   // appropriate operator delete.
@@ -237,6 +248,7 @@ void CodeGenModule::EmitCXXDestructors(const CXXDestructorDecl *D) {
   // The destructor used for destructing this as a most-derived class;
   // call the base destructor and then destructs any virtual bases.
   EmitGlobal(GlobalDecl(D, Dtor_Complete));
+  }
 
   // The destructor used for destructing this as a base class; ignores
   // virtual bases.

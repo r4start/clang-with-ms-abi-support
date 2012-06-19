@@ -1524,6 +1524,7 @@ public:
       GroupingParens(false), FunctionDefinition(FDK_Declaration), 
       Redeclaration(false),
       Attrs(ds.getAttributePool().getFactory()), AsmLabel(0),
+      //Attrs(const_cast<DeclSpec &>(ds).getAttributes()), AsmLabel(0),
       InlineParamsUsed(false), Extension(false) {
   }
 

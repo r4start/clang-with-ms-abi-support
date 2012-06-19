@@ -11,6 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// r4start
+#include <list>
+#include <set>
+#include <deque>
+#include "clang/AST/VBTableBuilder.h"
+
 #include "CodeGenModule.h"
 #include "CGCXXABI.h"
 #include "clang/AST/RecordLayout.h"
@@ -26,8 +32,18 @@ class RTTIBuilder {
   CodeGenModule &CGM;  // Per-module state.
   llvm::LLVMContext &VMContext;
   
+  llvm::Type *Int8PtrTy;
+  
+  /// r4start
+  llvm::Type* Int32Ty;
+  llvm::GlobalVariable::LinkageTypes CurLinkage;
+  
   /// Fields - The fields of the RTTI descriptor currently being built.
   SmallVector<llvm::Constant *, 16> Fields;
+
+  /// r4start
+  /// AmbiguousBases - Set of bases that in MSVC is ambiguous subobjects.
+  llvm::SmallSet<const CXXRecordDecl *, 8> AmbiguousBases;
 
   /// GetAddrOfTypeName - Returns the mangled type name of the given type.
   llvm::GlobalVariable *
@@ -61,9 +77,119 @@ class RTTIBuilder {
   /// struct, used for member pointer types.
   void BuildPointerToMemberTypeInfo(const MemberPointerType *Ty);
   
+  /// r4start
+  void GetAmbiguousSubobjects(const CXXRecordDecl *RD);
+
+  /// r4start
+  void BuildVBTable(const CXXRecordDecl *RD);
+
+  /// r4start
+  int32_t GetMemberDisplacement(const CXXRecordDecl *RD, CXXRecordDecl *Base);
+
+  /// r4start
+  uint32_t GetAttributesField(const CXXRecordDecl *RD,
+                              CXXRecordDecl *Base);
+
+  /// r4start
+  VBTableContext::VBTableEntry GetVBaseDisplacement(const CXXRecordDecl *RD,
+                                                    CXXRecordDecl *Base);
+
+  /// r4start
+  /// Microsoft specific.
+  llvm::Constant* 
+  BuildRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
+                               CXXRecordDecl *Base);
+
+  /// r4start
+  /// Build Microsoft specific structure Base Class Array.
+  /// This array consists of RTTIBaseClassDescriptor.
+  /// struct RTTIBaseClassDescriptor
+  /// {
+  ///   //type descriptor of the class
+  ///   struct TypeDescriptor* pTypeDescriptor;
+  ///
+  ///   //number of nested classes following in the Base Class Array
+  ///   DWORD numContainedBases;
+  ///
+  ///   //pointer-to-member displacement info
+  ///   struct PMD where;
+  ///
+  ///   //flags, usually 0
+  ///   DWORD attributes;
+  /// };
+  ///
+  /// struct PMD
+  /// {
+  ///   //member displacement
+  ///   int mdisp;
+  ///
+  ///   //vbtable displacement
+  ///   int pdisp;
+  ///
+  ///   //displacement inside vbtable
+  ///   int vdisp;
+  /// };
+  llvm::Constant *BuildRTTIBaseClassArray(const CXXRecordDecl* RD);
+
+  /// r4start
+  /// Build Microsoft specific structure Class Hierarchy Descriptor.
+  /// struct RTTIClassHierarchyDescriptor
+  /// {
+  ///   always zero?
+  ///   DWORD signature;
+  ///
+  ///   bit 0 set = multiple inheritance;
+  ///   bit 1 set = virtual inheritance, only sets with bit 0.
+  ///   bit 2 set = when we have inheritance like this
+  ///   class B {
+  ///   public:
+  ///     virtual void b(){}
+  ///     double b_field;
+  ///   };
+  ///
+  ///   class C :  B {
+  ///   public:
+  ///     virtual void C_f(){}
+  ///     int y;
+  ///   };
+  ///   
+  ///   struct F{};
+  ///   struct FE : F{};
+  ///
+  ///   class A : public C, B, FE, virtual F{
+  ///   public:
+  ///     int a_field;
+  ///     virtual void a(){}
+  ///   };
+  ///   
+  ///   DWORD attributes;
+  ///
+  ///   number of classes in pBaseClassArray
+  ///   DWORD numBaseClasses;
+  ///
+  ///   struct RTTIBaseClassArray* pBaseClassArray;
+  /// };
+  llvm::Constant *BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD);
+
+  /// r4start
+  /// Build Microsoft specific structure RTTI Type Descriptor.
+  /// struct RTTITypeDescriptor 
+  /// {
+  ///  // pointer to type_info vftable
+  ///  struct type_info* pVFTable;
+  /// 
+  ///   //always null?
+  ///   DWORD spare;
+  /// 
+  ///   char* name;
+  /// };
+  llvm::Constant *BuildRTTITypeDescriptor(QualType Ty);
+
 public:
   RTTIBuilder(CodeGenModule &CGM) : CGM(CGM), 
-    VMContext(CGM.getModule().getContext()) { }
+    VMContext(CGM.getModule().getContext()),
+    Int8PtrTy(llvm::Type::getInt8PtrTy(VMContext)),
+    Int32Ty(llvm::Type::getInt32Ty(VMContext)){ }
 
   // Pointer type info flags.
   enum {
@@ -106,6 +232,29 @@ public:
   ///
   /// \param Force - true to force the creation of this RTTI value
   llvm::Constant *BuildTypeInfo(QualType Ty, bool Force = false);
+
+  /// r4start
+  /// Build Microsoft specific type info - RTTI Complete Object Locator.
+  /// struct RTTICompleteObjectLocator
+  /// {
+  ///   //always zero ?
+  ///   DWORD signature;
+  ///
+  ///   //offset of this vtable in the complete class
+  ///   DWORD offset;
+  ///   
+  ///   //constructor displacement offset
+  ///   DWORD cdOffset;
+  ///
+  ///   //TypeDescriptor of the complete class
+  ///   struct TypeDescriptor* pTypeDescriptor;
+  ///
+  ///   //describes inheritance hierarchy
+  ///   struct RTTIClassHierarchyDescriptor* ClassDescriptor;
+  /// };
+  llvm::Constant *BuildMSTypeInfo(QualType Ty,
+                                  QualType BaseTy,
+                                  bool Force = false);
 };
 }
 
@@ -375,6 +524,16 @@ static bool CanUseSingleInheritance(const CXXRecordDecl *RD) {
 }
 
 void RTTIBuilder::BuildVTablePointer(const Type *Ty) {
+
+  const char *VTableName = 0;
+  llvm::Constant *VTable;
+
+  // r4start
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    VTableName = "\01??_7type_info@@6B@";
+
+    VTable = CGM.getModule().getOrInsertGlobal(VTableName, Int8PtrTy);
+  } else {
   // abi::__class_type_info.
   static const char * const ClassTypeInfo =
     "_ZTVN10__cxxabiv117__class_type_infoE";
@@ -384,8 +543,6 @@ void RTTIBuilder::BuildVTablePointer(const Type *Ty) {
   // abi::__vmi_class_type_info.
   static const char * const VMIClassTypeInfo =
     "_ZTVN10__cxxabiv121__vmi_class_type_infoE";
-
-  const char *VTableName = 0;
 
   switch (Ty->getTypeClass()) {
 #define TYPE(Class, Base)
@@ -478,8 +635,8 @@ void RTTIBuilder::BuildVTablePointer(const Type *Ty) {
     break;
   }
 
-  llvm::Constant *VTable = 
-    CGM.getModule().getOrInsertGlobal(VTableName, CGM.Int8PtrTy);
+      VTable = 
+      CGM.getModule().getOrInsertGlobal(VTableName, Int8PtrTy);
     
   llvm::Type *PtrDiffTy = 
     CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
@@ -487,8 +644,8 @@ void RTTIBuilder::BuildVTablePointer(const Type *Ty) {
   // The vtable address point is 2.
   llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
   VTable = llvm::ConstantExpr::getInBoundsGetElementPtr(VTable, Two);
-  VTable = llvm::ConstantExpr::getBitCast(VTable, CGM.Int8PtrTy);
-
+    VTable = llvm::ConstantExpr::getBitCast(VTable, Int8PtrTy);
+  }
   Fields.push_back(VTable);
 }
 
@@ -546,7 +703,1226 @@ maybeUpdateRTTILinkage(CodeGenModule &CGM, llvm::GlobalVariable *GV,
   TypeNameGV->setLinkage(Linkage);
 }
 
+// r4start
+static llvm::StructType* GetBaseClassDescriptorType(CodeGenModule& CGM)
+{
+  llvm::SmallVector<llvm::Type*, 4> BaseClassDescrFieldTypes;
+
+  BaseClassDescrFieldTypes.push_back(llvm::Type::getInt8PtrTy(CGM.getLLVMContext()));
+
+  // Push numContainedBases, PMD fields and attributes.
+  for (int i = 0; i < 5; ++i)
+  {
+    BaseClassDescrFieldTypes.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
+  }
+
+  return llvm::StructType::get(CGM.getLLVMContext(), BaseClassDescrFieldTypes);
+}
+
+// r4start
+// Need to rewrite this!!!!!!!!!!!!
+static uint32_t GetBasesCount(const CXXRecordDecl *RD) {
+  if (!RD->getNumBases() && !RD->getNumVBases())
+    return 0;
+
+  uint32_t BasesCount = 0;
+  llvm::SmallVector<const CXXRecordDecl *, 16> Bases;
+
+  Bases.push_back(RD);
+
+  while (!Bases.empty()) {
+    
+    const CXXRecordDecl *Derived = Bases.back();
+    Bases.pop_back();
+
+    for (CXXRecordDecl::base_class_const_iterator I = Derived->bases_begin(),
+         E = Derived->bases_end(); I != E; ++I, ++BasesCount) {
+      const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+
+      if (Base->getNumBases() ||
+          Base->getNumVBases())
+        Bases.push_back(Base);
+    }
+  }
+
+  return BasesCount;
+}
+
+// r4start
+static llvm::StructType* GetTypeDescriptorType(CodeGenModule& CGM,
+                                               llvm::Type* TypeInfoTy,
+                                               uint64_t NameLen) {
+  llvm::SmallVector<llvm::Type*, 3> DescrTy;
+
+  DescrTy.push_back(TypeInfoTy);
+  DescrTy.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
+  DescrTy.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), NameLen));
+
+  return llvm::StructType::get(CGM.getLLVMContext(), DescrTy);
+}
+
+// r4start
+void
+RTTIBuilder::BuildVBTable(const CXXRecordDecl *RD) {
+  llvm::SmallString<256> Name;
+  llvm::raw_svector_ostream Out(Name);
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleCXXVBTable(RD, 0, Out);
+  Out.flush();
+
+  llvm::StringRef VBTableName = Name.str();
+
+  llvm::GlobalVariable *VBTable = 
+    CGM.getModule().getGlobalVariable(VBTableName);
+  if (VBTable)
+    return;
+
+  VBTableContext& Context = CGM.getVBTableContext();
+  const VBTableContext::BaseVBTableTy &Table = Context.getVBTable(RD, RD);
+
+  llvm::ArrayType *VBTableType = llvm::ArrayType::get(Int32Ty, Table.size());
+  llvm::SmallVector<llvm::Constant *, 32> Offsets;
+
+  for (VBTableContext::BaseVBTableTy::const_iterator I = Table.begin(),
+       E = Table.end(); I != E; ++I) {
+    VBTableContext::VBTableEntry Entry = I->first;
+
+    Offsets.push_back(llvm::ConstantInt::get(Int32Ty, Entry.offset));
+  }
+
+  llvm::Constant *Init = llvm::ConstantArray::get(VBTableType, Offsets);
+
+  VBTable = 
+    new llvm::GlobalVariable(CGM.getModule(),Init->getType(), true,
+                             CurLinkage, Init, VBTableName);
+}
+
+uint32_t RTTIBuilder::GetAttributesField(const CXXRecordDecl *RD, 
+                                         CXXRecordDecl *Base) {
+  // At now we know that only first byte uses from attr field.
+  // 7 bit sets always (counting from 1).
+  // 5 bit sets if Base is virtually derived from RD.
+  // 4 bit sets always with 1 bit, at now I don`t know this bit meaning.
+  // 3 bit sets if Base is not directly public. 
+  // 2 bit sets if Base ambiguous subobject.
+  // 1 bit sets if down cast not allowed.
+  // Other bits are unknown.
+  uint32_t Attr = 64;
+
+  if (RD == Base)
+    return Attr;
+
+  if (RD->isVirtuallyDerivedFrom(Base))
+    Attr |= 16;
+
+  bool BaseWasVisited = false;
+  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
+       E = RD->bases_end(); I != E; ++I) {
+    const CXXRecordDecl *BaseDecl = I->getType()->getAsCXXRecordDecl();
+    if (BaseDecl == Base) {
+      BaseWasVisited = true;
+      if (I->getAccessSpecifier() != AS_public) {
+        Attr |= 4;
+      }
+      break;
+    }
+  }
+
+  CXXBasePaths Paths;
+  Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+  RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
+                    Base->getCanonicalDecl(), Paths);
+
+  QualType BaseTy = CGM.getContext().getTagDeclType(Base);
+
+  if (Paths.isAmbiguous(CGM.getContext().getCanonicalType(BaseTy)))
+    Attr |= 2;
+
+  // What we must do with ambiguous subobjects?
+  if (!BaseWasVisited) {
+    CXXBasePath& Path = Paths.front();
+    if (Path.Access != AS_public)
+      Attr |= 4;
+  }
+
+  // Down cast not allowed by default.
+  uint32_t DownCastAllowed = 9;
+
+  if (!(Attr & 4))
+    DownCastAllowed = 0;
+  
+  Attr |= DownCastAllowed;
+
+  return Attr;
+}
+
+int32_t RTTIBuilder::GetMemberDisplacement(const CXXRecordDecl *RD,
+                                           CXXRecordDecl *Base) {
+  assert(!RD->isVirtuallyDerivedFrom(Base) && 
+         "Unable get member displacement for virtual base!");
+
+  CXXBasePaths Paths;
+  Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+  RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
+                    Base->getCanonicalDecl(), Paths);
+
+  if (Paths.getDetectedVirtual())
+    return 0;
+
+  QualType BaseTy = CGM.getContext().getTagDeclType(Base);
+  CanQualType BaseCanQualTy = CGM.getContext().getCanonicalType(BaseTy);
+  assert(!Paths.isAmbiguous(BaseCanQualTy) && 
+         "At now we can't work with ambiguous bases!");
+
+  CXXBasePath& Path = Paths.front();
+
+  ASTContext &Ctx = CGM.getContext();
+
+  if (Path.size() ==  1) {
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
+    return Layout.getBaseClassOffset(Base).getQuantity();
+  }
+
+  int32_t MemberDisplacement = 0;
+  for (CXXBasePathElement *I = Path.begin(), *E = Path.end(); I != E; ++I) {
+    const ASTRecordLayout &MostDerivedLayout = Ctx.getASTRecordLayout(I->Class);
+    const CXXRecordDecl *BaseDecl = I->Base->getType()->getAsCXXRecordDecl();
+
+    MemberDisplacement += 
+      MostDerivedLayout.getBaseClassOffset(BaseDecl).getQuantity();
+  }
+
+  return MemberDisplacement;
+}
+
+VBTableContext::VBTableEntry 
+RTTIBuilder::GetVBaseDisplacement(const CXXRecordDecl *RD,
+                                  CXXRecordDecl *Base) {
+  VBTableContext::VBTableEntry result(0, -1);
+
+  if (RD->isVirtuallyDerivedFrom(Base)) {
+    const VBTableContext::VBTableEntry &RDEntry = 
+      CGM.getVBTableContext().getEntryFromVBTable(RD, RD, RD);
+
+    result.offset = -RDEntry.offset;
+
+    const VBTableContext::VBTableEntry &BaseEntry = 
+      CGM.getVBTableContext().getEntryFromVBTable(RD, RD, Base);
+
+    // Maybe not 4 but Int size.
+    result.index = BaseEntry.index * 4;
+    
+    return result;
+  }
+
+  CXXBasePaths Paths;
+  Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+  RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
+                    Base->getCanonicalDecl(), Paths);
+
+  if (!Paths.getDetectedVirtual())
+    return result;
+
+  const CXXRecordDecl *VirtBase = 
+    Paths.getDetectedVirtual()->getAsCXXRecordDecl();
+
+  if (!VirtBase)
+    return result;
+
+  const VBTableContext::VBTableEntry &RDEntry = 
+    CGM.getVBTableContext().getEntryFromVBTable(RD, RD, RD);
+
+  result.offset = -RDEntry.offset;
+
+  const VBTableContext::VBTableEntry &BaseEntry = 
+    CGM.getVBTableContext().getEntryFromVBTable(RD, RD, VirtBase);
+
+  // Maybe not 4 but Int size.
+  result.index = BaseEntry.index * 4;
+
+  return result;
+}
+
+llvm::Constant* 
+RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD, 
+                                          CXXRecordDecl *Base) {
+  llvm::SmallVector<llvm::Constant*, 6> BaseClassDescrVals;
+
+  // Get ptr to RTTI Type descriptor.
+  llvm::SmallString<256> TypeDescrBuff;
+  llvm::raw_svector_ostream OutType(TypeDescrBuff);
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleCXXRTTITypeDescriptor(Base, OutType);
+  OutType.flush();
+  llvm::StringRef TypeDescriptorName = TypeDescrBuff.str();
+
+  llvm::GlobalVariable *TypeDescr = 
+    CGM.getModule().getGlobalVariable(TypeDescriptorName);
+
+  if (!TypeDescr) {
+    BuildRTTITypeDescriptor(CGM.getContext().getTagDeclType(Base));
+    TypeDescr = 
+      CGM.getModule().getGlobalVariable(TypeDescriptorName);
+    
+    assert(TypeDescr && "Can`t find type descriptor!");
+  }
+
+  BaseClassDescrVals.push_back(llvm::ConstantExpr::getBitCast(TypeDescr,
+                                                              Int8PtrTy));
+  // Number contained bases.
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, 
+                                                      GetBasesCount(Base)));
+
+  int32_t MemberDisplacement = 0;
+  if (Base != RD && 
+      !RD->isVirtuallyDerivedFrom(Base))
+    MemberDisplacement = GetMemberDisplacement(RD, Base);
+
+  // Member displacement.
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty,
+                                                      MemberDisplacement));
+
+  /*int64_t Displacement = -1;
+  int32_t VBTableIndex = 0;
+  
+  if (RD->isVirtuallyDerivedFrom(Base)) {
+    const VBTableContext::VBTableEntry &RDEntry = 
+      CGM.getVBTableContext().getEntryFromVBTable(RD, RD);
+
+    Displacement = -RDEntry.offset;
+
+    const VBTableContext::VBTableEntry &BaseEntry = 
+      CGM.getVBTableContext().getEntryFromVBTable(RD, Base);
+
+    // Maybe not 4 but Int size.
+    VBTableIndex = BaseEntry.index * 4;
+  }*/
+
+  VBTableContext::VBTableEntry VBTableDisps = GetVBaseDisplacement(RD, Base);
+
+  // Vbtable displacement.
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, VBTableDisps.offset));
+
+  // Displacement inside vbtable.
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, VBTableDisps.index));
+
+  // Attributes.
+  uint32_t Attributes = GetAttributesField(RD, Base);
+
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, Attributes));
+
+  llvm::StructType* BaseClassDescrTy = GetBaseClassDescriptorType(CGM);
+
+  llvm::Constant* Init = 
+    llvm::ConstantStruct::get(BaseClassDescrTy, BaseClassDescrVals);
+  
+  llvm::SmallString<256> Name;
+  llvm::raw_svector_ostream Out(Name);
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->
+      mangleCXXRTTIBaseClassDescriptor(Base, MemberDisplacement, 
+                                       VBTableDisps.offset, VBTableDisps.index,
+                                       Attributes, Out);
+  Out.flush();
+
+  llvm::StringRef DescrName = Name.str();
+
+  llvm::GlobalVariable *BaseClassDescr = 
+    CGM.getModule().getGlobalVariable(DescrName);
+
+  if (!BaseClassDescr)
+    BaseClassDescr = 
+      new llvm::GlobalVariable(CGM.getModule(), Init->getType(), true,
+                               CurLinkage, Init, DescrName);
+
+  return BaseClassDescr;
+}
+
+// r4start
+llvm::Constant* RTTIBuilder::BuildRTTIBaseClassArray(const CXXRecordDecl* RD) {
+  llvm::SmallVector<llvm::Constant*, 64> BaseClassDescriptors;
+
+  std::deque<CXXRecordDecl *> Bases;
+  
+  Bases.push_front(const_cast<CXXRecordDecl *>(RD));
+
+  while (!Bases.empty()) {
+    CXXRecordDecl *Derived = Bases.front();
+    Bases.pop_front();
+
+    BaseClassDescriptors.push_back(
+       BuildRTTIBaseClassDescriptor(RD, Derived));
+
+    bool Generate = true;
+
+    for (CXXRecordDecl::base_class_const_iterator I = Derived->bases_begin(),
+         E = Derived->bases_end(); I != E; ++I) {
+      CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+
+      if (Base->getNumBases() ||
+          Base->getNumVBases()) {
+        Generate = false;
+      }
+
+      if (Generate) {
+        BaseClassDescriptors.push_back(
+          BuildRTTIBaseClassDescriptor(RD, Base));
+        continue;
+      }
+
+      Bases.push_back(Base);
+    }
+  }
+
+  llvm::ArrayType* BaseClassArrayType = 
+    llvm::ArrayType::get(BaseClassDescriptors[0]->getType(),
+                         BaseClassDescriptors.size());
+
+  llvm::Constant* BaseClassArrayInit = 
+    llvm::ConstantArray::get(BaseClassArrayType, BaseClassDescriptors);
+
+  llvm::SmallString<256> Name;
+  llvm::raw_svector_ostream Out(Name);
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleCXXRTTIBaseClassArray(RD, Out);
+  Out.flush();
+
+  llvm::StringRef ArrayName(Name.str());
+
+  llvm::GlobalVariable* BaseClassArray = CGM.getModule().getGlobalVariable(ArrayName);
+
+  if (!BaseClassArray)
+    BaseClassArray = 
+      new llvm::GlobalVariable(CGM.getModule(), BaseClassArrayInit->getType(),
+                              true, CurLinkage, BaseClassArrayInit, ArrayName);
+
+  return BaseClassArray;
+}
+
+// r4start
+// TODO: rewrite this.
+void RTTIBuilder::GetAmbiguousSubobjects(const CXXRecordDecl *RD) {
+  std::list<const CXXRecordDecl *> Bases;
+  std::set<const CXXRecordDecl *> VisitedBases;
+  std::set<const CXXRecordDecl *> VisitedVirtualBases;
+
+  Bases.push_back(RD);
+
+  while (!Bases.empty()) {
+    const CXXRecordDecl *Derived = Bases.back();
+    Bases.pop_back();
+
+    for (CXXRecordDecl::base_class_const_iterator I = Derived->bases_begin(),
+      E = Derived->bases_end(); I != E; ++I) {
+      const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+
+      if (I->isVirtual()) {
+        VisitedVirtualBases.insert(Base);
+      }
+
+      if (VisitedBases.find(Base) != VisitedBases.end()) {
+        AmbiguousBases.insert(Base);
+      } else if (VisitedVirtualBases.find(Base) != 
+                      VisitedVirtualBases.end()) {
+        AmbiguousBases.insert(Base);
+        VisitedBases.insert(Base);
+      } else {
+        VisitedBases.insert(Base);
+      }
+
+      Bases.push_back(Base);
+    }
+  }
+}
+
+// r4start
+llvm::Constant * 
+RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD)
+{
+  llvm::SmallString<256> DescriptorName;
+  llvm::raw_svector_ostream Out(DescriptorName);
+
+  MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
+
+  Ctx.getMsExtensions()->
+    mangleCXXRTTIClassHierarhyDescriptor(RD, Out);
+  Out.flush();
+
+  llvm::StringRef ClassHierarchyDescrName = DescriptorName.str();
+
+  llvm::SmallVector<llvm::Type*, 4> CHDFieldTypes;
+  llvm::SmallVector<llvm::Constant*, 4> CHDFieldVals;
+
+  // Signature and attribute fields are integers.
+  for (int i = 0; i < 3; ++i)
+  {
+    CHDFieldTypes.push_back(Int32Ty);
+  }
+
+  // Signature always 0?
+  CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+  
+  GetAmbiguousSubobjects(RD);
+
+  uint32_t AttributeVal = 0;
+  if (RD->getNumBases() > 1) {
+    AttributeVal |= 0x01;
+
+    if (RD->getNumVBases())
+      AttributeVal |= 0x02;
+
+    if (!AmbiguousBases.empty()) {
+      AttributeVal |= 0x04;
+    }
+  }
+
+  CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, AttributeVal));
+
+  CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, GetBasesCount(RD) + 1));
+
+  llvm::Constant* BaseClassArray = BuildRTTIBaseClassArray(RD);
+  CHDFieldTypes.push_back(Int8PtrTy);
+  CHDFieldVals.push_back(llvm::ConstantExpr::getBitCast(BaseClassArray, Int8PtrTy));
+
+  llvm::StructType* CHDType = 
+    llvm::StructType::get(CGM.getLLVMContext(), CHDFieldTypes);
+
+  llvm::Constant* ClassHierarchyDescr = 
+    llvm::ConstantStruct::get(CHDType, CHDFieldVals);
+
+  llvm::GlobalVariable* CHDVal = 
+    CGM.getModule().getGlobalVariable(ClassHierarchyDescrName);
+
+  if (!CHDVal)
+  CHDVal = 
+    new llvm::GlobalVariable(CGM.getModule(),
+                              ClassHierarchyDescr->getType(),
+                              true,
+                              CurLinkage,
+                              ClassHierarchyDescr,
+                              ClassHierarchyDescrName);
+
+  return CHDVal;
+}
+
+// r4start
+llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty)
+{
+  SmallString<256> Name;
+  llvm::raw_svector_ostream Out(Name);
+  const CXXRecordDecl* RD = Ty->getAsCXXRecordDecl();
+
+  MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
+
+  Ctx.getMsExtensions()->mangleCXXRTTITypeDescriptor(RD, Out);
+  Out.flush();
+
+  StringRef DescrName = Name.str();
+
+  llvm::GlobalVariable* TypeDescriptor = 
+    CGM.getModule().getGlobalVariable(DescrName);
+
+  if (TypeDescriptor)
+    return TypeDescriptor;
+
+  // Last field of type descriptor contains mangled name of class
+  std::string NameField = ".?AV" + RD->getNameAsString() + "@@";
+
+  llvm::Constant* Array = 
+    llvm::ConstantDataArray::getString(CGM.getLLVMContext(), 
+                                       StringRef(NameField));
+
+  BuildVTablePointer(cast<Type>(Ty));
+
+  llvm::Constant* TypeInfo = Fields.pop_back_val();
+
+  llvm::StructType* DescrTy = 
+    GetTypeDescriptorType(CGM, TypeInfo->getType(), NameField.length() + 1);
+
+  llvm::SmallVector<llvm::Constant*, 3> TypeDescrVals;
+
+  TypeDescrVals.push_back(TypeInfo);
+  TypeDescrVals.push_back(llvm::ConstantInt::get(DescrTy->getElementType(1), 0));
+  TypeDescrVals.push_back(Array);
+
+  llvm::Constant* Init = llvm::ConstantStruct::get(DescrTy, TypeDescrVals);
+
+  return new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
+                                  true, CurLinkage, Init, DescrName);
+}
+
+static CharUnits GetClassOffset(const ASTContext &Ctx,
+                                const CXXRecordDecl *RD,
+                                const CXXRecordDecl *Base) {
+  assert(RD != Base && 
+         "GetClassOffset can`t work if RD equal Base");
+
+  CharUnits BaseOffset;
+
+  if (RD->isVirtuallyDerivedFrom(const_cast<CXXRecordDecl *>(Base))) {
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
+    return Layout.getVBaseClassOffset(Base);
+  }
+
+  CXXBasePaths InhPaths;
+  InhPaths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+  RD->lookupInBases(&CXXRecordDecl::FindBaseClass, 
+                 const_cast<CXXRecordDecl *>(Base), InhPaths);
+
+  assert(InhPaths.begin() != InhPaths.end() &&
+         "Can`t find inheritance path from RD to Base!");
+  
+  CXXBasePath& Path = InhPaths.front();
+
+  for (CXXBasePath::const_iterator I = Path.begin(),
+       E = Path.end(); I != E; ++I) {
+    const CXXRecordDecl *BaseElem = I->Base->getType()->getAsCXXRecordDecl();
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(I->Class);
+
+    if (I->Base->isVirtual())
+      BaseOffset += Layout.getVBaseClassOffset(BaseElem);
+    else
+      BaseOffset += Layout.getBaseClassOffset(BaseElem);
+  }
+
+  return BaseOffset;
+}
+
+// r4start
+llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
+                                             QualType BaseTy,
+                                             bool Force) {
+  // We want to operate on the canonical type.
+  Ty = CGM.getContext().getCanonicalType(Ty);
+
+  llvm::SmallString<256> OutName;
+  llvm::raw_svector_ostream Out(OutName);
+  
+  MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
+  MSMangleContextExtensions* CtxExt = Ctx.getMsExtensions();
+
+  CXXRecordDecl *Base = 0;
+  CXXRecordDecl *LayoutClass = Ty->getAsCXXRecordDecl();
+
+  if (LayoutClass != BaseTy->getAsCXXRecordDecl())
+    Base = BaseTy->getAsCXXRecordDecl();
+
+  const ASTRecordLayout &Layout =
+    CGM.getContext().getASTRecordLayout(LayoutClass);
+
+  CtxExt->mangleCXXRTTICompleteObjectLocator(LayoutClass, Base, Out);
+  
+  Out.flush();
+
+  // Complete Object Locator name
+  llvm::StringRef COLName = OutName.str();
+  
+  CurLinkage = getTypeInfoLinkage(CGM, Ty);
+
+  llvm::Type* Int32Ty = 
+    llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
+
+  llvm::Constant* SignatureField = llvm::ConstantInt::get(Int32Ty, 0);
+  
+  uint64_t VFTableOffset = 0;
+  if (Base != Layout.getPrimaryBase() && Base) {
+    VFTableOffset = 
+      GetClassOffset(CGM.getContext(), LayoutClass, Base).getQuantity();
+  }
+
+  llvm::Constant* VTableOffset = llvm::ConstantInt::get(Int32Ty, VFTableOffset);
+  
+  llvm::Constant* ConstructorDisplacement = llvm::ConstantInt::get(Int32Ty, 0);
+
+  Fields.push_back(SignatureField);
+  Fields.push_back(VTableOffset);
+  Fields.push_back(ConstructorDisplacement);
+
+  llvm::Constant *TypeDescr = BuildRTTITypeDescriptor(Ty);
+  Fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescr, Int8PtrTy));
+
+  llvm::Constant *CHD = 
+    BuildRTTIClassHierarchyDescriptor(Ty->getAsCXXRecordDecl());
+  Fields.push_back(llvm::ConstantExpr::getBitCast(CHD, Int8PtrTy));
+
+  // Build virtual bases table.
+  /*if (LayoutClass->getNumVBases())
+    BuildVBTable(LayoutClass);*/
+
+  llvm::Constant* Init = llvm::ConstantStruct::getAnon(Fields);
+  
+  llvm::GlobalVariable* GV = CGM.getModule().getGlobalVariable(COLName);
+  if (!GV)
+    GV = new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
+                                 /*Constant=*/true, CurLinkage, Init, COLName);
+
+  GV->setUnnamedAddr(true);
+  
+  return llvm::ConstantExpr::getBitCast(GV, Int8PtrTy);
+}
+
+/*
+// r4start
+static void ParseDeepBases(MangleContext& Context,
+                           const CXXRecordDecl* RD,
+                           llvm::raw_ostream& Out)
+{
+  CXXRecordDecl::reverse_base_class_const_iterator  
+                              baseClass = RD->vbases_rbegin();
+  if (RD->getNumVBases())
+  {
+    // Build vftable for virtual bases.
+
+    for(baseClass;
+        baseClass != RD->vbases_rend();
+        ++baseClass)
+    {
+      Context.mangleCXXVTable(RD,
+        baseClass->getType()->getAsCXXRecordDecl(),
+        Out);
+    }
+  }
+
+  // Built vftables for bases virtual bases. 
+  for(baseClass = RD->bases_rbegin();
+      baseClass != RD->bases_rend();
+      ++baseClass)
+  {
+    if (baseClass->getType()->getAsCXXRecordDecl()->getNumVBases())
+    {
+      ParseDeepBases(Context, baseClass->getType()->getAsCXXRecordDecl(), Out);
+    }
+  }
+}
+
+// r4start
+static bool CXXClassHasNewVirtualFunction(const CXXRecordDecl *RD)
+{
+  for (CXXRecordDecl::method_iterator method = RD->method_begin();
+       method != RD->method_end();
+       ++method)
+  {
+    if (method->isVirtual() &&
+        !method->size_overridden_methods())
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// r4start
+static bool HasBasesVirtualFunctions(const CXXRecordDecl* RD)
+{
+  for (CXXRecordDecl::base_class_const_iterator base = RD->bases_begin();
+       base != RD->bases_end();
+       ++base)
+  {
+    if (base->getType()->getAsCXXRecordDecl()->isPolymorphic())
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// r4start
+static bool IsAllBasesVirtual(const CXXRecordDecl *RD)
+{
+  for (CXXRecordDecl::base_class_const_iterator base = RD->bases_begin();
+       base != RD->bases_end();
+       ++base)
+  {
+    if (!base->isVirtual())
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// r4start
+static bool IsClassDeclareVFunctions(const CXXRecordDecl *RD)
+{
+  for (CXXRecordDecl::method_iterator method = RD->method_begin();
+       method != RD->method_end();
+       ++method)
+  {
+    if (method->isVirtual())
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+// r4start
+static void BuildVFTableForNonVirtualBases(MangleContext& Context,
+                                           const CXXRecordDecl* RD,
+                                           llvm::raw_ostream& Out)
+{
+  CXXRecordDecl::reverse_base_class_const_iterator baseClass;
+
+  // Build vftable for nonvirtual bases.
+  for (baseClass = RD->bases_rbegin();
+    baseClass != RD->bases_rend();
+    ++baseClass)
+  {
+    // If no virtual functions then no vftable ^_^
+    if (!baseClass->isVirtual() &&
+      baseClass->getType()->getAsCXXRecordDecl()->isPolymorphic())
+    {
+      Context.mangleCXXVTable(RD,
+        baseClass->getType()->getAsCXXRecordDecl(),
+        Out);
+    }
+  }
+}
+
+// r4start
+static void GenerateVFTables(MangleContext& Context,
+                             const CXXRecordDecl* RD,
+                             llvm::raw_ostream& Out)
+{
+  if (RD->getNumVBases())
+  {
+  
+    if (!HasBasesVirtualFunctions(RD))
+    {
+      // Bases don`t have any virtual functions,
+      // so we don`t need to build vftable for them.
+      if (RD->isPolymorphic())
+      {
+        // This class have virtual function.
+        // Build vftable.
+        Context.mangleCXXVTable(RD, 0, Out);
+      }
+      return ;
+    }
+    
+    // We have one virtual base class with vfunctions and
+    // no new vfunctions in child class,
+    // so build one vftable.
+    if (RD->getNumVBases() == 1 &&
+        RD->getNumBases() == RD->getNumVBases() &&
+        HasBasesVirtualFunctions(RD) &&
+        !IsClassDeclareVFunctions(RD))
+    {
+      Context.mangleCXXVTable(RD, 0, Out);
+      return ;
+    }
+
+    // MS compiler do this optimization.
+    // For example:
+    // if we have 2 virtual bases and 1 of them have a virtual base,
+    // then class shares vftable with base without base.
+    if (IsAllBasesVirtual(RD) &&
+        RD->getNumVBases() > RD->getNumBases() &&
+        !IsClassDeclareVFunctions(RD))
+    {
+      bool optimized = false;
+
+      for (CXXRecordDecl::reverse_base_class_const_iterator base = RD->bases_rbegin();
+           base != RD->bases_rend();
+           ++base)
+      {
+        CXXRecordDecl* baseClass = base->getType()->getAsCXXRecordDecl();
+        
+        if (!baseClass->getNumBases() &&
+            !optimized)
+        {
+          Context.mangleCXXVTable(RD, 0, Out);
+          optimized = true;
+          continue ;
+        }
+
+        Context.mangleCXXVTable(RD, baseClass, Out);
+        ParseDeepBases(Context, baseClass, Out);
+      }
+
+      return ;
+    }
+
+    // Build vftable for virtual bases.
+    for (CXXRecordDecl::reverse_base_class_const_iterator virt = RD->vbases_rbegin();
+         virt != RD->vbases_rend();
+         ++virt)
+    {
+      // If class not contains virtual function,
+      // We don`t need to construct it`s vftable.
+      if (virt->getType()->getAsCXXRecordDecl()->isPolymorphic())
+      {
+        Context.mangleCXXVTable(RD,
+          virt->getType()->getAsCXXRecordDecl(),
+          Out);
+      }
+    }
+
+    // If all bases are virtual then we must add
+    // vftable record ??_7class_name@@6B0@@.
+    // Maybe this is marker for vftable sharing???
+    if (IsAllBasesVirtual(RD) && 
+        CXXClassHasNewVirtualFunction(RD))
+    {
+      Context.getMsExtensions()->
+        mangleCXXVFTableByClassName(RD->getNameAsString(), "0", Out);
+      return ;
+    }
+
+    BuildVFTableForNonVirtualBases(Context, RD, Out);
+
+  }
+  else if (HasBasesVirtualFunctions(RD))
+  {
+    BuildVFTableForNonVirtualBases(Context, RD, Out);
+  }
+  else if (RD->isPolymorphic())
+  {
+    // If in class contains virtual function.
+    Context.mangleCXXVTable(RD, 0, Out);
+  }
+}
+
+// r4start
+static void GenerateVBTables(MangleContext& Context,
+                             const CXXRecordDecl* RD,
+                             llvm::raw_ostream& Out)
+{
+  bool haveVitualBasesBases = false;
+
+  for (CXXRecordDecl::reverse_base_class_const_iterator base = RD->bases_rbegin();
+       base != RD->bases_rend();
+       ++base)
+  {
+    if (base->getType()->getAsCXXRecordDecl()->getNumVBases())
+    {
+      Context.getMsExtensions()->
+        mangleCXXVBTable(RD, base->getType()->getAsCXXRecordDecl(), Out);
+      haveVitualBasesBases = true;
+    }
+  }
+
+  if (!haveVitualBasesBases)
+  {
+    Context.getMsExtensions()->mangleCXXVBTable(RD, 0, Out);
+  }
+  else
+  {
+    Context.getMsExtensions()->mangleCXXVBTable(RD, "0", Out);
+  }
+}
+
+// r4start
+static void GenerateCompleteObjectLocatorData(MangleContext& Context,
+                                              const CXXRecordDecl* RD,
+                                              llvm::raw_ostream& Out)
+{
+  if (IsAllBasesVirtual(RD))
+  {
+    if (CXXClassHasNewVirtualFunction(RD))
+    {
+      Context.getMsExtensions()->
+        mangleCXXRTTICompleteObjectLocator(
+          RD,
+          "0",
+          Out
+        );
+    }
+    else
+    {
+      Context.getMsExtensions()->
+        mangleCXXRTTICompleteObjectLocator(
+          RD,
+          RD->vbases_begin()->getType()->getAsCXXRecordDecl(),
+          Out
+        );
+    }
+  }
+  else
+  {
+    if (RD->getNumBases() == 1)
+    {
+      Context.getMsExtensions()->
+        mangleCXXRTTICompleteObjectLocator(
+          RD,
+          0,
+          Out
+        );
+
+      return;
+    }
+
+    for (CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
+      baseClass != RD->bases_end();
+      ++baseClass)
+    {
+      if (!baseClass->isVirtual())
+      {
+        // Mangle Complete Object Locator for first nonvirtual base
+         Context.getMsExtensions()->
+          mangleCXXRTTICompleteObjectLocator(
+            RD,
+            // first nonvirtual base class
+            baseClass->getType()->getAsCXXRecordDecl(), 
+            Out
+          );
+        break;
+      }
+    }
+  }
+}
+
+// r4start
+static void GenerateBaseClassDescriptorsArray(MangleContext& Context,
+                                              const CXXRecordDecl* RD,
+                                              llvm::raw_ostream& Out)
+{
+  CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
+
+  int64_t bParameter = 
+    (RD->getNumBases() - RD->getNumVBases()) * 4; // 4 is some magic
+
+  bool isFirstNonVirtualBase = false;
+
+  for (int nonVirtCounter = 0, virtCounter = 4;
+       baseClass != RD->bases_end();
+       ++baseClass)
+  {
+    llvm::StringRef dParameter;
+
+    if (baseClass->isVirtual())
+    {
+      if (baseClass->getAccessSpecifier() == AS_public)
+      {
+        dParameter = "FA";
+      }
+      else
+      {
+        dParameter = "FN";
+      }
+
+      Context.getMsExtensions()->
+        mangleCXXRTTIBaseClassDescriptor(
+          baseClass->getType()->getAsCXXRecordDecl(),
+          0,
+          bParameter,
+          virtCounter,
+          dParameter,
+          Out
+        );
+      virtCounter += 4;
+    }
+    else
+    {
+
+      if (baseClass->getAccessSpecifier() == AS_public)
+      {
+        dParameter = "EA";
+      }
+      else
+      {
+        dParameter = "EN";
+      }
+
+      Context.getMsExtensions()->
+        mangleCXXRTTIBaseClassDescriptor(
+          baseClass->getType()->getAsCXXRecordDecl(),
+          nonVirtCounter,
+          0, // "?0" we need this here
+          0,
+          dParameter,
+          Out
+        );
+
+      nonVirtCounter += 4;
+    }
+
+    Context.mangleCXXRTTI(baseClass->getType(), Out);
+
+    Context.getMsExtensions()->
+      mangleCXXRTTIClassHierarhyDescriptor(
+        baseClass->getType()->getAsCXXRecordDecl(),
+        Out
+      );
+
+    Context.getMsExtensions()->
+      mangleCXXRTTIBaseClassArray(
+        baseClass->getType()->getAsCXXRecordDecl(),
+        Out
+      );
+
+    // End of base class RTTI info.
+    // All virtual classes have this tail and
+    // all base, exclude first nonvirtual base.
+    if (baseClass->isVirtual() || 
+        isFirstNonVirtualBase)
+    {
+      Context.getMsExtensions()->
+        mangleCXXRTTIBaseClassDescriptor(
+          baseClass->getType()->getAsCXXRecordDecl(),
+          0,
+          0, // "?0"
+          0,
+          "EA",
+          Out
+        );
+    }
+    else if (!isFirstNonVirtualBase)
+    {
+      isFirstNonVirtualBase = true;
+    }
+
+  }
+}
+
+// r4start
+static void GenerateCOLTail(MangleContext& Context,
+                            const CXXRecordDecl *RD,
+                            llvm::raw_ostream& Out)
+{
+  // In this case we have more than 1 nonvirtual base class.
+  // Nonvirtual _R4 comes first of all.
+  if (RD->getNumBases() - RD->getNumVBases() > 1)
+  {
+    CXXRecordDecl::base_class_const_iterator 
+                        firstNonVirtualBase = RD->bases_begin();
+    for(; firstNonVirtualBase != RD->bases_end(); ++firstNonVirtualBase)
+    {
+      if (!firstNonVirtualBase->isVirtual())
+      {
+        break;
+      }
+    }
+
+    CXXRecordDecl::base_class_const_iterator 
+                        baseClass = firstNonVirtualBase + 1;
+    for (; baseClass != RD->bases_end(); ++baseClass)
+    {
+      if (!baseClass->isVirtual())
+      {
+        Context.getMsExtensions()->
+          mangleCXXRTTICompleteObjectLocator(
+            RD,
+            baseClass->getType()->getAsCXXRecordDecl(),
+            Out
+          );
+      }
+    }
+
+    baseClass = RD->bases_begin();
+    for (; baseClass != RD->bases_end(); ++baseClass)
+    {
+      if (baseClass->isVirtual())
+      {
+        Context.getMsExtensions()->
+          mangleCXXRTTICompleteObjectLocator(
+            RD,
+            baseClass->getType()->getAsCXXRecordDecl(),
+            Out
+          );
+      }
+    }
+  }
+  else if (RD->getNumBases() - RD->getNumVBases() == 1)
+  {
+    for (CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
+         baseClass != RD->bases_end();
+         ++baseClass)
+    {
+      if (baseClass->isVirtual())
+      {
+        Context.getMsExtensions()->
+          mangleCXXRTTICompleteObjectLocator(
+            RD,
+            baseClass->getType()->getAsCXXRecordDecl(),
+            Out
+          );
+      }
+    }
+  }
+  else
+  {
+    for(CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
+        baseClass != RD->bases_end();
+        ++baseClass)
+    {
+      Context.getMsExtensions()->
+        mangleCXXRTTICompleteObjectLocator(
+          RD,
+          baseClass->getType()->getAsCXXRecordDecl(),
+          Out
+        );
+    }
+  }
+}
+
+// r4start
+static void GenerateRTTI(MangleContext& Context,
+                         const CXXRecordDecl *RD,
+                         llvm::raw_ostream& Out)
+{
+  // If we have base classes
+  // we build vftables, start form last.
+  if (RD->getNumBases() != 0) 
+  {
+    GenerateVFTables(Context, RD, Out);
+
+    if (RD->getNumVBases())
+    {
+      GenerateVBTables(Context, RD, Out);
+    }
+
+    GenerateCompleteObjectLocatorData(Context, RD, Out);
+
+    // Mangle type descriptor
+    Context.mangleCXXRTTI(RD->getASTContext().getRecordType(RD), Out);
+
+    // type_info vftable
+    Context.getMsExtensions()->
+      mangleCXXVFTableByClassName(
+        llvm::StringRef("type_info"),
+        llvm::StringRef(), 
+        Out
+      );
+
+    Context.getMsExtensions()->
+      mangleCXXRTTIClassHierarhyDescriptor(RD, Out);
+
+    Context.getMsExtensions()->
+      mangleCXXRTTIBaseClassArray(RD, Out);
+
+    // For this class
+    Context.getMsExtensions()->
+      mangleCXXRTTIBaseClassDescriptor(RD, 0, 0, 0, "EA", Out);
+
+    GenerateBaseClassDescriptorsArray(Context, RD, Out);
+
+    // If we have more than 1 base class then
+    // their COL just appends to the end
+    if (RD->getNumBases() > 1) 
+    {
+      GenerateCOLTail(Context, RD, Out);
+    }
+  }
+  else
+  {
+   Context.mangleCXXVTable(RD, 0, Out);
+  }
+}
+*/
+
 llvm::Constant *RTTIBuilder::BuildTypeInfo(QualType Ty, bool Force) {
+  // r4start
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    assert(false && "Must call BuildMSTypeInfo");
+  }
+
   // We want to operate on the canonical type.
   Ty = CGM.getContext().getCanonicalType(Ty);
 
@@ -985,6 +2361,25 @@ llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
     return ObjCRuntime->GetEHType(Ty);
 
   return RTTIBuilder(*this).BuildTypeInfo(Ty);
+}
+
+llvm::Constant *
+CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
+                                         QualType BaseTy,
+                                         bool ForEH) {
+  // Return a bogus pointer if RTTI is disabled, unless it's for EH.
+  // FIXME: should we even be calling this method if RTTI is disabled
+  // and it's not for EH?
+  if (!ForEH && !getContext().getLangOpts().RTTI) {
+    llvm::Type *Int8PtrTy = llvm::Type::getInt8PtrTy(VMContext);
+    return llvm::Constant::getNullValue(Int8PtrTy);
+  }
+  
+  if (ForEH && Ty->isObjCObjectPointerType() && !LangOpts.NeXTRuntime) {
+    return ObjCRuntime->GetEHType(Ty);
+  }
+
+  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
 }
 
 void CodeGenModule::EmitFundamentalRTTIDescriptor(QualType Type) {

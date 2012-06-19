@@ -413,6 +413,11 @@ class IdentifierTable {
   typedef llvm::StringMap<IdentifierInfo*, llvm::BumpPtrAllocator> HashTableTy;
   HashTableTy HashTable;
 
+  // Separate hash table for identifiers defined by MS specific keyword __identifier
+  // Need it because this keyword allow use of reserved keywords as plain identifiers
+  bool AllowMSIdentifier;
+  HashTableTy MSIdentifierHashTable;
+
   IdentifierInfoLookup* ExternalLookup;
 
 public:
@@ -438,6 +443,18 @@ public:
   /// \brief Return the identifier token info for the specified named
   /// identifier.
   IdentifierInfo &get(StringRef Name) {
+
+    // This is fast hack to allow usage of identifiers, registered by __identifier
+    // keyword without this keyword. For example: int __identifier(i); i = 0;
+    if (AllowMSIdentifier && HashTable.find(Name) == HashTable.end()) {
+        HashTableTy::iterator i = MSIdentifierHashTable.find(Name);
+        if (i != MSIdentifierHashTable.end()) {
+            IdentifierInfo *II = i->getValue();
+            assert(II && "MSIdentifierHashTable can't contain empty values");
+            return *II;
+        }
+    }
+
     llvm::StringMapEntry<IdentifierInfo*> &Entry =
       HashTable.GetOrCreateValue(Name);
 
@@ -471,6 +488,26 @@ public:
     II.TokenID = TokenCode;
     assert(II.TokenID == (unsigned) TokenCode && "TokenCode too large");
     return II;
+  }
+
+  IdentifierInfo &getMSIdentifier(StringRef Name) {
+    assert(AllowMSIdentifier);
+    llvm::StringMapEntry<IdentifierInfo*> &Entry =
+        MSIdentifierHashTable.GetOrCreateValue(Name);
+
+    IdentifierInfo *II = Entry.getValue();
+    if (II) return *II;
+    
+    // Lookups failed, make a new IdentifierInfo.
+    void *Mem = getAllocator().Allocate<IdentifierInfo>();
+    II = new (Mem) IdentifierInfo();
+    Entry.setValue(II);
+
+    // Make sure getName() knows how to find the IdentifierInfo
+    // contents.
+    II->Entry = &Entry;
+
+    return *II;
   }
 
   /// \brief Gets an IdentifierInfo for the given name without consulting

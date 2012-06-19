@@ -7492,6 +7492,11 @@ static bool CheckForModifiableLvalue(Expr *E, SourceLocation Loc, Sema &S) {
     IsLV = Expr::MLV_InvalidMessageExpression;
   if (IsLV == Expr::MLV_Valid)
     return false;
+#if 1
+  // DAEMON!!!
+  if (S.getLangOpts().MicrosoftMode && IsLV == Expr::MLV_LValueCast)
+    return false;
+#endif
 
   unsigned Diag = 0;
   bool NeedType = false;

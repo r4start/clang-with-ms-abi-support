@@ -1746,7 +1746,7 @@ private:
   TPResult
   isCXXDeclarationSpecifier(TPResult BracedCastResult = TPResult::False(),
                             bool *HasMissingTypename = 0);
-
+  
   /// \brief Determine whether an identifier has been tentatively declared as a
   /// non-type. Such tentative declarations should not be found to name a type
   /// during a tentative parse, but also should not be annotated as a non-type.
@@ -1851,6 +1851,14 @@ private:
     if (getLangOpts().MicrosoftExt && Tok.is(tok::l_square))
       ParseMicrosoftAttributes(attrs, endLoc);
   }
+  
+  //DAEMON
+  SourceLocation ParseMicrosoftAttributeArgs(Sema::NamedArgsMap& NamedArgs, 
+                                             ExprVector& UnnamedArgs, 
+                                             RecordDecl* RD);
+  SourceLocation MaybeParseMicrosoftAttributeArgs(ExprVector &ArgExprs, RecordDecl* RD);
+  void ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
+                                        SourceLocation *EndLoc = 0);
   void ParseMicrosoftAttributes(ParsedAttributes &attrs,
                                 SourceLocation *endLoc = 0);
   void ParseMicrosoftDeclSpec(ParsedAttributes &Attrs);
@@ -1982,6 +1990,10 @@ private:
   isCXX11AttributeSpecifier(bool Disambiguate = false,
                             bool OuterMightBeMessageSend = false);
 
+  // DAEMON
+  bool isMicrosoftAttributeSpecifier(bool FullLookahead = false, 
+                                 tok::TokenKind *After = 0);
+  
   Decl *ParseNamespace(unsigned Context, SourceLocation &DeclEnd,
                        SourceLocation InlineLoc = SourceLocation());
   void ParseInnerNamespace(std::vector<SourceLocation>& IdentLoc,

@@ -288,6 +288,11 @@ def err_unspecified_vla_size_with_static : Error<
 
 def err_expected_case_before_expression: Error<
   "expected 'case' keyword before expression">;
+  
+def err_attr_named_args_pos: Error<
+  "unnamed arguments must precede named arguments">;
+def err_attr_not_support_unnamed_args: Error<
+  "'%0' attribute does not support unnamed arguments">;
 
 // Declarations.
 def err_typename_requires_specqual : Error<

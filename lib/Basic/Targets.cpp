@@ -2497,7 +2497,7 @@ class WindowsX86_32TargetInfo : public WindowsTargetInfo<X86_32TargetInfo> {
 public:
   WindowsX86_32TargetInfo(const std::string& triple)
     : WindowsTargetInfo<X86_32TargetInfo>(triple) {
-    TLSSupported = false;
+    TLSSupported = true;
     WCharType = UnsignedShort;
     DoubleAlign = LongLongAlign = 64;
     DescriptionString = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
@@ -2712,7 +2712,7 @@ class WindowsX86_64TargetInfo : public WindowsTargetInfo<X86_64TargetInfo> {
 public:
   WindowsX86_64TargetInfo(const std::string& triple)
     : WindowsTargetInfo<X86_64TargetInfo>(triple) {
-    TLSSupported = false;
+    TLSSupported = true;
     WCharType = UnsignedShort;
     LongWidth = LongAlign = 32;
     DoubleAlign = LongLongAlign = 64;

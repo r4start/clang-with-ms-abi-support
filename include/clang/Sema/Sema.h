@@ -42,6 +42,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/DenseSet.h"
 #include <deque>
 #include <string>
 
@@ -2227,6 +2228,48 @@ public:
   /// \brief Stmt attributes - this routine is the top level dispatcher.
   StmtResult ProcessStmtAttributes(Stmt *Stmt, AttributeList *Attrs,
                                    SourceRange Range);
+
+
+  class MicrosoftAttributeDescriptor
+  {
+  private:
+      RecordDecl* Decl;
+      IdentifierInfo *AttrII;
+
+  public:
+      MicrosoftAttributeDescriptor(RecordDecl* Decl);
+
+      RecordDecl* getDecl() { return Decl; }
+      const RecordDecl* getDecl() const { return Decl; }
+
+      IdentifierInfo *getAttrII() const { return AttrII; }
+      bool CheckArgs(ExprVector& args);
+  };
+
+  NamespaceDecl* MicrosoftVcAttributesNamespace;
+  bool isPredefinedMsAttribute(RecordDecl* RD);
+  bool isMsAttr(RecordDecl* RD);
+  void WarnAmbiguousAttr(Sema& S, IdentifierInfo &II, 
+                             SourceLocation NameLoc, 
+                             RecordDecl** RD, size_t RDCount);
+  RecordDecl* FindMsAttributeInVcAttrs(IdentifierInfo *II);
+  IdentifierInfo* CorrectMsAttributeName(IdentifierInfo* II, RecordDecl* RD);
+  RecordDecl* FindMsAttribute(IdentifierInfo *&II, SourceLocation NameLoc,
+                              Scope *S, CXXScopeSpec *SS = 0);
+
+  typedef llvm::SmallVector< std::pair<UnqualifiedId, Expr*>, 8> NamedArgsMap;
+  typedef llvm::DenseSet<NamedDecl*> UsedNamesMap;
+  bool AddNamedAttributeArg(const UnqualifiedId& Id, 
+                            RecordDecl* RD,
+                            ExprVector &ArgExprs, 
+                            UsedNamesMap& UsedNames,
+                            Expr* ValueExpr);
+  bool CheckMsAttributeArgs(SourceLocation ArgLocation, 
+                            RecordDecl* RD,
+                            ExprVector &UnnamedArgs, 
+                            NamedArgsMap& NamedArgs,
+                            ExprVector &ArgExprs);  
+  void AddMsAttributeDefaultValues(RecordDecl* RD, ExprVector &ArgExprs);  
 
   void WarnUndefinedMethod(SourceLocation ImpLoc, ObjCMethodDecl *method,
                            bool &IncompleteImpl, unsigned DiagID);

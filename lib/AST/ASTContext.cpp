@@ -6672,6 +6672,21 @@ QualType ASTContext::mergeTypes(QualType LHS, QualType RHS,
   case Type::Enum:
     return QualType();
   case Type::Builtin:
+    // DAEMON!!!
+    if (getLangOpts().MicrosoftMode && !getLangOpts().CPlusPlus) {
+        const BuiltinType* blhs = LHS->getAs<BuiltinType>();
+        const BuiltinType* brhs = RHS->getAs<BuiltinType>();
+        if (getLangOpts().CharIsSigned) {
+            if ((blhs->getKind() == BuiltinType::Char_S && brhs->getKind() == BuiltinType::SChar) ||
+                (brhs->getKind() == BuiltinType::Char_S && blhs->getKind() == BuiltinType::SChar))
+                return LHS;
+        }
+        else {
+            if ((blhs->getKind() == BuiltinType::Char_U && brhs->getKind() == BuiltinType::UChar) ||
+                (brhs->getKind() == BuiltinType::Char_U && blhs->getKind() == BuiltinType::UChar))
+                return LHS;
+        }
+    }
     // Only exactly equal builtin types are compatible, which is tested above.
     return QualType();
   case Type::Complex:
@@ -7182,7 +7197,8 @@ GVALinkage ASTContext::GetGVALinkageForFunction(const FunctionDecl *FD) {
   if (!FD->isInlined())
     return External;
     
-  if (!getLangOpts().CPlusPlus || FD->hasAttr<GNUInlineAttr>()) {
+  if (!getLangOpts().CPlusPlus && !getLangOpts().MicrosoftMode 
+      || FD->hasAttr<GNUInlineAttr>()) {
     // GNU or C99 inline semantics. Determine whether this symbol should be
     // externally visible.
     if (FD->isInlineDefinitionExternallyVisible())

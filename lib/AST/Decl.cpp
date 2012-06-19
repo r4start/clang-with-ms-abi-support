@@ -1955,7 +1955,7 @@ bool FunctionDecl::isInlined() const {
   return false;
 }
 
-static bool RedeclForcesDefC99(const FunctionDecl *Redecl) {
+static bool RedeclForcesDefC99(const FunctionDecl *Redecl, ASTContext& Context) {
   // Only consider file-scope declarations in this test.
   if (!Redecl->getLexicalDeclContext()->isTranslationUnit())
     return false;
@@ -2011,7 +2011,7 @@ bool FunctionDecl::doesDeclarationForceExternallyVisibleDefinition() const {
     return FoundBody;
   }
 
-  if (Context.getLangOpts().CPlusPlus)
+  if (Context.getLangOpts().CPlusPlus || Context.getLangOpts().MicrosoftMode)
     return false;
 
   // C99 6.7.4p6:
@@ -2024,7 +2024,7 @@ bool FunctionDecl::doesDeclarationForceExternallyVisibleDefinition() const {
   bool FoundBody = false;
   while ((Prev = Prev->getPreviousDecl())) {
     FoundBody |= Prev->Body;
-    if (RedeclForcesDefC99(Prev))
+    if (RedeclForcesDefC99(Prev, Context))
       return false;
   }
   return FoundBody;
@@ -2082,7 +2082,7 @@ bool FunctionDecl::isInlineDefinitionExternallyVisible() const {
   for (redecl_iterator Redecl = redecls_begin(), RedeclEnd = redecls_end();
        Redecl != RedeclEnd;
        ++Redecl) {
-    if (RedeclForcesDefC99(*Redecl))
+    if (RedeclForcesDefC99(*Redecl, Context))
       return true;
   }
   
