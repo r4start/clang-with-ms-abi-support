@@ -64,6 +64,8 @@ const char *getTokenName(enum TokenKind Kind);
 /// Preprocessor::getSpelling().
 const char *getTokenSimpleSpelling(enum TokenKind Kind);
 
+const char *getKeywordIdentifier(enum TokenKind Kind);
+
 }  // end namespace tok
 }  // end namespace clang
 

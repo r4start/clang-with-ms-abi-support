@@ -1398,7 +1398,8 @@ public:
 
   /// GenerateThunk - Generate a thunk for the given method.
   void GenerateThunk(llvm::Function *Fn, const CGFunctionInfo &FnInfo,
-                     GlobalDecl GD, const ThunkInfo &Thunk);
+                     GlobalDecl GD, const ThunkInfo &Thunk,
+                     const CXXRecordDecl *MostDerived = 0);
 
   void GenerateVarArgsThunk(llvm::Function *Fn, const CGFunctionInfo &FnInfo,
                             GlobalDecl GD, const ThunkInfo &Thunk);
@@ -1428,6 +1429,23 @@ public:
                                 VisitedVirtualBasesSetTy& VBases);
 
   void InitializeVTablePointers(const CXXRecordDecl *ClassDecl);
+
+  /// r4start
+  void MSInitializeVBTablePointer(llvm::Constant *VBTable, CharUnits Offset);
+
+  /// r4start
+  void MSInitializeVBTablePointers(const CXXRecordDecl *Class);
+
+  /// r4start
+  void MSInitializeVFTablePointer(llvm::Constant *VFTable, CharUnits Offset);
+
+  /// r4start
+  void MSInitializeVFTablePointers(const CXXRecordDecl *MostDerived,
+                                   const CXXRecordDecl *RD, 
+                                   const CXXRecordDecl *Base);
+
+  /// r4start
+  void MSInitializeVFTablePointers(const CXXRecordDecl *Class);
 
   /// GetVTablePtr - Return the Value of the vtable pointer member pointed
   /// to by This.
@@ -2230,7 +2248,8 @@ public:
                            llvm::Value *This,
                            llvm::Value *VTT,
                            CallExpr::const_arg_iterator ArgBeg,
-                           CallExpr::const_arg_iterator ArgEnd);
+                           CallExpr::const_arg_iterator ArgEnd,
+                           bool CompleteCtorCall = false);
   RValue EmitCXXMemberCallExpr(const CXXMemberCallExpr *E,
                                ReturnValueSlot ReturnValue);
   RValue EmitCXXMemberPointerCallExpr(const CXXMemberCallExpr *E,

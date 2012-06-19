@@ -853,16 +853,26 @@ void EmitClangAttrList(RecordKeeper &Records, raw_ostream &OS) {
         " INHERITABLE_PARAM_ATTR(NAME)\n";
   OS << "#endif\n\n";
 
+  OS << "#ifndef MS_SA_ATTR\n";
+  OS << "#define MS_SA_ATTR(NAME) INHERITABLE_ATTR(NAME)\n";
+  OS << "#endif\n\n";
+
+  OS << "#ifndef LAST_MS_SA_ATTR\n";
+  OS << "#define LAST_MS_SA_ATTR(NAME) MS_SA_ATTR(NAME)\n";
+  OS << "#endif\n\n";
+
   Record *InhClass = Records.getClass("InheritableAttr");
   Record *InhParamClass = Records.getClass("InheritableParamAttr");
+  Record *MsSAClass = Records.getClass("MsSAAttr");
   std::vector<Record*> Attrs = Records.getAllDerivedDefinitions("Attr"),
-                       NonInhAttrs, InhAttrs, InhParamAttrs;
+                       NonInhAttrs, InhAttrs, InhParamAttrs, MsSAAttrs;
   for (std::vector<Record*>::iterator i = Attrs.begin(), e = Attrs.end();
        i != e; ++i) {
     if (!(*i)->getValueAsBit("ASTNode"))
       continue;
-    
-    if ((*i)->isSubClassOf(InhParamClass))
+    if ((*i)->isSubClassOf(MsSAClass))
+      MsSAAttrs.push_back(*i);
+    else if ((*i)->isSubClassOf(InhParamClass))
       InhParamAttrs.push_back(*i);
     else if ((*i)->isSubClassOf(InhClass))
       InhAttrs.push_back(*i);
@@ -870,14 +880,17 @@ void EmitClangAttrList(RecordKeeper &Records, raw_ostream &OS) {
       NonInhAttrs.push_back(*i);
   }
 
+  EmitAttrList(OS, "MS_SA_ATTR", MsSAAttrs);
   EmitAttrList(OS, "INHERITABLE_PARAM_ATTR", InhParamAttrs);
   EmitAttrList(OS, "INHERITABLE_ATTR", InhAttrs);
   EmitAttrList(OS, "ATTR", NonInhAttrs);
 
   OS << "#undef LAST_ATTR\n";
+  OS << "#undef MS_SA_ATTR\n";
   OS << "#undef INHERITABLE_ATTR\n";
   OS << "#undef LAST_INHERITABLE_ATTR\n";
   OS << "#undef LAST_INHERITABLE_PARAM_ATTR\n";
+  OS << "#undef LAST_MS_SA_ATTR\n";
   OS << "#undef ATTR\n";
 }
 

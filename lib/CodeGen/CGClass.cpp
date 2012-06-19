@@ -272,11 +272,13 @@ CodeGenFunction::GetAddressOfDerivedClass(llvm::Value *Value,
   return Value;
 }
                              
+/// r4start
 /// GetVTTParameter - Return the VTT parameter that should be passed to a
 /// base constructor/destructor with virtual bases.
 static llvm::Value *GetVTTParameter(CodeGenFunction &CGF, GlobalDecl GD,
                                     bool ForVirtualBase) {
-  if (!CodeGenVTables::needsVTTParameter(GD)) {
+  if (!CodeGenVTables::needsVTTParameter(GD) ||
+      CGF.CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
     // This constructor/destructor does not need a VTT parameter.
     return 0;
   }
@@ -403,7 +405,7 @@ static void EmitBaseInitializer(CodeGenFunction &CGF,
                           AggValueSlot::DoesNotNeedGCBarriers,
                           AggValueSlot::IsNotAliased);
 
-  CGF.EmitAggExpr(BaseInit->getInit(), AggSlot);
+  CGF.EmitAggExpr(BaseInit->getInit(), AggSlot, false);
   
   if (CGF.CGM.getLangOpts().Exceptions && 
       !BaseClassDecl->hasTrivialDestructor())
@@ -710,6 +712,7 @@ static bool IsConstructorDelegationValid(const CXXConstructorDecl *Ctor) {
   return true;
 }
 
+/// r4start
 /// EmitConstructorBody - Emits the body of the current constructor.
 void CodeGenFunction::EmitConstructorBody(FunctionArgList &Args) {
   const CXXConstructorDecl *Ctor = cast<CXXConstructorDecl>(CurGD.getDecl());
@@ -767,6 +770,47 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
     return EmitDelegatingCXXConstructorCall(CD, Args);
 
   const CXXRecordDecl *ClassDecl = CD->getParent();
+  llvm::SmallPtrSet<CXXCtorInitializer *, 8> VisitedCtorInitializers;
+
+  // r4start
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
+      ClassDecl->getNumVBases()) {
+    llvm::Constant *Zero = llvm::ConstantInt::get(CGM.Int32Ty, 0);
+    llvm::Value *FlagParam = 
+      (++(CurFn->arg_begin()))->getValueName()->getValue();
+    llvm::Value *Condition = Builder.CreateICmpEQ(Zero, FlagParam, "spices");
+
+    llvm::BasicBlock *VBTableInit = 
+      llvm::BasicBlock::Create(CGM.getLLVMContext(), "vbtable.init", CurFn);
+    llvm::BasicBlock *VBTableSkipInit = 
+      llvm::BasicBlock::Create(CGM.getLLVMContext(), "skip.vbtable.init");
+
+    Builder.CreateCondBr(Condition, VBTableInit, VBTableSkipInit);
+
+    Builder.SetInsertPoint(VBTableInit);
+
+    MSInitializeVBTablePointers(ClassDecl);
+
+    // In MS ABI we must emit virtual base initializers before vf-table init.
+    for (CXXConstructorDecl::init_const_iterator M = CD->init_begin(),
+         E = CD->init_end(); M != E; ++M) {
+      CXXCtorInitializer *Member = *M;
+      
+      if (Member->isBaseInitializer()) {
+        CXXRecordDecl *BaseClass = 
+          Member->getBaseClass()->getAsCXXRecordDecl();
+        if (ClassDecl->isVirtuallyDerivedFrom(BaseClass)) {
+          VisitedCtorInitializers.insert(Member);
+          EmitBaseInitializer(*this, ClassDecl, Member, CtorType);
+        }
+      }
+    }
+
+    Builder.CreateBr(VBTableSkipInit);
+
+    CurFn->getBasicBlockList().push_back(VBTableSkipInit);
+    Builder.SetInsertPoint(VBTableSkipInit);
+  }
 
   SmallVector<CXXCtorInitializer *, 8> MemberInitializers;
   
@@ -846,8 +890,7 @@ HasTrivialDestructorBody(ASTContext &Context,
 
 static bool
 FieldHasTrivialDestructorBody(ASTContext &Context,
-                              const FieldDecl *Field)
-{
+                              const FieldDecl *Field) {
   QualType FieldBaseElementType = Context.getBaseElementType(Field->getType());
 
   const RecordType *RT = FieldBaseElementType->getAs<RecordType>();
@@ -1258,7 +1301,8 @@ CodeGenFunction::EmitCXXConstructorCall(const CXXConstructorDecl *D,
   llvm::Value *VTT = GetVTTParameter(*this, GlobalDecl(D, Type), ForVirtualBase);
   llvm::Value *Callee = CGM.GetAddrOfCXXConstructor(D, Type);
 
-  EmitCXXMemberCall(D, Callee, ReturnValueSlot(), This, VTT, ArgBeg, ArgEnd);
+  EmitCXXMemberCall(D, Callee, ReturnValueSlot(), This, VTT, ArgBeg, ArgEnd, 
+                    Type == Ctor_Complete);
 }
 
 void
@@ -1476,6 +1520,8 @@ CodeGenFunction::InitializeVTablePointer(BaseSubobject Base,
   // Compute the address point.
   llvm::Value *VTableAddressPoint;
 
+  // r4start
+  if (Target.getCXXABI() != CXXABI_Microsoft) {
   // Check if we need to use a vtable from the VTT.
   if (CodeGenVTables::needsVTTParameter(CurGD) &&
       (RD->getNumVBases() || NearestVBase)) {
@@ -1495,6 +1541,9 @@ CodeGenFunction::InitializeVTablePointer(BaseSubobject Base,
       CGM.getVTableContext().getVTableLayout(VTableClass).getAddressPoint(Base);
     VTableAddressPoint =
       Builder.CreateConstInBoundsGEP2_64(VTable, 0, AddressPoint);
+  }
+  } else {
+   llvm_unreachable("Use MSInitializeVFTablePointer padawan!");
   }
 
   // Compute where to store the address point.
@@ -1593,6 +1642,11 @@ void CodeGenFunction::InitializeVTablePointers(const CXXRecordDecl *RD) {
   if (!RD->isDynamicClass())
     return;
 
+  // r4start
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    return MSInitializeVFTablePointers(RD);
+  }
+
   // Get the VTable.
   llvm::Constant *VTable = CGM.getVTables().GetAddrOfVTable(RD);
 
@@ -1603,6 +1657,172 @@ void CodeGenFunction::InitializeVTablePointers(const CXXRecordDecl *RD) {
                            /*OffsetFromNearestVBase=*/CharUnits::Zero(),
                            /*BaseIsNonVirtualPrimaryBase=*/false, 
                            VTable, RD, VBases);
+}
+
+void CodeGenFunction::MSInitializeVBTablePointer(llvm::Constant *VBTable,
+                                                 CharUnits Offset) {
+  llvm::Value *ThisPtr = LoadCXXThis();
+
+  ThisPtr = Builder.CreateBitCast(ThisPtr, Int8PtrTy);
+
+  llvm::Value *VBPtr = 
+    Builder.CreateConstInBoundsGEP1_64(ThisPtr, Offset.getQuantity(), 
+                                       "vbptr.field");
+
+  llvm::Value *VBTableAddressPoint = 
+    Builder.CreateConstInBoundsGEP1_64(VBTable, 0, "vbtable.addr");
+
+  llvm::Type *AddressPointerTy = VBTableAddressPoint->getType()->getPointerTo();
+  VBPtr = Builder.CreateBitCast(VBPtr, AddressPointerTy, "vbptr");
+
+  Builder.CreateStore(VBTableAddressPoint, VBPtr);
+}
+
+// r4start
+void CodeGenFunction::MSInitializeVBTablePointers(const CXXRecordDecl *Class) {
+  assert(Class && "Can not generate vb-table for null class!");
+
+  if (!Class->getNumVBases())
+    return;
+  
+  VBTableContext& Context = CGM.getVBTableContext();
+  auto VBTables = Context.getVBTables(Class);
+  for (auto I = VBTables.begin(), E = VBTables.end(); I != E; ++I) {
+    llvm::GlobalVariable *VBTable = 
+      CGM.getVTables().GetAddrOfVBTable(Class, I->first);
+
+    const VBTableContext::BaseVBTableTy &Table = I->second;
+
+    llvm::SmallVector<llvm::Constant *, 32> Offsets;
+
+    for (VBTableContext::BaseVBTableTy::const_iterator I = Table.begin(),
+         E = Table.end(); I != E; ++I) {
+      VBTableContext::VBTableEntry Entry = I->first;
+
+      Offsets.push_back(llvm::ConstantInt::get(Int32Ty, Entry.offset));
+    }
+
+    llvm::ArrayType *VBTableType = llvm::ArrayType::get(Int32Ty, Table.size());
+    llvm::Constant *Init = llvm::ConstantArray::get(VBTableType, Offsets);
+
+    VBTable->setInitializer(Init);
+    MSInitializeVBTablePointer(VBTable, 
+                       CharUnits::fromQuantity(-(Table.begin()->first.offset)));
+  }
+}
+
+// r4start
+void CodeGenFunction::MSInitializeVFTablePointer(llvm::Constant *VFTable,
+                                                 CharUnits Offset) {
+  llvm::Value *ThisPtr = LoadCXXThis();
+
+  ThisPtr = Builder.CreateBitCast(ThisPtr, Int8PtrTy);
+
+  llvm::Value *VFPtr = 
+    Builder.CreateConstInBoundsGEP1_64(ThisPtr, Offset.getQuantity(), 
+                                       "vfptr.field");
+
+  llvm::Value *VTableAddressPoint = 
+    Builder.CreateConstInBoundsGEP2_64(VFTable, 0, 1, "vtable.addr");
+
+  llvm::Type *AddressPointerTy = VTableAddressPoint->getType()->getPointerTo();
+  VFPtr = Builder.CreateBitCast(VFPtr, AddressPointerTy, "vfptr");
+
+  Builder.CreateStore(VTableAddressPoint, VFPtr);
+}
+
+static CharUnits GetClassOffset(const ASTContext &Ctx,
+                                const CXXRecordDecl *RD,
+                                const CXXRecordDecl *Base) {
+  assert(RD != Base && 
+         "GetClassOffset can`t work if RD equal Base");
+
+  CharUnits BaseOffset;
+
+  if (RD->isVirtuallyDerivedFrom(const_cast<CXXRecordDecl *>(Base))) {
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
+    return Layout.getVBaseClassOffset(Base);
+  }
+
+  CXXBasePaths InhPaths;
+  InhPaths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+  RD->lookupInBases(&CXXRecordDecl::FindBaseClass, 
+                 const_cast<CXXRecordDecl *>(Base), InhPaths);
+
+  assert(InhPaths.begin() != InhPaths.end() &&
+         "Can`t find inheritance path from RD to Base!");
+  
+  CXXBasePath& Path = InhPaths.front();
+
+  for (CXXBasePath::const_iterator I = Path.begin(),
+       E = Path.end(); I != E; ++I) {
+    const CXXRecordDecl *BaseElem = I->Base->getType()->getAsCXXRecordDecl();
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(I->Class);
+
+    if (I->Base->isVirtual())
+      BaseOffset += Layout.getVBaseClassOffset(BaseElem);
+    else
+      BaseOffset += Layout.getBaseClassOffset(BaseElem);
+  }
+
+  return BaseOffset;
+}
+
+// r4start
+void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *MostDerived, 
+                                                  const CXXRecordDecl *RD, 
+                                                  const CXXRecordDecl *Base) {
+  for (CXXRecordDecl::base_class_const_iterator I = Base->bases_begin(),
+       E = Base->bases_end(); I != E; ++I) {
+    const CXXRecordDecl *BaseDecl = I->getType()->getAsCXXRecordDecl();
+
+    if (!BaseDecl->isPolymorphic())
+      continue;
+
+    MSInitializeVFTablePointers(MostDerived, Base, BaseDecl);
+  }
+
+  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(Base);
+  if (Layout.getPrimaryBase() || !Layout.hasOwnVFPtr())
+    return;
+
+  llvm::Constant *VFTable = 
+    CGM.getVTables().GetAddrOfVFTable(MostDerived, Base);
+
+  CharUnits VFPtrOffset = 
+    GetClassOffset(CGM.getContext(), MostDerived, Base) /*+ 
+                                                        Layout.getVFPtrOffset()*/;
+
+  MSInitializeVFTablePointer(VFTable, VFPtrOffset);
+}
+
+// r4start
+void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *RD) {
+  if (!RD->getNumBases()) {
+    // At now only build vftable
+    llvm::Constant *VFTable = CGM.getVTables().GetAddrOfVFTable(RD, 0);
+    MSInitializeVFTablePointer(VFTable, CharUnits::fromQuantity(0));
+    return;
+  }
+
+  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
+
+  if (Layout.hasOwnVFPtr()) {
+    llvm::Constant *VFTable = 
+      CGM.getVTables().GetAddrOfVFTable(RD, 0);
+
+    MSInitializeVFTablePointer(VFTable, CharUnits::fromQuantity(0));
+  }
+
+  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
+       E = RD->bases_end(); I != E; ++I) {
+    const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+
+    if (!Base->isPolymorphic())
+      continue;
+
+    MSInitializeVFTablePointers(RD, RD, Base);
+  }
 }
 
 llvm::Value *CodeGenFunction::GetVTablePtr(llvm::Value *This,

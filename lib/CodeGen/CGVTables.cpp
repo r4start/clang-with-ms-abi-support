@@ -117,6 +117,80 @@ static llvm::Value *PerformTypeAdjustment(CodeGenFunction &CGF,
   return CGF.Builder.CreateBitCast(V, Ptr->getType());
 }
 
+static bool IsDirectBase(const CXXRecordDecl *RD, const CXXRecordDecl *Base) {
+  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
+       E = RD->bases_end(); I != E; ++I) {
+    if (I->getType()->getAsCXXRecordDecl() == Base)
+      return true;
+  }
+  return false;
+}
+
+static llvm::Value *PerformTypeAdjustmentMS(CodeGenFunction &CGF,
+                                            llvm::Value *Ptr,
+                                            const CXXMethodDecl *MD,
+                                            const CXXRecordDecl *MostDerived,
+                                            int64_t NonVirtualAdjustment,
+                                            int64_t VirtualAdjustment,
+                                            bool IsVtordispEx) {
+  if (!NonVirtualAdjustment && !VirtualAdjustment && !IsVtordispEx)
+    return Ptr;
+
+  llvm::Type *Int32PtrTy = llvm::Type::getInt32PtrTy(CGF.getLLVMContext());
+  
+  llvm::Value *V = 
+    CGF.Builder.CreateBitCast(Ptr, CGF.CGM.Int8PtrTy, "this.i8.ptr");
+
+  // If we have vtordisp, use it.
+  if (VirtualAdjustment) {
+    llvm::Value *VtorDispPtr = 
+      CGF.Builder.CreateConstGEP1_32(V, VirtualAdjustment, "vtordisp.ptr");
+
+    VtorDispPtr = 
+      CGF.Builder.CreateBitCast(VtorDispPtr, Int32PtrTy, "vtordisp");
+    
+    // Load the adjustment offset from the vtable.
+    llvm::Value *Offset = 
+      CGF.Builder.CreateLoad(VtorDispPtr, "vtordisp.offset");
+    
+    // Adjust our pointer.
+    V = CGF.Builder.CreateInBoundsGEP(V, Offset, "vtordisp.this");
+  }
+
+  if (IsVtordispEx) {
+    assert(MostDerived && "Can not build vtordispex thunk!");
+
+    VBTableContext &VBTableCtx = CGF.CGM.getVBTableContext();
+
+    const VBTableContext::VBTableEntry &Entry = 
+      VBTableCtx.getEntryFromVBTable(MostDerived, MostDerived, MD->getParent());
+    const VBTableContext::VBTableEntry &FirstEntry = 
+      VBTableCtx.getEntryFromVBTable(MostDerived, MostDerived, MostDerived);
+      
+    llvm::Value *VBPtr = 
+      CGF.Builder.CreateConstGEP1_32(V, FirstEntry.offset, "vbptr.ptr");
+
+    VBPtr = CGF.Builder.CreateBitCast(VBPtr, Int32PtrTy, "vbptr");
+
+    VBPtr = 
+      CGF.Builder.CreateConstGEP1_32(VBPtr, Entry.index, "vbtable.offset");
+
+    llvm::Value *OffsetFromVBTable = 
+      CGF.Builder.CreateLoad(VBPtr, "vbase.offset");
+
+    V = CGF.Builder.CreateGEP(V, OffsetFromVBTable, "this.plus.vb.offset");
+  }
+
+  if (NonVirtualAdjustment) {
+    // Do the non-virtual adjustment.
+    V = CGF.Builder.CreateConstGEP1_32(V, NonVirtualAdjustment, 
+                                       "adjusted.this");
+  }
+
+  // Cast back to the original type.
+  return CGF.Builder.CreateBitCast(V, Ptr->getType(), "final.this");
+}
+
 static void setThunkVisibility(CodeGenModule &CGM, const CXXMethodDecl *MD,
                                const ThunkInfo &Thunk, llvm::Function *Fn) {
   CGM.setGlobalVisibility(Fn, MD);
@@ -302,7 +376,8 @@ void CodeGenFunction::GenerateVarArgsThunk(
 
 void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
                                     const CGFunctionInfo &FnInfo,
-                                    GlobalDecl GD, const ThunkInfo &Thunk) {
+                                    GlobalDecl GD, const ThunkInfo &Thunk,
+                                    const CXXRecordDecl *MostDerived) {
   const CXXMethodDecl *MD = cast<CXXMethodDecl>(GD.getDecl());
   const FunctionProtoType *FPT = MD->getType()->getAs<FunctionProtoType>();
   QualType ResultType = FPT->getResultType();
@@ -332,8 +407,17 @@ void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
   CXXThisValue = CXXABIThisValue;
 
   // Adjust the 'this' pointer if necessary.
-  llvm::Value *AdjustedThisPtr = 
-    PerformTypeAdjustment(*this, LoadCXXThis(), 
+  llvm::Value *AdjustedThisPtr;
+  const CXXRecordDecl *Base = MD->getParent();
+  /// r4start
+  if (getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft)
+    AdjustedThisPtr = PerformTypeAdjustmentMS(*this, LoadCXXThis(), MD,
+                                              MostDerived, 
+                                              Thunk.This.NonVirtual,
+                                              Thunk.This.VCallOffsetOffset,
+                                              Thunk.IsVtordispEx);
+  else
+    AdjustedThisPtr = PerformTypeAdjustment(*this, LoadCXXThis(), 
                           Thunk.This.NonVirtual, 
                           Thunk.This.VCallOffsetOffset);
   
@@ -396,7 +480,8 @@ void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
 }
 
 void CodeGenVTables::EmitThunk(GlobalDecl GD, const ThunkInfo &Thunk, 
-                               bool UseAvailableExternallyLinkage)
+                               bool UseAvailableExternallyLinkage,
+                               const CXXRecordDecl *MostDerived)
 {
   const CGFunctionInfo &FnInfo = CGM.getTypes().arrangeGlobalDeclaration(GD);
 
@@ -461,7 +546,7 @@ void CodeGenVTables::EmitThunk(GlobalDecl GD, const ThunkInfo &Thunk,
       CodeGenFunction(CGM).GenerateVarArgsThunk(ThunkFn, FnInfo, GD, Thunk);
   } else {
     // Normal thunk body generation.
-    CodeGenFunction(CGM).GenerateThunk(ThunkFn, FnInfo, GD, Thunk);
+    CodeGenFunction(CGM).GenerateThunk(ThunkFn, FnInfo, GD, Thunk, MostDerived);
   }
 
   if (UseAvailableExternallyLinkage)
@@ -483,8 +568,7 @@ void CodeGenVTables::MaybeEmitThunkAvailableExternally(GlobalDecl GD,
   EmitThunk(GD, Thunk, /*UseAvailableExternallyLinkage=*/true);
 }
 
-void CodeGenVTables::EmitThunks(GlobalDecl GD)
-{
+void CodeGenVTables::EmitThunks(GlobalDecl GD) {
   const CXXMethodDecl *MD = 
     cast<CXXMethodDecl>(GD.getDecl())->getCanonicalDecl();
 
@@ -492,8 +576,12 @@ void CodeGenVTables::EmitThunks(GlobalDecl GD)
   if (isa<CXXDestructorDecl>(MD) && GD.getDtorType() == Dtor_Base)
     return;
 
-  const VTableContext::ThunkInfoVectorTy *ThunkInfoVector =
-    VTContext.getThunkInfo(MD);
+  const VTableContext::ThunkInfoVectorTy *ThunkInfoVector = 0;
+  if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+    ThunkInfoVector = VTContext.getThunkInfo(MD);
+  } else {
+    ThunkInfoVector = VTContext.getThunkInfoMS(MD);
+  }
   if (!ThunkInfoVector)
     return;
 
@@ -611,6 +699,204 @@ CodeGenVTables::CreateVTableInitializer(const CXXRecordDecl *RD,
   return llvm::ConstantArray::get(ArrayType, Inits);
 }
 
+llvm::Constant *
+CodeGenVTables::CreateVFTableInitializer(const CXXRecordDecl *RD,
+                                         const CXXRecordDecl *Base,
+                                         const VTableComponent *Components, 
+                                         unsigned NumComponents,
+                               const VTableLayout::VTableThunkTy *VTableThunks,
+                                         unsigned NumVTableThunks) {
+  SmallVector<llvm::Constant *, 64> Inits;
+
+  llvm::Type *PtrDiffTy = 
+    CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
+
+  QualType ClassType = CGM.getContext().getTagDeclType(RD);
+  QualType BaseType = CGM.getContext().getTagDeclType(Base);
+
+  llvm::Constant* PureVirtualFn = 0;
+
+  llvm::Constant *RTTI = CGM.GetAddrOfMSRTTIDescriptor(ClassType, BaseType);
+  unsigned NextVTableThunkIndex = 0;
+
+  for (unsigned I = 0; I < NumComponents; ++I) {
+    llvm::Constant *Init;
+    VTableComponent Component = Components[I];
+
+    switch (Component.getKind()) {
+    case VTableComponent::CK_RTTI:
+      Init = llvm::ConstantExpr::getBitCast(RTTI, CGM.Int8PtrTy);
+      break;
+    case VTableComponent::CK_CompleteDtorPointer:
+    case VTableComponent::CK_FunctionPointer: {
+        GlobalDecl GD;
+
+        switch (Component.getKind()) {
+        case VTableComponent::CK_FunctionPointer:
+          GD = Component.getFunctionDecl();
+          break;
+        case VTableComponent::CK_CompleteDtorPointer:
+          // In MS ABI this is 'scalar deleting destructor'.
+          GD = GlobalDecl(Component.getDestructorDecl(), Dtor_Complete);
+          break;
+        case VTableComponent::CK_DeletingDtorPointer:
+          // In MS ABI this is 'vector deleting destructor'.
+          GD = GlobalDecl(Component.getDestructorDecl(), Dtor_Deleting);
+          break;
+        default:
+          llvm_unreachable("Vftable containes RTTI info and FunctionPtrs!!!");
+        }
+        
+        if (cast<CXXMethodDecl>(GD.getDecl())->isPure()) {
+          // We have a pure virtual member function.
+          if (!PureVirtualFn) {
+            llvm::FunctionType *Ty = 
+              llvm::FunctionType::get(CGM.VoidTy, /*isVarArg=*/false);
+            PureVirtualFn = 
+              CGM.CreateRuntimeFunction(Ty, "_purecall");
+            PureVirtualFn = llvm::ConstantExpr::getBitCast(PureVirtualFn, 
+                                                           CGM.Int8PtrTy);
+          }
+
+          Init = PureVirtualFn;
+        } else {
+          if (NextVTableThunkIndex < NumVTableThunks &&
+            VTableThunks[NextVTableThunkIndex].first == I) {
+            const ThunkInfo &Thunk = VTableThunks[NextVTableThunkIndex].second;
+
+            llvm::Type *Ty = CGM.getTypes().GetFunctionTypeForVTable(GD);
+            CGM.GetAddrOfFunction(GD, Ty, /*ForVTable=*/true);
+
+            Init = CGM.GetAddrOfThunk(GD, Thunk);
+            MaybeEmitThunkAvailableExternally(GD, Thunk);
+            // TODO: Do for RD thunks deferred generation.
+            EmitThunk(GD, Thunk, true, RD);
+
+            NextVTableThunkIndex++;
+          } else {
+            llvm::Type *Ty = CGM.getTypes().GetFunctionTypeForVTable(GD);
+            Init = CGM.GetAddrOfFunction(GD, Ty, /*ForVTable=*/true);
+          }
+          Init = llvm::ConstantExpr::getBitCast(Init, CGM.Int8PtrTy);
+        }
+        break;
+      }
+    default:
+      llvm_unreachable("Vftable containes RTTI info and FunctionPtrs!!!");
+    }
+    Inits.push_back(Init);
+  }
+
+  llvm::ArrayType *ArrayType = llvm::ArrayType::get(CGM.Int8PtrTy, NumComponents);
+  return llvm::ConstantArray::get(ArrayType, Inits);
+}
+
+// r4start
+llvm::GlobalVariable *
+CodeGenVTables::GetAddrOfVBTable(const CXXRecordDecl *RD,
+                                 const CXXRecordDecl *Base) {
+  llvm::GlobalVariable *&VBTable = MSVBTables[RD][Base];
+  if (VBTable)
+    return VBTable;
+
+  const CXXRecordDecl *BaseDecl = Base;
+  if (BaseDecl == RD)
+    BaseDecl = 0;
+
+  llvm::SmallString<256> Name;
+  llvm::raw_svector_ostream Out(Name);
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleCXXVBTable(RD, BaseDecl, Out);
+  Out.flush();
+
+  llvm::StringRef VBTableName = Name.str();
+
+  VBTableContext& Context = CGM.getVBTableContext();
+  const VBTableContext::BaseVBTableTy &Table = Context.getVBTable(RD, Base);
+
+  llvm::ArrayType *VBTableType = 
+                                llvm::ArrayType::get(CGM.Int32Ty, Table.size());
+
+  VBTable = CGM.CreateOrReplaceCXXRuntimeVariable(Name, VBTableType, 
+                                            llvm::GlobalValue::ExternalLinkage);
+
+  VBTable->setUnnamedAddr(true);
+
+  return VBTable;
+}
+
+// r4start
+llvm::GlobalVariable *
+CodeGenVTables::GetAddrOfVFTable(const CXXRecordDecl *RD,
+                                 const CXXRecordDecl *Base) {
+  const CXXRecordDecl *BaseDecl;
+  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
+
+  if (!Base)
+    BaseDecl = RD;
+  else
+    BaseDecl = Base;
+
+  llvm::GlobalVariable *&VFTable = MSVFTables[RD][BaseDecl];
+  if (VFTable) {
+    return VFTable;
+  }
+
+  if (ShouldEmitVTableInThisTU(RD))
+    CGM.DeferredVTables.push_back(RD);
+   
+  SmallString<256> OutName;
+  llvm::raw_svector_ostream Out(OutName);
+
+  CGM.getCXXABI().getMangleContext().mangleCXXVTable(RD, BaseDecl, Out);
+  
+  Out.flush();
+  StringRef Name = OutName.str();
+
+  llvm::ArrayType *ArrayType = 
+    llvm::ArrayType::get(CGM.Int8PtrTy,
+             VTContext.getVFTableLayout(RD, BaseDecl).getNumVTableComponents());
+
+  VFTable =
+    CGM.CreateOrReplaceCXXRuntimeVariable(Name, ArrayType, 
+                                          llvm::GlobalValue::ExternalLinkage);
+
+  VFTable->setUnnamedAddr(true);
+  return VFTable;
+}
+
+// r4start
+void 
+CodeGenVTables::EmitVFTableDefinition(llvm::GlobalVariable *VFTable,
+                                    llvm::GlobalVariable::LinkageTypes Linkage,
+                                      const CXXRecordDecl *RD, 
+                                      const CXXRecordDecl *Base) {
+  const CXXRecordDecl *BaseDecl = Base;
+  if (!Base)
+    BaseDecl = RD;
+
+  const VTableLayout &VTLayout = VTContext.getVFTableLayout(RD, BaseDecl);
+
+  // Create and set the initializer.
+  llvm::Constant *Init = 
+    CreateVFTableInitializer(RD,
+                             BaseDecl,
+                             VTLayout.vtable_component_begin(),
+                             VTLayout.getNumVTableComponents(),
+                             VTLayout.vtable_thunk_begin(),
+                             VTLayout.getNumVTableThunks());
+
+  VFTable->setInitializer(Init);
+  
+  // Set the correct linkage.
+  VFTable->setLinkage(Linkage);
+  
+  // Set the right visibility.
+  CGM.setTypeVisibility(VFTable, RD, CodeGenModule::TVK_ForVTable);
+}
+
+// r4start
 llvm::GlobalVariable *CodeGenVTables::GetAddrOfVTable(const CXXRecordDecl *RD) {
   llvm::GlobalVariable *&VTable = VTables[RD];
   if (VTable)
@@ -622,7 +908,7 @@ llvm::GlobalVariable *CodeGenVTables::GetAddrOfVTable(const CXXRecordDecl *RD) {
 
   SmallString<256> OutName;
   llvm::raw_svector_ostream Out(OutName);
-  CGM.getCXXABI().getMangleContext().mangleCXXVTable(RD, Out);
+  CGM.getCXXABI().getMangleContext().mangleCXXVTable(RD, 0, Out);
   Out.flush();
   StringRef Name = OutName.str();
 
@@ -706,8 +992,64 @@ CodeGenVTables::GenerateConstructionVTable(const CXXRecordDecl *RD,
 }
 
 void 
+CodeGenVTables::BuildVFTables(const CXXRecordDecl *MostDerivedClass,
+                                   const CXXRecordDecl *RD,
+                                   const CXXRecordDecl *Base,
+                                   llvm::GlobalVariable::LinkageTypes Linkage) {
+  for (CXXRecordDecl::base_class_const_iterator I = Base->bases_begin(),
+       E = Base->bases_end(); I != E; ++I) {
+    const CXXRecordDecl *BaseDecl = I->getType()->getAsCXXRecordDecl();
+
+    if (!BaseDecl->isPolymorphic())
+      continue;
+
+    BuildVFTables(MostDerivedClass, Base, BaseDecl, Linkage);
+  }
+
+  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(Base);
+  if (Layout.getPrimaryBase() ||
+      !Layout.hasOwnVFPtr())
+    return;
+
+  llvm::GlobalVariable *VFTable = GetAddrOfVFTable(MostDerivedClass, Base);
+
+  EmitVFTableDefinition(VFTable, Linkage, MostDerivedClass, Base);
+}
+
+void
+CodeGenVTables::MSGenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
+                                    const CXXRecordDecl *RD) {
+  const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
+
+  if (!RD->getNumBases()) {
+    llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);
+    EmitVFTableDefinition(VFTable, Linkage, RD, 0);
+    return;
+  }
+
+  if (Layout.hasOwnVFPtr()) {
+    llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);
+    EmitVFTableDefinition(VFTable, Linkage, RD, 0);
+  }
+  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
+        E = RD->bases_end(); I != E; ++I) {
+    const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+
+    if (!Base->isPolymorphic())
+      continue;
+
+    BuildVFTables(RD, RD, Base, Linkage);
+  }
+}
+
+void 
 CodeGenVTables::GenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
                                   const CXXRecordDecl *RD) {
+  // r4start
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    return MSGenerateClassData(Linkage, RD);
+  }
+
   llvm::GlobalVariable *VTable = GetAddrOfVTable(RD);
   if (VTable->hasInitializer())
     return;

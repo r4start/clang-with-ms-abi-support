@@ -789,6 +789,9 @@ public:
   typedef llvm::DenseMap<BaseSubobject, uint64_t> 
     AddressPointsMapTy;
 
+  typedef llvm::DenseMap<const CXXMethodDecl *, const CXXMethodDecl *> 
+    OverriddersMapTy;
+
 private:
   /// VTables - Global vtable information.
   VTableContext &VTables;
@@ -875,6 +878,9 @@ private:
   /// most derived class for which the vtable is currently being built.
   ThunksMapTy Thunks;
   
+  typedef llvm::SmallVector<const CXXMethodDecl *, 8> VFTableTy;
+  VFTableTy VFTable;
+  
   /// AddThunk - Add a thunk for the given method.
   void AddThunk(const CXXMethodDecl *MD, const ThunkInfo &Thunk);
   
@@ -904,6 +910,34 @@ private:
   ComputeThisAdjustment(const CXXMethodDecl *MD, 
                         CharUnits BaseOffsetInLayoutClass,
                         FinalOverriders::OverriderInfo Overrider);
+
+  /// MSComputeThisAdjustmentForThunk - Compute the 'this' pointer adjustment.
+  /// In MS ABI this is sly thing. Microsoft compiler generates general
+  /// function. This function works with 'this' = 'this' + adjustment, but
+  /// this new pointer can point to memory after class.
+  /// For example we have such ierarchy:
+  /// class first{
+  ///   int s;
+  /// public:
+  ///   virtual void asdf() {}
+  /// };
+  /// class second : public virtual first {
+  /// public :
+  ///   int q;
+  ///   virtual void asdf() { q = 90; }
+  /// };
+  /// class third : public virtual second {
+  /// public:
+  /// };
+  /// For second::asdf in third will be generates 
+  /// thunk with adjustor equals 16. When we call
+  /// second::asdf pointer in ecx register will not
+  /// be pointer to second::vbptr.
+  ThisAdjustment
+  MSComputeThisAdjustmentForThunk(const CXXMethodDecl *MD,
+                                  ThunkInfo &Info,
+                                  const CXXBasePath &Path,
+                          FinalOverriders::OverriderInfo Overrider);
 
   /// AddMethod - Add a single virtual member function to the vtable
   /// components vector.
@@ -940,6 +974,26 @@ private:
                   const CXXRecordDecl *FirstBaseInPrimaryBaseChain,
                   CharUnits FirstBaseOffsetInLayoutClass,
                   PrimaryBasesSetVectorTy &PrimaryBases);
+
+  /// r4start
+  void AddAllVirtualFunctions(const CXXRecordDecl *RD, 
+                              bool IgnoreDestructor = true);
+
+  /// r4start
+  bool IsThunkRequire(const CXXMethodDecl *Overridden, 
+                      const CXXMethodDecl *Overrider/*,
+                      const ASTRecordLayout::VBaseInfo &VI*/) const;
+  bool IsVtordispEx(const CXXMethodDecl *Overridden, 
+                    const CXXMethodDecl *Overrider) const;
+
+  void GenerateVFTable(OverriddersMapTy &OverridersMap,
+                       CXXBasePath &Path);
+
+  /// r4start
+  void FillVFTable(CXXBasePath &Path);
+
+  /// r4start
+  void MSAddMethods();
 
   // LayoutVTable - Layout the vtable for the given base class, including its
   // secondary vtables and any vtables for virtual bases.
@@ -979,9 +1033,15 @@ private:
 
   /// isBuildingConstructionVTable - Return whether this vtable builder is
   /// building a construction vtable.
+  /// r4start
   bool isBuildingConstructorVTable() const { 
+    if (Context.getTargetInfo().getCXXABI() == CXXABI_Microsoft)
+      return false;
     return MostDerivedClass != LayoutClass;
   }
+
+  /// r4start
+  void MSLayoutVFTable();
 
 public:
   VTableBuilder(VTableContext &VTables, const CXXRecordDecl *MostDerivedClass,
@@ -1287,6 +1347,137 @@ VTableBuilder::ComputeThisAdjustment(const CXXMethodDecl *MD,
   return Adjustment;
 }
   
+static CharUnits GetClassOffset(const ASTContext &Ctx,
+                                const CXXRecordDecl *RD,
+                                const CXXRecordDecl *Base) {
+  assert(RD != Base && 
+         "GetClassOffset can`t work if RD equal Base");
+
+  CharUnits BaseOffset;
+
+  if (RD->isVirtuallyDerivedFrom(const_cast<CXXRecordDecl *>(Base))) {
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
+    return Layout.getVBaseClassOffset(Base);
+  }
+
+  CXXBasePaths InhPaths;
+  InhPaths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+  RD->lookupInBases(&CXXRecordDecl::FindBaseClass, 
+                 const_cast<CXXRecordDecl *>(Base), InhPaths);
+
+  assert(InhPaths.begin() != InhPaths.end() &&
+         "Can`t find inheritance path from RD to Base!");
+  
+  CXXBasePath& Path = InhPaths.front();
+
+  for (CXXBasePath::const_iterator I = Path.begin(),
+       E = Path.end(); I != E; ++I) {
+    const CXXRecordDecl *BaseElem = I->Base->getType()->getAsCXXRecordDecl();
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(I->Class);
+
+    if (I->Base->isVirtual())
+      BaseOffset += Layout.getVBaseClassOffset(BaseElem);
+    else
+      BaseOffset += Layout.getBaseClassOffset(BaseElem);
+  }
+
+  return BaseOffset;
+}
+
+static ASTRecordLayout::VBaseOffsetsMapTy::const_iterator
+GetVBaseInfo(ASTContext &Ctx, const CXXRecordDecl *RD,const CXXBasePath &Path) {
+  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
+  const ASTRecordLayout::VBaseOffsetsMapTy 
+    &VBases = Layout.getVBaseOffsetsMap();
+  ASTRecordLayout::VBaseOffsetsMapTy::const_iterator
+    VBaseInfo = VBases.end();
+
+  for (CXXBasePath::const_iterator I = Path.begin(),
+       E = Path.end(); I != E; ++I) {
+    const CXXRecordDecl *Base = I->Base->getType()->getAsCXXRecordDecl();
+    if ((VBaseInfo = VBases.find(Base)) != VBases.end() && 
+        VBaseInfo->second.hasVtorDisp())
+      return VBaseInfo;
+  }
+}
+
+ThisAdjustment
+VTableBuilder::MSComputeThisAdjustmentForThunk(const CXXMethodDecl *MD,
+                                               ThunkInfo &Info,
+                                               const CXXBasePath &Path,
+                                    FinalOverriders::OverriderInfo Overrider) {
+  const CXXRecordDecl *Base = MD->getParent();
+  const CXXRecordDecl *RD = Overrider.Method->getParent();
+  
+  const ASTRecordLayout &Layout = Context.getASTRecordLayout(LayoutClass);
+  const ASTRecordLayout &RDLayout = Context.getASTRecordLayout(RD);
+  ThisAdjustment Ret;
+
+  const ASTRecordLayout::VBaseOffsetsMapTy 
+    &VBases = Layout.getVBaseOffsetsMap();
+
+  auto vi = VBases.find(Base);
+  if ((Base == RD || LayoutClass == RD) &&
+      vi != VBases.end() && vi->second.hasVtorDisp() ||
+      Base == RDLayout.getPrimaryBase()) {
+    return Ret;
+  }
+
+  /*if ((Base == RD || LayoutClass == RD) &&
+      !VI.hasVtorDisp() ||
+      Base == RDLayout.getPrimaryBase())
+    return Ret;*/
+
+  CharUnits BaseOffsetInRD = GetClassOffset(Context, RD, Base);
+
+  if (LayoutClass == RD) {
+    Ret.NonVirtual = BaseOffsetInRD.getQuantity();
+
+    if (vi->second.hasVtorDisp()) {
+      Ret.VCallOffsetOffset = 4;
+      Ret.NonVirtual = 0;
+    }
+
+    return Ret;
+  }
+
+  CharUnits BaseOffsetInLayout = GetClassOffset(Context, LayoutClass, Base);
+  CharUnits RDOffsetInLayout = GetClassOffset(Context, LayoutClass, RD);
+
+  // vtordisp
+  if (vi->second.hasVtorDisp()) {
+    Ret.VCallOffsetOffset = 4;
+  }
+
+  if (BaseOffsetInLayout - RDOffsetInLayout < BaseOffsetInRD) {
+
+    const ASTRecordLayout &BaseLayout = Context.getASTRecordLayout(Base);
+    const ASTRecordLayout::VBaseOffsetsMapTy 
+      &RDVbases = RDLayout.getVBaseOffsetsMap();
+    ASTRecordLayout::VBaseOffsetsMapTy::const_iterator
+      VI = RDVbases.find(Base);
+
+    CharUnits VtordispCorrection;
+    if (VI != RDVbases.end() &&
+        VI->second.hasVtorDisp())
+      VtordispCorrection = CharUnits::fromQuantity(4);
+
+    Ret.NonVirtual = (RDLayout.getNonVirtualSize() + 
+      BaseLayout.getNonVirtualSize() + VtordispCorrection).getQuantity();
+
+    // TODO: check this!!!!
+    Info.VFPtrOffset = 
+      BaseOffsetInLayout.getQuantity();
+
+    if (IsVtordispEx(MD, Overrider.Method)) {
+      Ret.NonVirtual -= 
+        (RDOffsetInLayout - Layout.getVBPtrOffset()).getQuantity();
+    }
+  }
+
+  return Ret;
+}
+
 void 
 VTableBuilder::AddMethod(const CXXMethodDecl *MD,
                          ReturnAdjustment ReturnAdjustment) {
@@ -1563,7 +1754,347 @@ VTableBuilder::AddMethods(BaseSubobject Base, CharUnits BaseOffsetInLayoutClass,
   }
 }
 
+static void ReplaceOverridden(const CXXMethodDecl *MD,
+                              const CXXRecordDecl *Base,
+                              VTableBuilder::OverriddersMapTy &OverridersMap,
+                     llvm::SmallVector<const CXXMethodDecl *, 8> &Methods) {
+  for (CXXMethodDecl::method_iterator Overridden = 
+       MD->begin_overridden_methods(), OverE = MD->end_overridden_methods();
+       Overridden != OverE; ++Overridden) {
+
+    const CXXMethodDecl *OverMD = *Overridden;
+    
+    if (OverMD->getParent() == Base ||
+        Base->isDerivedFrom(OverMD->getParent())) {
+      auto I = std::find(Methods.begin(), Methods.end(), OverMD);
+
+      assert(I != Methods.end() && 
+             "Can not find overloaded method in vftable!");
+
+      Methods.insert(I, MD);
+
+      if (OverridersMap.count(OverMD)) {
+        const CXXMethodDecl *Parent = OverridersMap[OverMD];
+
+        Methods.erase(std::find(Methods.begin(), Methods.end(), OverMD));
+
+        auto iter = std::find(Methods.begin(), Methods.end(), Parent);
+        if (iter != Methods.end()) {
+          Methods.erase(iter);
+        }
+
+        OverridersMap.erase(OverMD);
+        OverridersMap.insert(std::make_pair(MD, Parent));
+      } else {
+        Methods.erase(std::find(Methods.begin(), Methods.end(), OverMD));
+        OverridersMap.insert(std::make_pair(MD, OverMD));
+      }
+
+      return;
+    }
+  }
+}
+
+static void ReplaceOverriddenDestructor(const CXXMethodDecl *MD,
+                         llvm::SmallVector<const CXXMethodDecl *, 8> &VFTable) {
+  auto I = std::find_if(VFTable.begin(), VFTable.end(),
+          [](const CXXMethodDecl *MD) -> bool {
+            return isa<CXXDestructorDecl>(MD);
+        });
+
+  if (I == VFTable.end()) {
+    return;
+  }
+
+  const CXXMethodDecl *Destructor = *I;
+  VFTable.insert(I, MD);
+  VFTable.erase(std::find(VFTable.begin(), VFTable.end(), Destructor));
+}
+
+void VTableBuilder::AddAllVirtualFunctions(const CXXRecordDecl *RD, 
+                                           bool IgnoreDestructor) {
+  for (CXXRecordDecl::method_iterator M = RD->method_begin(),
+       E = RD->method_end(); M != E; ++M) {
+    const CXXMethodDecl *MD = *M;
+
+    if (!MD->isVirtual())
+      continue;
+
+    if (isa<CXXDestructorDecl>(MD) && !IgnoreDestructor)
+      VFTable.push_back(MD);
+
+    if (MD->size_overridden_methods())
+      continue;
+
+    VFTable.push_back(MD);
+  }
+}
+
+bool VTableBuilder::IsThunkRequire(const CXXMethodDecl *Overridden,
+                                   const CXXMethodDecl *Overrider/*,
+                                   const ASTRecordLayout::VBaseInfo &VI*/) const {
+  const ASTRecordLayout &Layout = Context.getASTRecordLayout(LayoutClass);
+
+  const ASTRecordLayout::VBaseOffsetsMapTy 
+    &VBases = Layout.getVBaseOffsetsMap();
+  
+  const CXXRecordDecl *base = Overridden->getParent();
+  auto vi = VBases.find(base);
+  if (vi != VBases.end() && vi->second.hasVtorDisp()) {
+    return true;
+  }
+
+  /*if (VI.hasVtorDisp())
+    return true;*/
+
+  if (MostDerivedClass == LayoutClass ||
+      Overrider->getParent() == LayoutClass)
+    return false;
+
+  const CXXRecordDecl *RD = Overrider->getParent();
+  const CXXRecordDecl *Base = Overridden->getParent();
+
+  CharUnits BaseOffsetInLayout = GetClassOffset(Context, LayoutClass, Base);
+  CharUnits RDOffsetInLayout = GetClassOffset(Context, LayoutClass, RD);
+
+  if (BaseOffsetInLayout < RDOffsetInLayout)
+    return true;
+  
+  CharUnits BaseOffsetInRD = GetClassOffset(Context, RD, Base);
+  const ASTRecordLayout &RDLayout = Context.getASTRecordLayout(RD);
+
+  CharUnits FieldOffset;
+  if (RDLayout.getFieldCount()) {
+    FieldOffset = 
+      CharUnits::fromQuantity(RDLayout.getFieldOffset(0) / 8);
+  } else {
+    return false;
+    //if (RDLayout.hasOwnVFPtr()) {
+    //  FieldOffset += CharUnits::fromQuantity(4);
+    //}
+
+    //if (RD->getNumVBases()) {
+    //  FieldOffset = RDLayout.getVBPtrOffset() + CharUnits::fromQuantity(4);
+    //}
+  }
+
+  CharUnits ThisAdjInRD = BaseOffsetInRD - FieldOffset;
+  CharUnits ThisAdjInLayoutClass = 
+    BaseOffsetInLayout - (FieldOffset + RDOffsetInLayout);
+
+  if (ThisAdjInRD != ThisAdjInLayoutClass)
+    return true;
+
+  return false;
+}
+
+namespace {
+class FindFunctionBase : 
+ public std::unary_function<const CXXBaseSpecifier &, bool> {
+  const CXXRecordDecl *OverriderBase;
+public:
+  FindFunctionBase(const CXXRecordDecl *RD) :
+   OverriderBase(RD) {}
+
+  bool operator ()(const CXXBaseSpecifier &Base) {
+    if (Base.getType()->getAsCXXRecordDecl() == OverriderBase &&
+        !Base.isVirtual())
+      return true;
+    return false;
+  }
+};
+
+class FindVBaseInfo : 
+ public std::unary_function<const CXXBasePathElement &, bool> {
+  const ASTRecordLayout::VBaseOffsetsMapTy &VBases;
+public:
+  FindVBaseInfo(ASTContext &Ctx, const CXXRecordDecl *Class) :
+   VBases(Ctx.getASTRecordLayout(Class).getVBaseOffsetsMap()) {}
+
+  bool operator () (const CXXBasePathElement &Elem) {
+    const CXXRecordDecl *Base = Elem.Base->getType()->getAsCXXRecordDecl();
+
+    ASTRecordLayout::VBaseOffsetsMapTy::const_iterator VBaseInfo = 
+                                                              VBases.find(Base);
+    if (VBaseInfo != VBases.end()/* && 
+        VBaseInfo->second.hasVtorDisp()*/) {
+      return true;
+    }
+
+    return false;
+  }
+
+  ASTRecordLayout::VBaseInfo getVBaseInfo(const CXXBasePathElement &Elem) {
+    const CXXRecordDecl *Base = Elem.Base->getType()->getAsCXXRecordDecl();
+    ASTRecordLayout::VBaseOffsetsMapTy::const_iterator VBaseInfo = 
+                                                              VBases.find(Base);
+    if (VBaseInfo != VBases.end()) {
+        return VBaseInfo->second;
+    }
+
+    return ASTRecordLayout::VBaseInfo();
+  }
+};
+}
+
+bool VTableBuilder::IsVtordispEx(const CXXMethodDecl *Overridden,
+                                 const CXXMethodDecl *Overrider) const {
+  if (Overrider->getParent() == LayoutClass)
+    return false;
+
+  const ASTRecordLayout &Layout = Context.getASTRecordLayout(LayoutClass);
+  
+  const ASTRecordLayout::VBaseOffsetsMapTy 
+    &VBases = Layout.getVBaseOffsetsMap();
+  
+  const CXXRecordDecl *OVBase = Overridden->getParent();
+
+  ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
+    VBaseInfo = VBases.find(OVBase);
+
+  const CXXBaseSpecifier *OverriderBase = 
+    std::find_if(LayoutClass->bases_begin(),
+                 LayoutClass->bases_end(),
+                 FindFunctionBase(Overrider->getParent()));
+
+  if (VBaseInfo != VBases.end() &&
+      VBaseInfo->second.hasVtorDisp() &&
+      OVBase != LayoutClass &&
+      OverriderBase == LayoutClass->bases_end())
+    return true;
+  return false;
+}
+
+void VTableBuilder::GenerateVFTable(OverriddersMapTy &OverriddersMap,
+                                    CXXBasePath &Path) {
+  int idx = 1;
+  const ASTRecordLayout::VBaseOffsetsMapTy 
+    &VBases = Context.getASTRecordLayout(LayoutClass).getVBaseOffsetsMap();
+  /*CXXBasePathElement *PathPoint = 
+    std::find_if(Path.begin(), Path.end(), FindVBaseInfo(Context, LayoutClass));*/
+
+  for (auto I = VFTable.begin(), E = VFTable.end();
+       I != E; ++I, ++idx) {
+    if (OverriddersMap.count(*I)) {
+      OverriddersMapTy::iterator Elem = OverriddersMap.find(*I);
+
+      if (IsThunkRequire(Elem->second, Elem->first)) {
+        
+        FinalOverriders::OverriderInfo Overrider;
+
+        Overrider.Method = Elem->first;
+        ThunkInfo Info;
+        Info.VFPtrOffset = uint32_t(-1);
+
+        ThisAdjustment TA =
+          MSComputeThisAdjustmentForThunk(Elem->second, Info, Path, Overrider);
+
+        Info.This = TA;
+        Info.IsVtordispEx = IsVtordispEx(Elem->second, Elem->first);
+
+        const CXXRecordDecl *base = Elem->second->getParent();
+        auto vi = VBases.find(base);
+
+        if (vi->second.hasVtorDisp() && vi != VBases.end()) {
+          Info.This.VCallOffsetOffset = -4;
+        } else {
+          Info.This.VCallOffsetOffset = 0;
+        }
+
+        AddThunk(*I, Info);
+        VTableThunks.insert(std::make_pair(idx, Info));
+
+        if (isa<CXXDestructorDecl>(*I))
+          llvm_unreachable("Can not build virtual dtor thunk!");
+        else
+          Components.push_back(VTableComponent::MakeFunction(*I));
+        
+        continue;
+      }
+    }
+
+    if (isa<CXXDestructorDecl>(*I))
+      Components.push_back(
+                VTableComponent::MakeCompleteDtor(cast<CXXDestructorDecl>(*I)));
+    else
+      Components.push_back(VTableComponent::MakeFunction(*I));
+  }
+}
+
+void VTableBuilder::FillVFTable(CXXBasePath &Path) {
+  bool IsPrimary = true;
+  OverriddersMapTy OverridersMap;
+  
+  for (CXXBasePath::reverse_iterator I = Path.rbegin(),
+       E = Path.rend(); I != E; ++I) {
+    const CXXRecordDecl *Decl = I->Base->getType()->getAsCXXRecordDecl();
+    const ASTRecordLayout &Layout = Context.getASTRecordLayout(I->Class);
+
+    IsPrimary = (Decl == Layout.getPrimaryBase()) && IsPrimary;
+    
+    for (CXXRecordDecl::method_iterator M = I->Class->method_begin(),
+         ME = I->Class->method_end(); M != ME; ++M) {
+      const CXXMethodDecl *MD = *M;
+
+      if (!MD->isVirtual())
+        continue;
+
+      if (IsPrimary && !MD->size_overridden_methods()) {
+        VFTable.push_back(MD);
+        continue;
+      }
+
+      if (isa<CXXDestructorDecl>(MD)){
+        ReplaceOverriddenDestructor(MD, VFTable);
+      } else if (MD->size_overridden_methods() && 
+                 !isa<CXXDestructorDecl>(MD)) {
+        ReplaceOverridden(MD, Decl, OverridersMap, VFTable);
+      }
+    }
+  }
+
+  GenerateVFTable(OverridersMap, Path);
+}
+
+void VTableBuilder::MSAddMethods() {
+  if (LayoutClass == MostDerivedClass) {
+    AddAllVirtualFunctions(LayoutClass, false);
+
+    OverriddersMapTy EmptyMap;
+    CXXBasePath EmptyPath;
+    GenerateVFTable(EmptyMap, EmptyPath);
+    
+    return;
+  }
+
+  CXXBasePaths Paths;
+  Paths.setOrigin(const_cast<CXXRecordDecl *>(LayoutClass));
+
+  LayoutClass->lookupInBases(&CXXRecordDecl::FindBaseClass, 
+                          const_cast<CXXRecordDecl *>(MostDerivedClass), Paths);
+  
+  AddAllVirtualFunctions(MostDerivedClass);
+
+  FillVFTable(Paths.front());
+}
+
+void VTableBuilder::MSLayoutVFTable() {
+  assert(MostDerivedClass && "MostDerived must not be 0!");
+  assert(LayoutClass && "LayoutClass must not be 0!");
+
+  // Add RTTI
+  Components.push_back(VTableComponent::MakeRTTI(MostDerivedClass));
+
+  MSAddMethods();
+
+  //ComputeThisAdjustments();
+}
+
 void VTableBuilder::LayoutVTable() {
+  // r4start
+  if (Context.getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    return MSLayoutVFTable();
+  }
   LayoutPrimaryAndSecondaryVTables(BaseSubobject(MostDerivedClass,
                                                  CharUnits::Zero()),
                                    /*BaseIsMorallyVirtual=*/false,
@@ -2393,6 +2924,24 @@ void VTableContext::ComputeVTableRelatedInformation(const CXXRecordDecl *RD) {
   }
 }
 
+// r4start
+void 
+VTableContext::ComputeVFTableRelatedInformation(const CXXRecordDecl *RD,
+                                                const CXXRecordDecl *Base) {
+
+  const VTableLayout *&Entry = VFTablesLayouts[RD][Base];
+
+  // Check if we've computed this information before.
+  if (Entry)
+    return;
+ 
+  VTableBuilder Builder(*this, Base, CharUnits::Zero(), 
+    /*MostDerivedClassIsVirtual=*/0, RD);
+  Entry = CreateVTableLayout(Builder);
+ 
+  Thunks.insert(Builder.thunks_begin(), Builder.thunks_end());
+}
+
 VTableLayout *VTableContext::createConstructionVTableLayout(
                                           const CXXRecordDecl *MostDerivedClass,
                                           CharUnits MostDerivedClassOffset,
@@ -2401,4 +2950,14 @@ VTableLayout *VTableContext::createConstructionVTableLayout(
   VTableBuilder Builder(*this, MostDerivedClass, MostDerivedClassOffset, 
                         MostDerivedClassIsVirtual, LayoutClass);
   return CreateVTableLayout(Builder);
+}
+
+const VTableContext::ThunkInfoVectorTy *
+VTableContext::getThunkInfoMS(const CXXMethodDecl *MD) {
+  ThunksMapTy::const_iterator I = Thunks.find(MD);
+  if (I == Thunks.end()) {
+    // We did not find a thunk for this method.
+    return 0;
+  }
+  return &I->second;
 }

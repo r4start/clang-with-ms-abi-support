@@ -488,7 +488,9 @@ public:
   /// pointers is preferred unless the identifier is already available as a
   /// string (this avoids allocation and copying of memory to construct an
   /// std::string).
-  IdentifierInfo *getIdentifierInfo(StringRef Name) const {
+  IdentifierInfo *getIdentifierInfo(StringRef Name, bool MSIdentifier = false) const {
+    if (MSIdentifier)
+      return &Identifiers.getMSIdentifier(Name);
     return &Identifiers.get(Name);
   }
 

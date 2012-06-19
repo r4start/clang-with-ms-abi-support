@@ -25,6 +25,7 @@ namespace clang {
   class ASTContext;
   class IdentifierInfo;
   class Expr;
+  class RecordDecl;
 
 /// \brief Represents information about a change in availability for
 /// an entity, which is part of the encoding of the 'availability'
@@ -86,6 +87,10 @@ private:
 
   unsigned AttrKind : 8;
 
+  /// \brief Represents information about dynamically-describable (by RecordDecl)
+  /// Microsoft attribute
+  RecordDecl* RD;
+
   /// \brief The location of the 'unavailable' keyword in an
   /// availability attribute.
   SourceLocation UnavailableLoc;
@@ -131,7 +136,7 @@ private:
     : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
       NumArgs(numArgs), SyntaxUsed(syntaxUsed), Invalid(false),
-      UsedAsTypeAttr(false), IsAvailability(false), 
+      UsedAsTypeAttr(false), IsAvailability(false), RD(NULL),
       NextInPosition(0), NextInPool(0) {
     if (numArgs) memcpy(getArgsBuffer(), args, numArgs * sizeof(Expr*));
     AttrKind = getKind(getName(), getScopeName(), syntaxUsed);
@@ -149,7 +154,7 @@ private:
     : AttrName(attrName), ScopeName(scopeName), ParmName(parmName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(parmLoc),
       NumArgs(0), SyntaxUsed(syntaxUsed),
-      Invalid(false), UsedAsTypeAttr(false), IsAvailability(true),
+      Invalid(false), UsedAsTypeAttr(false), IsAvailability(true), RD(NULL),
       UnavailableLoc(unavailable), MessageExpr(messageExpr),
       NextInPosition(0), NextInPool(0) {
     new (&getAvailabilitySlot(IntroducedSlot)) AvailabilityChange(introduced);
@@ -182,10 +187,14 @@ public:
   SourceLocation getParameterLoc() const { return ParmLoc; }
 
   bool isDeclspecAttribute() const { return SyntaxUsed == AS_Declspec; }
+  bool isMicrosoftAttribute() const { return RD != NULL; }
   bool isCXX0XAttribute() const { return SyntaxUsed == AS_CXX11; }
 
   bool isInvalid() const { return Invalid; }
   void setInvalid(bool b = true) const { Invalid = b; }
+
+  RecordDecl* getMsAttributeRecordDecl() const { return RD; }
+  void setMsAttributeRecordDecl(RecordDecl* RD) { this->RD = RD; }
 
   bool isUsedAsTypeAttr() const { return UsedAsTypeAttr; }
   void setUsedAsTypeAttr() { UsedAsTypeAttr = true; }

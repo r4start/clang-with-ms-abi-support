@@ -2288,6 +2288,19 @@ LValue CodeGenFunction::EmitCastLValue(const CastExpr *E) {
   case CK_ARCReclaimReturnedObject:
   case CK_ARCExtendBlockObject: 
   case CK_CopyAndAutoreleaseBlockObject: {
+#if 1
+    //DAEMON!!!
+    if (getContext().getLangOpts().MicrosoftMode)
+    {
+        const ExplicitCastExpr *CE = cast<ExplicitCastExpr>(E);
+    
+        LValue LV = EmitLValue(E->getSubExpr());
+        QualType ToType = getContext().getLValueReferenceType(E->getType());
+        llvm::Value *V = Builder.CreateBitCast(LV.getAddress(), 
+                                               ConvertType(ToType));
+        return MakeAddrLValue(V, E->getType());
+    }
+#endif
     // These casts only produce lvalues when we're binding a reference to a 
     // temporary realized from a (converted) pure rvalue. Emit the expression
     // as a value, copy it into a temporary, and return an lvalue referring to

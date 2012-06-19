@@ -102,13 +102,23 @@ struct ThunkInfo {
   /// Return - The return adjustment.
   ReturnAdjustment Return;
 
-  ThunkInfo() { }
+  /// r4start
+  bool IsVtordispEx;
 
-  ThunkInfo(const ThisAdjustment &This, const ReturnAdjustment &Return)
-    : This(This), Return(Return) { }
+  /// r4start
+  uint32_t VFPtrOffset;
+
+  ThunkInfo() : IsVtordispEx(false), VFPtrOffset(-1) { }
+
+  ThunkInfo(const ThisAdjustment &This, const ReturnAdjustment &Return,
+            bool IsVtordispEx = false, uint32_t VFPtrOffset = -1)
+    : This(This), Return(Return), IsVtordispEx(IsVtordispEx), 
+  VFPtrOffset(VFPtrOffset) { }
 
   friend bool operator==(const ThunkInfo &LHS, const ThunkInfo &RHS) {
-    return LHS.This == RHS.This && LHS.Return == RHS.Return;
+    return LHS.This == RHS.This && LHS.Return == RHS.Return &&
+           LHS.IsVtordispEx == RHS.IsVtordispEx && 
+           LHS.VFPtrOffset == RHS.VFPtrOffset;
   }
 
   friend bool operator<(const ThunkInfo &LHS, const ThunkInfo &RHS) {

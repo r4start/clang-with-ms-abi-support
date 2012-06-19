@@ -496,6 +496,7 @@ KEYWORD(__leave                       , KEYMS | KEYBORLAND)
 KEYWORD(__int64                       , KEYMS)
 KEYWORD(__if_exists                   , KEYMS)
 KEYWORD(__if_not_exists               , KEYMS)
+KEYWORD(__identifier              , KEYMS)
 KEYWORD(__single_inheritance          , KEYMS)
 KEYWORD(__multiple_inheritance        , KEYMS)
 KEYWORD(__virtual_inheritance         , KEYMS)
@@ -573,6 +574,7 @@ ANNOTATION(template_id)  // annotation for a C++ template-id that names a
 ANNOTATION(primary_expr) // annotation for a primary expression
 ANNOTATION(decltype)     // annotation for a decltype expression,
                          // e.g., "decltype(foo.bar())"
+ANNOTATION(__identifier) // annotation for a microsoft __identifier expression
 
 // Annotation for #pragma unused(...)
 // For each argument inside the parentheses the pragma handler will produce

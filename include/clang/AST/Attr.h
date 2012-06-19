@@ -141,6 +141,21 @@ public:
   static bool classof(const InheritableParamAttr *) { return true; }
 };
 
+class MsSAAttr : public InheritableParamAttr {
+protected:
+  MsSAAttr(attr::Kind AK, SourceRange R)
+    : InheritableParamAttr(AK, R) {}
+
+public:
+  void setInherited(bool I) { Inherited = I; }
+
+  // Implement isa/cast/dyncast/etc.
+  static bool classof(const Attr *A) {
+    return A->getKind() <= attr::LAST_MS_SA;
+  }
+  static bool classof(const MsSAAttr *) { return true; }
+};
+
 #include "clang/AST/Attrs.inc"
 
 /// AttrVec - A vector of Attr, which is how they are stored on the AST.

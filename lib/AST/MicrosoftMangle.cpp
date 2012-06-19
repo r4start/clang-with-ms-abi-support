@@ -20,9 +20,13 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/Basic/ABI.h"
+// r4start
+#include "clang/AST/RecordLayout.h"
+#include "clang/AST/CXXInheritance.h"
 
 using namespace clang;
 
+// r4start
 namespace {
 
 /// MicrosoftCXXNameMangler - Manage the mangling of a single name for the
@@ -46,6 +50,22 @@ public:
   void mangleNumber(int64_t Number);
   void mangleNumber(const llvm::APSInt &Value);
   void mangleType(QualType T, SourceRange Range);
+  void mangleClassArryaOrHierarchyDescr(const CXXRecordDecl *RD,
+                                        StringRef FuncName = "??_R2");
+  void mangleCompleteObjLocatorOrVFTable(const CXXRecordDecl *RD,
+                                         const CXXRecordDecl *BaseClass = 0,
+                                         StringRef FuncName = "??_R4");
+  void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *RD, 
+                                   StringRef Prefix = "?");
+  void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
+                                        int64_t MemberDisplacement,
+                                        int64_t VBTableDisplacement,
+                                        int64_t IndexInVBTable,
+                                        int64_t Attributes,
+                                        StringRef Prefix = "?");
+  void mangleCXXRTTIVBTable(const CXXRecordDecl *RD,
+                            const CXXRecordDecl *BaseClass,
+                            StringRef Prefix = "?");
 
 private:
   void mangleUnqualifiedName(const NamedDecl *ND) {
@@ -90,7 +110,9 @@ private:
 
 /// MicrosoftMangleContext - Overrides the default MangleContext for the
 /// Microsoft Visual C++ ABI.
-class MicrosoftMangleContext : public MangleContext {
+class MicrosoftMangleContext :
+  public MangleContext,
+  public MSMangleContextExtensions {
 public:
   MicrosoftMangleContext(ASTContext &Context,
                    DiagnosticsEngine &Diags) : MangleContext(Context, Diags) { }
@@ -103,6 +125,7 @@ public:
                                   const ThisAdjustment &ThisAdjustment,
                                   raw_ostream &);
   virtual void mangleCXXVTable(const CXXRecordDecl *RD,
+                               const CXXRecordDecl *BaseClass,
                                raw_ostream &);
   virtual void mangleCXXVTT(const CXXRecordDecl *RD,
                             raw_ostream &);
@@ -117,6 +140,38 @@ public:
                              raw_ostream &);
   virtual void mangleReferenceTemporary(const clang::VarDecl *,
                                         raw_ostream &);
+  
+  virtual MSMangleContextExtensions* getMsExtensions();
+
+  /// Microsoft RTTI specific extensions
+
+  virtual void mangleCXXRTTICompleteObjectLocator(const CXXRecordDecl *RD,
+                                                  const CXXRecordDecl *BaseClass,
+                                                  raw_ostream &);
+
+  virtual void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *,
+                                           raw_ostream &);
+
+  virtual void mangleCXXRTTICompleteObjectLocator(const CXXRecordDecl *RD,
+                                                  StringRef BaseClass,
+                                                  raw_ostream &);
+
+  virtual void mangleCXXRTTIClassHierarhyDescriptor(const CXXRecordDecl *RD,
+                                                    raw_ostream &);
+
+  virtual void mangleCXXRTTIBaseClassArray(const CXXRecordDecl *RD,
+                                           raw_ostream &);
+
+  virtual void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
+                                                int64_t MemberOffset,
+                                                int64_t OffsetInVBTable,
+                                                int64_t IndexInVBTable,
+                                                int64_t Attributes,
+                                                raw_ostream &Out);
+
+  virtual void mangleCXXVBTable(const CXXRecordDecl *RD,
+                                const CXXRecordDecl *BaseDecl,
+                                raw_ostream &);
 };
 
 }
@@ -200,6 +255,205 @@ void MicrosoftCXXNameMangler::mangle(const NamedDecl *D,
     Diags.Report(D->getLocation(), DiagID)
       << D->getSourceRange();
   }
+}
+
+void MicrosoftCXXNameMangler::mangleClassArryaOrHierarchyDescr(
+                                        const CXXRecordDecl *RD,
+                                        StringRef Prefix ) {
+  Out << '\01';
+  Out << Prefix;
+
+  mangleName(RD);
+
+  Out << "8";
+}
+
+static bool ClassDeclaresNewVirtualFunction(const CXXRecordDecl *RD) {
+  for (CXXRecordDecl::method_iterator M = RD->method_begin(),
+       E = RD->method_end(); M != E; ++M) {
+    if (!M->size_overridden_methods() && M->isVirtual() &&
+        M->getKind() != Decl::CXXDestructor)
+      return true;
+  }
+  return false;
+}
+
+static bool IsPrimaryBase(const ASTContext &Ctx, CXXBasePath &Path) {
+  int primaryBaseCount = 0;
+  for (CXXBasePath::const_iterator I = Path.begin(),
+       E = Path.end(); I != E; ++I) {
+    const CXXRecordDecl *BaseDecl = I->Base->getType()->getAsCXXRecordDecl();
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(I->Class);
+
+    if (BaseDecl == Layout.getPrimaryBase())
+      ++primaryBaseCount;
+  }
+
+  if (primaryBaseCount == Path.size())
+    return true;
+
+  return false;
+}
+
+static bool IsVBasesHasVFTables(const ASTContext &Ctx, 
+                                const CXXRecordDecl *Class) {
+  for (CXXRecordDecl::base_class_const_iterator I = Class->vbases_begin(),
+       E = Class->vbases_end(); I != E; ++I) {
+    const ASTRecordLayout &L = 
+      Ctx.getASTRecordLayout(I->getType()->getAsCXXRecordDecl());
+    if (L.hasOwnVFPtr())
+      return true;
+
+    if (const CXXRecordDecl *Primary = L.getPrimaryBase()) {
+      do {
+        const ASTRecordLayout &primaryLayout = Ctx.getASTRecordLayout(Primary);
+        if (primaryLayout.hasOwnVFPtr())
+          return true;
+        if (!(Primary = primaryLayout.getPrimaryBase()))
+          break;
+      } while (true);
+      
+    }
+  }
+  return false;
+}
+
+static bool IsClassHasOneVFTable(const ASTContext &Ctx, 
+                                 const CXXRecordDecl *Class, int &Counter) {
+  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(Class);
+  if (Layout.hasOwnVFPtr()) {
+    Counter++;
+  }
+
+  int vftableCount = 0;
+
+  for (CXXRecordDecl::base_class_const_iterator I = Class->bases_begin(),
+       E = Class->bases_end();  I != E; ++I) {
+    const ASTRecordLayout &L = 
+      Ctx.getASTRecordLayout(I->getType()->getAsCXXRecordDecl());
+
+    IsClassHasOneVFTable(Ctx, I->getType()->getAsCXXRecordDecl(), vftableCount);
+  }
+
+  if (vftableCount) {
+    Counter += vftableCount;
+    return false;
+  }
+
+  return true;
+}
+
+static bool IsClassHasOneVFTable(const ASTContext &Ctx, 
+                                 const CXXRecordDecl *Class) {
+  int vftableCount = 0;
+  return IsClassHasOneVFTable(Ctx, Class, vftableCount);
+}
+
+void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
+                                        const CXXRecordDecl *RD,
+                                        const CXXRecordDecl *BaseClass,
+                                        StringRef Prefix) {
+  Out << '\01';
+  Out << Prefix;
+
+  mangleName(RD);
+
+  Out << "6B";
+
+  const ASTRecordLayout &Layout = 
+    Context.getASTContext().getASTRecordLayout(RD);
+
+  if (BaseClass && RD != BaseClass) {
+    CXXBasePaths Paths;
+    Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
+    RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
+                    const_cast<CXXRecordDecl *>(BaseClass->getCanonicalDecl()),
+                      Paths);
+
+    if (!IsPrimaryBase(Context.getASTContext(), Paths.front()) &&
+        !IsClassHasOneVFTable(getASTContext(), RD)) {
+      mangleName(BaseClass);
+    }
+
+  } else if (Layout.hasOwnVFPtr() && 
+                                    IsVBasesHasVFTables(getASTContext(), RD)) {
+    Out << "0@";
+  }
+
+  Out << "@";
+}
+
+void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
+                                        const CXXRecordDecl *RD,
+                                        StringRef Prefix) {
+  Out << '\01';
+  Out << Prefix;
+
+  Out << "?_R0";
+  
+  // This is always reference?
+  Out << "?A";
+  mangleType(RD->getASTContext().getRecordType(RD));
+  // End magic number
+  Out << "@8";
+}
+
+void MicrosoftCXXNameMangler::mangleCXXRTTIBaseClassDescriptor(
+                                        const CXXRecordDecl *RD,
+                                        int64_t MemberDisplacement,
+                                        int64_t VBTableDisplacement,
+                                        int64_t IndexInVBTable,
+                                        int64_t Attributes,
+                                        StringRef Prefix)
+{
+  assert(Attributes != 0 && "Class inheritance must be greater 0");
+
+  Out << '\01';
+  Out << Prefix;
+  Out << "?_R1";
+
+  if (MemberDisplacement == 0) {
+    Out << "A@";
+  } else {
+    mangleNumber(MemberDisplacement);
+  }
+
+  if (VBTableDisplacement == -1)
+  {
+    Out << "?0";
+  } else {
+    mangleNumber(VBTableDisplacement);
+  }
+
+  if (IndexInVBTable == 0) {
+    Out << "A@";
+  } else {
+    mangleNumber(IndexInVBTable);
+  }
+    
+  mangleNumber(Attributes);
+  mangleName(RD);
+  Out << "8";
+}
+
+void MicrosoftCXXNameMangler::mangleCXXRTTIVBTable(
+                                        const CXXRecordDecl *RD,
+                                        const CXXRecordDecl *BaseClass,
+                                        StringRef Prefix) {
+  Out << '\01';
+  Out << Prefix;
+
+  Out << "?_8";
+  mangleName(RD);
+
+  Out << "7B";
+
+  if (BaseClass)
+  {
+    mangleName(BaseClass);
+  }
+
+  Out << "@";
 }
 
 void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD) {
@@ -593,6 +847,10 @@ void MicrosoftCXXNameMangler::mangleOperatorName(OverloadedOperatorKind OO,
   case OO_PipeEqual: Out << "?_5"; break;
   // <operator-name> ::= ?_6 # ^=
   case OO_CaretEqual: Out << "?_6"; break;
+#if 0
+  // <operator-name> ::= ?_G # scalar deleting destructor
+  case OO_ScalarDeletingDestructor: Out << "?_G"; break;
+#endif
   //                     ?_7 # vftable
   //                     ?_8 # vbtable
   //                     ?_9 # vcall
@@ -1492,12 +1750,55 @@ void MicrosoftMangleContext::mangleName(const NamedDecl *D,
   MicrosoftCXXNameMangler Mangler(*this, Out);
   return Mangler.mangle(D);
 }
+
+namespace {
+struct CheckVtordisp : 
+  std::unary_function<const std::pair<const CXXRecordDecl *,
+                                      ASTRecordLayout::VBaseInfo>, bool> {
+
+  bool operator () (const std::pair<const CXXRecordDecl *, 
+                                    ASTRecordLayout::VBaseInfo> &Elem) {
+    return Elem.second.hasVtorDisp();
+  }
+};
+}
+
 void MicrosoftMangleContext::mangleThunk(const CXXMethodDecl *MD,
                                          const ThunkInfo &Thunk,
-                                         raw_ostream &) {
-  unsigned DiagID = getDiags().getCustomDiagID(DiagnosticsEngine::Error,
-    "cannot mangle thunk for this method yet");
-  getDiags().Report(MD->getLocation(), DiagID);
+                                         raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  Out << '\01' << "?";
+
+  mangler.mangleName(MD);
+
+  const ASTRecordLayout &Layout = 
+    getASTContext().getASTRecordLayout(MD->getParent());
+
+  ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
+    I = std::find_if(Layout.getVBaseOffsetsMap().begin(),
+                     Layout.getVBaseOffsetsMap().end(),
+                     CheckVtordisp());
+
+  if (I == Layout.getVBaseOffsetsMap().end()) {
+    // Unknown prefix for number.
+    Out << "W";
+    mangler.mangleNumber(uint32_t(-Thunk.This.NonVirtual));
+  } else {
+    // This string right if we have vtordisp.
+    // Unknown prefix.
+    if (Thunk.IsVtordispEx)
+      Out << "$R4";
+    else
+      Out << "$4";
+    Out << "-VTORDISP-";
+    
+    if (Thunk.VFPtrOffset != uint32_t(-1))
+      mangler.mangleNumber(Thunk.VFPtrOffset);
+    // When we have vtordisp thunk, number always is -4.
+    mangler.mangleNumber(uint32_t(-4));
+  }
+
+  mangler.mangleFunctionEncoding(MD);
 }
 void MicrosoftMangleContext::mangleCXXDtorThunk(const CXXDestructorDecl *DD,
                                                 CXXDtorType Type,
@@ -1508,22 +1809,10 @@ void MicrosoftMangleContext::mangleCXXDtorThunk(const CXXDestructorDecl *DD,
   getDiags().Report(DD->getLocation(), DiagID);
 }
 void MicrosoftMangleContext::mangleCXXVTable(const CXXRecordDecl *RD,
+                                             const CXXRecordDecl *Base,
                                              raw_ostream &Out) {
-  // <mangled-name> ::= ? <operator-name> <class-name> <storage-class>
-  //                      <cvr-qualifiers> [<name>] @
-  // <operator-name> ::= _7 # vftable
-  //                 ::= _8 # vbtable
-  // NOTE: <cvr-qualifiers> here is always 'B' (const). <storage-class>
-  // is always '6' for vftables and '7' for vbtables. (The difference is
-  // beyond me.)
-  // TODO: vbtables.
-  MicrosoftCXXNameMangler Mangler(*this, Out);
-  Mangler.getStream() << "\01??_7";
-  Mangler.mangleName(RD);
-  Mangler.getStream() << "6B";
-  // TODO: If the class has more than one vtable, mangle in the class it came
-  // from.
-  Mangler.getStream() << '@';
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleCompleteObjLocatorOrVFTable(RD, Base, "??_7");
 }
 void MicrosoftMangleContext::mangleCXXVTT(const CXXRecordDecl *RD,
                                           raw_ostream &) {
@@ -1543,13 +1832,92 @@ void MicrosoftMangleContext::mangleCXXRTTI(QualType T,
   getDiags().Report(DiagID)
     << T.getBaseTypeIdentifier();
 }
+void 
+MicrosoftMangleContext::mangleCXXRTTITypeDescriptor(const CXXRecordDecl *RD,
+                                                    raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleCXXRTTITypeDescriptor(RD);
+}
 void MicrosoftMangleContext::mangleCXXRTTIName(QualType T,
-                                               raw_ostream &) {
-  // FIXME: Give a location...
-  unsigned DiagID = getDiags().getCustomDiagID(DiagnosticsEngine::Error,
-    "cannot mangle the name of type %0 into RTTI descriptors yet");
-  getDiags().Report(DiagID)
-    << T.getBaseTypeIdentifier();
+                                               raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleType(T);
+}
+
+MSMangleContextExtensions* MicrosoftMangleContext::getMsExtensions() {
+  return this;
+}
+
+void MicrosoftMangleContext::mangleCXXRTTICompleteObjectLocator(
+                                        const CXXRecordDecl *RD,
+                                        const CXXRecordDecl *Base,
+                                        raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleCompleteObjLocatorOrVFTable(RD, Base, "??_R4");
+}
+
+void MicrosoftMangleContext::mangleCXXRTTICompleteObjectLocator(
+                                        const CXXRecordDecl *RD,
+                                        StringRef BaseClass,
+                                        raw_ostream &Out) {
+
+  Out << '\01';
+  Out << "??_R4";
+  Out << RD->getNameAsString();
+  Out << "@@6B";
+
+  if (BaseClass.size())
+  {
+    Out << BaseClass;
+
+    if (BaseClass == "0")
+    {
+      Out << "@";
+    }
+    else
+    {
+      Out << "@@";
+    }
+    
+  }
+
+  Out << "@";
+}
+
+void MicrosoftMangleContext::mangleCXXRTTIClassHierarhyDescriptor(
+                                        const CXXRecordDecl *RD, 
+                                        raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleClassArryaOrHierarchyDescr(RD, "??_R3");
+}
+
+void MicrosoftMangleContext::mangleCXXRTTIBaseClassArray(
+                                        const CXXRecordDecl *RD, 
+                                        raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleClassArryaOrHierarchyDescr(RD, "??_R2");
+}
+
+void MicrosoftMangleContext::mangleCXXRTTIBaseClassDescriptor(
+                                        const CXXRecordDecl *RD,
+                                        int64_t MemberOffset,
+                                        int64_t OffsetInVBTable,
+                                        int64_t IndexInVBTable,
+                                        int64_t Attributes,
+                                        raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+
+  mangler.mangleCXXRTTIBaseClassDescriptor(RD, MemberOffset,
+                                           OffsetInVBTable,
+                                           IndexInVBTable,
+                                           Attributes);
+}
+
+void MicrosoftMangleContext::mangleCXXVBTable(const CXXRecordDecl *RD,
+                                              const CXXRecordDecl *BaseDecl,
+                                              raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleCXXRTTIVBTable(RD, BaseDecl);
 }
 void MicrosoftMangleContext::mangleCXXCtor(const CXXConstructorDecl *D,
                                            CXXCtorType Type,

@@ -302,10 +302,38 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &attrs) {
     return;
   }
 
-  while (Tok.getIdentifierInfo()) {
-    IdentifierInfo *AttrName = Tok.getIdentifierInfo();
-    SourceLocation AttrNameLoc = ConsumeToken();
+  // DAEMON!!!
+  while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {
+      
+    IdentifierInfo *AttrName;
+    SourceLocation AttrNameLoc;
     
+    // DAEMON!!!
+    if (Tok.is(tok::string_literal))
+    {
+        llvm::SmallString<64> NameBuffer;
+        // Parse the non-empty comma-separated list of expressions.
+        ExprResult ArgExpr(ParseAssignmentExpression());
+        if (ArgExpr.isInvalid()) {
+            SkipUntil(tok::r_paren, false);
+            continue;
+        }
+        Expr *ExprList = ArgExpr.take();
+        ExprList = ExprList->IgnoreParenCasts();
+        StringLiteral *Str = dyn_cast<StringLiteral>(ExprList);
+        if (!Str) {
+            SkipUntil(tok::r_paren, false);
+            continue;
+        }
+        AttrName = PP.getIdentifierInfo(Str->getString());
+        AttrNameLoc = Str->getLocStart();
+
+    }
+    else
+    {
+        AttrName = Tok.getIdentifierInfo();
+        AttrNameLoc = ConsumeToken();
+    }
     // FIXME: Remove this when we have proper __declspec(property()) support.
     // Just skip everything inside property().
     if (AttrName->getName() == "property") {

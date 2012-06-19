@@ -50,6 +50,7 @@ add_clang_library(clangAST
   TypeLoc.cpp
   TypePrinter.cpp
   VTableBuilder.cpp
+  VBTableBuilder.cpp
   VTTBuilder.cpp
   )
 

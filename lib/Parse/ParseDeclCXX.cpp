@@ -988,6 +988,14 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   SuppressAccessChecks diagsFromTag(*this, shouldDelayDiagsInTag);
 
   ParsedAttributes attrs(AttrFactory);
+
+  // DAEMON!
+  // By standart syntax "[attr] struct A { int a };" will apply attr
+  // on definition of struct (after semicolon), but Microsoft
+  // applies such attributes to on declaration (after "struct A")
+  if (getLangOpts().MicrosoftExt)
+      attrs.takeAllFrom(DS.getAttributes());
+
   // If attributes exist after tag, parse them.
   if (Tok.is(tok::kw___attribute))
     ParseGNUAttributes(attrs);
@@ -2966,6 +2974,191 @@ void Parser::ParseCXX11Attributes(ParsedAttributesWithRange &attrs,
   attrs.Range = SourceRange(StartLoc, *endLoc);
 }
 
+/// Parse the arguments to a parameterized Microsoft attribute
+SourceLocation Parser::ParseMicrosoftAttributeArgs(Sema::NamedArgsMap& NamedArgs, 
+                                                   ExprVector& UnnamedArgs, 
+                                                   RecordDecl* RD) 
+{
+    assert(Tok.is(tok::l_paren));  
+    SourceLocation LParen = ConsumeParen(); // ignore the left paren loc for now
+
+    bool NamedArgFound = false;
+    while(true)  
+    {
+        if (Tok.is(tok::r_paren))
+            break;
+        if (Tok.is(tok::identifier) && NextToken().is(tok::equal))
+        {
+            IdentifierInfo *ParmName = 0;
+            SourceLocation ParmLoc, EqualLoc;
+
+            ParmName = Tok.getIdentifierInfo();
+            ParmLoc = ConsumeToken();
+
+            EqualLoc = ConsumeToken();
+            ExprResult AssignedVal = ParseConstantExpression();
+            if (AssignedVal.isInvalid()) {
+                SkipUntil(tok::comma, tok::r_paren, true, true);
+                continue;
+            }
+
+            UnqualifiedId Name;
+            Name.setIdentifier(ParmName, ParmLoc);
+            NamedArgs.push_back(std::make_pair(Name, AssignedVal.take()));
+
+            NamedArgFound = true;
+        }
+        else {
+            if (NamedArgFound) {
+                Diag(Tok.getLocation(), diag::err_attr_named_args_pos);
+                SkipUntil(tok::comma, tok::r_paren, true, true);
+                continue;
+            }
+            if (RD->hasAttr<MsSourceAnnotationAttributeAttributeAttr>()) {
+                Diag(Tok.getLocation(), diag::err_attr_not_support_unnamed_args)
+                    << RD->getName();
+            }
+            ExprResult ArgExpr(ParseAssignmentExpression());
+            if (ArgExpr.isInvalid()) {
+                SkipUntil(tok::comma, tok::r_paren, true, true);
+                break;
+            }
+            UnnamedArgs.push_back(ArgExpr.take());
+        }
+        if (Tok.is(tok::comma)) {
+        ConsumeToken();
+        continue;
+        }
+        break;
+    }
+
+
+    SourceLocation RParen = Tok.getLocation();
+    if (!ExpectAndConsume(tok::r_paren, diag::err_expected_rparen)) {
+        return RParen;
+    }
+    return SourceLocation();
+}
+
+/// Parse the arguments to a parameterized Microsoft attribute
+SourceLocation Parser::MaybeParseMicrosoftAttributeArgs(ExprVector &ArgExprs, RecordDecl* RD) {
+  
+  // Change attr DeclContext to CurContext to make id resolver work like MS
+  // We must resolve id's in attr RecordDecl, and after that in current context, 
+  // it's parent and so on...
+  DeclContext* AttrDeclContext = RD->getDeclContext();
+  RD->setDeclContext(Actions.CurContext);
+
+  ParseScope ClassScope(this, Scope::ClassScope|Scope::DeclScope);
+  Actions.ActOnStartDelayedMemberDeclarations(getCurScope(), RD);
+
+  ExprVector UnnamedArgs(Actions);
+  Sema::NamedArgsMap NamedArgs;
+  SourceLocation argsBegin = Tok.getLocation();
+  SourceLocation argsEnd;
+  if (Tok.is(tok::l_paren)) {
+      argsEnd = ParseMicrosoftAttributeArgs(NamedArgs, UnnamedArgs, RD);
+      if (argsEnd.isInvalid()) 
+          return argsEnd;
+  }
+  else
+      argsEnd = Tok.getLocation();
+  
+  Actions.CheckMsAttributeArgs(argsBegin, RD, UnnamedArgs, NamedArgs, ArgExprs);
+
+  Actions.ActOnFinishDelayedMemberDeclarations(getCurScope(), RD);
+  RD->setDeclContext(AttrDeclContext);
+  return argsEnd;
+}
+
+//DAEMON!!!
+void Parser::ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
+                                              SourceLocation *endLoc)
+{
+  assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
+
+  //Diag(Tok.getLocation(), diag::warn_cxx98_compat_attribute);
+
+  ConsumeBracket();
+
+  if (Tok.is(tok::comma)) {
+    Diag(Tok.getLocation(), diag::err_expected_ident);
+    ConsumeToken();
+  }
+
+  while (!Tok.is(tok::r_square)) {
+    // attribute not present
+    if (Tok.is(tok::comma)) {
+      ConsumeToken();
+      continue;
+    }
+
+    IdentifierInfo *ApplicationScopeName = 0;
+    SourceLocation ApplicationScopeLoc;
+
+    // attribute application scope 
+    // i.e. [returnvalue:SA_Post(MustCheck=SA_Yes)] or [assembly:AssemblyTitle("msvcm100")];
+    if (Tok.is(tok::identifier) && NextToken().is(tok::colon))
+    {
+        ApplicationScopeName = Tok.getIdentifierInfo();
+        ApplicationScopeLoc = ConsumeToken();
+        // Consume colon
+        ConsumeToken();
+    }
+    
+    CXXScopeSpec SS;
+    if (getLangOpts().CPlusPlus) {
+        // Parse (optional) nested-name-specifier.
+        ParseOptionalCXXScopeSpecifier(SS, ParsedType(), /*EnteringContext=*/false);
+
+        if (SS.isInvalid() || Tok.isNot(tok::identifier)) {
+            Diag(Tok, diag::err_expected_ident);
+            // TODO! Skip arguments?
+            SkipUntil(tok::r_square, true, true);
+            break;
+        }
+    }
+
+    // Parse identifier.
+    IdentifierInfo *AttrName = Tok.getIdentifierInfo();
+    SourceLocation AttrNameLoc = ConsumeToken();
+    
+    RecordDecl* RD;
+    if (SS.isNotEmpty())
+        RD = Actions.FindMsAttribute(AttrName, AttrNameLoc, getCurScope(), &SS);
+    else
+        RD = Actions.FindMsAttribute(AttrName, AttrNameLoc, getCurScope());
+
+    if (!RD) {
+        // TODO! Warning? We can't find argument definition...
+        // TODO! Skip arguments and continue to the next attr?
+        SkipUntil(tok::r_square, true, true);
+        break;
+    }
+
+    AttributeList* attr;
+    ExprVector ArgExprs(Actions);
+
+    SourceLocation argsEnd = MaybeParseMicrosoftAttributeArgs(ArgExprs, RD);
+
+    if (argsEnd.isInvalid()) {
+        SkipUntil(tok::r_square, true, true);
+        break;
+    }
+    attr = attrs.addNew(AttrName, SourceRange(AttrNameLoc, argsEnd), 
+                ApplicationScopeName, ApplicationScopeLoc,
+                0, SourceLocation(),
+                ArgExprs.take(), ArgExprs.size());
+    attr->setMsAttributeRecordDecl(RD);
+  }
+
+  if (endLoc)
+    *endLoc = Tok.getLocation();
+  if (ExpectAndConsume(tok::r_square, diag::err_expected_rsquare))
+    SkipUntil(tok::r_square, false);
+}
+
+
 /// ParseMicrosoftAttributes - Parse a Microsoft attribute [Attr]
 ///
 /// [MS] ms-attribute:
@@ -2976,15 +3169,17 @@ void Parser::ParseCXX11Attributes(ParsedAttributesWithRange &attrs,
 ///             ms-attribute ms-attribute-seq
 void Parser::ParseMicrosoftAttributes(ParsedAttributes &attrs,
                                       SourceLocation *endLoc) {
-  assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
+  //assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
 
-  while (Tok.is(tok::l_square)) {
-    // FIXME: If this is actually a C++11 attribute, parse it as one.
-    ConsumeBracket();
-    SkipUntil(tok::r_square, true, true);
-    if (endLoc) *endLoc = Tok.getLocation();
-    ExpectAndConsume(tok::r_square, diag::err_expected_rsquare);
-  }
+  //SourceLocation StartLoc = Tok.getLocation(), Loc;
+  //if (!endLoc)
+  //  endLoc = &Loc;
+
+  do {
+    ParseMicrosoftAttributeSpecifier(attrs, endLoc);
+  } while (isMicrosoftAttributeSpecifier());
+
+  //attrs.Range = SourceRange(StartLoc, *endLoc);
 }
 
 void Parser::ParseMicrosoftIfExistsClassDeclaration(DeclSpec::TST TagType,

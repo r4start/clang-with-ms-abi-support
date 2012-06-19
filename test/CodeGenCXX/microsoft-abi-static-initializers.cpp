@@ -6,8 +6,8 @@ struct S {
 } s;
 
 // CHECK: define internal void [[INIT_s:@.*global_var.*]] nounwind
-// CHECK: call void @"\01??0S@@QAE@XZ"
-// CHECK: call i32 @atexit(void ()* @"__dtor_\01?s@@3US@@A")
+// CHECK: %call = call %struct.S* @"\01??0S@@QAE@XZ"(%struct.S* @"\01?s@@3US@@A")
+// CHECK: %0 = call i32 @atexit(void ()* @"__dtor_\01?s@@3US@@A") nounwind
 // CHECK: ret void
 
 // CHECK: define internal void @"__dtor_\01?s@@3US@@A"() nounwind {
@@ -34,11 +34,11 @@ void force_usage() {
 }
 
 // CHECK: define internal void [[INIT_foo:@.*global_var.*]] nounwind
-// CHECK: call void @"\01??0A@@QAE@XZ"
+// CHECK: call %class.A* @"\01??0A@@QAE@XZ"
 // CHECK: call i32 @atexit(void ()* [[FOO_DTOR:@"__dtor_.*foo@.*]])
 // CHECK: ret void
 
-// CHECK: define linkonce_odr void @"\01??0A@@QAE@XZ"
+// CHECK: define linkonce_odr %class.A* @"\01??0A@@QAE@XZ"
 
 // CHECK: define linkonce_odr void @"\01??1A@@QAE@XZ"
 

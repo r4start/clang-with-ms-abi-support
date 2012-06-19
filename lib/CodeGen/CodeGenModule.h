@@ -448,6 +448,7 @@ public:
   CodeGenTypes &getTypes() { return Types; }
   CodeGenVTables &getVTables() { return VTables; }
   VTableContext &getVTableContext() { return VTables.getVTableContext(); }
+  VBTableContext &getVBTableContext() { return VTables.getVBTableContext(); }
   DiagnosticsEngine &getDiags() const { return Diags; }
   const llvm::TargetData &getTargetData() const { return TheTargetData; }
   const TargetInfo &getTarget() const { return Context.getTargetInfo(); }
@@ -541,6 +542,12 @@ public:
   /// GetAddrOfRTTIDescriptor - Get the address of the RTTI descriptor 
   /// for the given type.
   llvm::Constant *GetAddrOfRTTIDescriptor(QualType Ty, bool ForEH = false);
+
+  /// r4start
+  /// GetAddrOfRTTIDescriptor - Get the address of the RTTI descriptor 
+  /// for the given type in MS ABI.
+  llvm::Constant *
+  GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy, bool ForEH = false);
 
   /// GetAddrOfThunk - Get the address of the thunk for the given global decl.
   llvm::Constant *GetAddrOfThunk(GlobalDecl GD, const ThunkInfo &Thunk);

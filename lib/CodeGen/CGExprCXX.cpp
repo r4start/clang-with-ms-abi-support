@@ -29,7 +29,8 @@ RValue CodeGenFunction::EmitCXXMemberCall(const CXXMethodDecl *MD,
                                           llvm::Value *This,
                                           llvm::Value *VTT,
                                           CallExpr::const_arg_iterator ArgBeg,
-                                          CallExpr::const_arg_iterator ArgEnd) {
+                                          CallExpr::const_arg_iterator ArgEnd,
+                                          bool CompleteCtorCall) {
   assert(MD->isInstance() &&
          "Trying to emit a member call expr on a static method!");
 
@@ -40,6 +41,8 @@ RValue CodeGenFunction::EmitCXXMemberCall(const CXXMethodDecl *MD,
 
   // If there is a VTT parameter, emit it.
   if (VTT) {
+    assert(CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft &&
+           "MS ABI does not have VTT!");
     QualType T = getContext().getPointerType(getContext().VoidPtrTy);
     Args.add(RValue::get(VTT), T);
   }
@@ -47,6 +50,13 @@ RValue CodeGenFunction::EmitCXXMemberCall(const CXXMethodDecl *MD,
   const FunctionProtoType *FPT = MD->getType()->castAs<FunctionProtoType>();
   RequiredArgs required = RequiredArgs::forPrototypePlus(FPT, Args.size());
   
+  // r4start
+  if (isa<CXXConstructorDecl>(MD) && MD->getParent()->getNumVBases() &&
+      CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    llvm::Value *Flag = llvm::ConstantInt::get(CGM.Int32Ty, CompleteCtorCall);
+    Args.add(RValue::get(Flag), CGM.getContext().Char32Ty);
+  }
+
   // And the rest of the call args.
   EmitCallArgs(Args, FPT, ArgBeg, ArgEnd);
 

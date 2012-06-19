@@ -505,4 +505,81 @@ namespace test1 {
 // CHECK-NEXT:  16 |       (A vftable pointer)
 // CHECK-NEXT:  sizeof=20, dsize=20, align=4
 // CHECK-NEXT:  nvsize=4, nvalign=4
+
+
+  struct first {
+    virtual void asdf() {}
+    virtual void g(){}
+	};
+	
+  struct second : virtual first {
+    int q;
+	  virtual void asdf() { q = 90; }
+	  virtual void g(){ q = 12; }
+  };
+	
+  struct third : virtual second {};
+	void test2() { third *t; }
+	
+// CHECK:        0 | struct test1::third
+// CHECK-NEXT:   0 |   (third vbtable pointer)
+// CHECK-NEXT:   4 |   struct test1::first (virtual base)
+// CHECK-NEXT:   4 |     (first vftable pointer)
+// CHECK-NEXT:   8 |   struct test1::second (virtual base)
+// CHECK-NEXT:   8 |     (second vbtable pointer)
+// CHECK-NEXT:  12 |     int q
+// CHECK-NEXT:  sizeof=16, dsize=16, align=4
+// CHECK-NEXT:  nvsize=4, nvalign=4
+}
+
+namespace test2 {
+  struct A { virtual void foo(); };
+  struct B : virtual A { virtual void foo(); };
+  struct Test1 : B { Test1(); };
+  struct Test2 : virtual B { Test2(); };
+  struct Test3 : B { Test3(); virtual void foo(); };
+  struct Test4 : virtual B { Test4(); virtual void foo(); };
+  
+  void test() { 
+    Test1 *t;
+    Test2 *t2;
+    Test3 *t3;
+    Test4 *t4;
+  }
+  
+// CHECK:        0 | struct test2::Test1
+// CHECK-NEXT:   0 |   struct test2::B (base)
+// CHECK-NEXT:   0 |     (B vbtable pointer)
+// CHECK-NEXT:   4 |   struct test2::A (virtual base)
+// CHECK-NEXT:   4 |     (A vftable pointer)
+// CHECK-NEXT:  sizeof=8, dsize=8, align=4
+// CHECK-NEXT:  nvsize=4, nvalign=4
+  
+// CHECK:        0 | struct test2::Test2
+// CHECK-NEXT:   0 |   (Test2 vbtable pointer)
+// CHECK-NEXT:   4 |   struct test2::A (virtual base)
+// CHECK-NEXT:   4 |     (A vftable pointer)
+// CHECK-NEXT:   8 |   struct test2::B (virtual base)
+// CHECK-NEXT:   8 |     (B vbtable pointer)
+// CHECK-NEXT:  sizeof=12, dsize=12, align=4
+// CHECK-NEXT:  nvsize=4, nvalign=4
+
+// CHECK:        0 | struct test2::Test3
+// CHECK-NEXT:   0 |   struct test2::B (base)
+// CHECK-NEXT:   0 |     (B vbtable pointer)
+// CHECK-NEXT:   4 |   (vtordisp for vbase A)
+// CHECK-NEXT:   8 |   struct test2::A (virtual base)
+// CHECK-NEXT:   8 |     (A vftable pointer)
+// CHECK-NEXT:  sizeof=12, dsize=12, align=4
+// CHECK-NEXT:  nvsize=4, nvalign=4
+  
+// CHECK:        0 | struct test2::Test4
+// CHECK-NEXT:   0 |   (Test4 vbtable pointer)
+// CHECK-NEXT:   4 |   (vtordisp for vbase A)
+// CHECK-NEXT:   8 |   struct test2::A (virtual base)
+// CHECK-NEXT:   8 |     (A vftable pointer)
+// CHECK-NEXT:  12 |   struct test2::B (virtual base)
+// CHECK-NEXT:  12 |     (B vbtable pointer)
+// CHECK-NEXT:  sizeof=16, dsize=16, align=4
+// CHECK-NEXT:  nvsize=4, nvalign=4
 }
