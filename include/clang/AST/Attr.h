@@ -120,6 +120,21 @@ public:
   }
 };
 
+class MsSAAttr : public InheritableParamAttr {
+protected:
+  MsSAAttr(attr::Kind AK, SourceRange R)
+    : InheritableParamAttr(AK, R) {}
+
+public:
+  void setInherited(bool I) { Inherited = I; }
+
+  // Implement isa/cast/dyncast/etc.
+  static bool classof(const Attr *A) {
+    return A->getKind() <= attr::LAST_MS_SA;
+  }
+  static bool classof(const MsSAAttr *) { return true; }
+};
+
 #include "clang/AST/Attrs.inc"
 
 }  // end namespace clang

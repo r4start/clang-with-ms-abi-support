@@ -22,6 +22,7 @@
 using namespace clang;
 using namespace CodeGen;
 
+// r4start
 namespace {
 
 class MicrosoftCXXABI : public CGCXXABI {
@@ -45,10 +46,7 @@ public:
   void BuildDestructorSignature(const CXXDestructorDecl *Ctor,
                                 CXXDtorType Type,
                                 CanQualType &ResTy,
-                                SmallVectorImpl<CanQualType> &ArgTys) {
-    // 'this' is already in place
-    // TODO: 'for base' flag
-  }
+                                SmallVectorImpl<CanQualType> &ArgTys);
 
   void BuildInstanceFunctionParams(CodeGenFunction &CGF,
                                    QualType &ResTy,
@@ -115,29 +113,52 @@ bool MicrosoftCXXABI::needThisReturn(GlobalDecl GD) {
 }
 
 void MicrosoftCXXABI::BuildConstructorSignature(const CXXConstructorDecl *Ctor,
-                                 CXXCtorType Type,
-                                 CanQualType &ResTy,
-                                 SmallVectorImpl<CanQualType> &ArgTys) {
+                                                CXXCtorType Type,
+                                                CanQualType &ResTy,
+                                   llvm::SmallVectorImpl<CanQualType> &ArgTys) {
+    // 'this' is already in place
+    // Ctor returns this ptr
+    ResTy = ArgTys[0];
+
+    const CXXRecordDecl *Class = Ctor->getParent();
+    if (!Class->getNumVBases())
+      return;
+    ArgTys.push_back(CGM.getContext().Char32Ty);
+}
+void MicrosoftCXXABI::BuildDestructorSignature(const CXXDestructorDecl *Ctor,
+                                               CXXDtorType Type,
+                                               CanQualType &ResTy,
+                                   llvm::SmallVectorImpl<CanQualType> &ArgTys) {
   // 'this' is already in place
   // TODO: 'for base' flag
-  // Ctor returns this ptr
-  ResTy = ArgTys[0];
+  // TODO: add RTTI if need
 }
 
 void MicrosoftCXXABI::BuildInstanceFunctionParams(CodeGenFunction &CGF,
                                                   QualType &ResTy,
                                                   FunctionArgList &Params) {
-  BuildThisParam(CGF, Params);
-  if (needThisReturn(CGF.CurGD)) {
-    ResTy = Params[0]->getType();
-  }
+    BuildThisParam(CGF, Params);
+    if (NeedThisReturn(CGF.CurGD)) {
+      ResTy = Params[0]->getType();
+    }
+
+    const CXXMethodDecl *MD = cast<CXXMethodDecl>(CGF.CurGD.getDecl());
+    if (!MD->getParent()->getNumVBases() || !isa<CXXConstructorDecl>(MD))
+      return;
+    ImplicitParamDecl *FlagDecl
+      = ImplicitParamDecl::Create(CGM.getContext(), 0, MD->getLocation(),
+      &CGM.getContext().Idents.get("ctor.flag"),
+      CGM.getContext().Char32Ty);
+    Params.push_back(FlagDecl);
 }
 
 void MicrosoftCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
   EmitThisParam(CGF);
-  if (needThisReturn(CGF.CurGD)) {
+
+  if (NeedThisReturn(CGF.CurGD)) {
     CGF.Builder.CreateStore(getThisValue(CGF), CGF.ReturnValue);
   }
+  // TODO: 'for base' flag
 }
 
 bool MicrosoftCXXABI::requiresArrayCookie(const CXXDeleteExpr *expr,

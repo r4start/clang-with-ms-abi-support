@@ -557,7 +557,9 @@ public:
 
   /// Return information about the specified preprocessor
   /// identifier token.
-  IdentifierInfo *getIdentifierInfo(StringRef Name) const {
+  IdentifierInfo *getIdentifierInfo(StringRef Name, bool MSIdentifier = false) const {
+    if (MSIdentifier)
+      return &Identifiers.getMSIdentifier(Name);
     return &Identifiers.get(Name);
   }
 

@@ -19,6 +19,7 @@
 #include "clang/AST/GlobalDecl.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/Basic/ABI.h"
+#include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/SetVector.h"
 #include <utility>
 
@@ -280,6 +281,10 @@ private:
     VTableLayoutMapTy;
   VTableLayoutMapTy VTableLayouts;
 
+  /// r4start
+  /// Table for vftable layouts.
+  llvm::DenseMap<const CXXRecordDecl *, VTableLayoutMapTy > VFTablesLayouts;
+
   /// NumVirtualFunctionPointers - Contains the number of virtual function
   /// pointers in the vtable for a given record decl.
   llvm::DenseMap<const CXXRecordDecl *, uint64_t> NumVirtualFunctionPointers;
@@ -306,6 +311,10 @@ private:
   /// given record decl.
   void ComputeVTableRelatedInformation(const CXXRecordDecl *RD);
 
+  /// r4start
+  void ComputeVFTableRelatedInformation(const CXXRecordDecl *RD,
+                                        const CXXRecordDecl *Base);
+
 public:
   VTableContext(ASTContext &Context) : Context(Context) {}
   ~VTableContext();
@@ -317,6 +326,13 @@ public:
     return *VTableLayouts[RD];
   }
 
+  /// r4start
+  const VTableLayout &getVFTableLayout(const CXXRecordDecl *RD,
+                                       const CXXRecordDecl *Base) {
+    ComputeVFTableRelatedInformation(RD, Base);
+    return *VFTablesLayouts[RD][Base];
+  }
+
   VTableLayout *
   createConstructionVTableLayout(const CXXRecordDecl *MostDerivedClass,
                                  CharUnits MostDerivedClassOffset,
@@ -324,6 +340,9 @@ public:
                                  const CXXRecordDecl *LayoutClass);
 
   const ThunkInfoVectorTy *getThunkInfo(const CXXMethodDecl *MD) {
+    // r4start
+    assert(Context.getTargetInfo().getCXXABI() != CXXABI_Microsoft &&
+           "getThunkInfo doesn`t work in MS ABI!");
     ComputeVTableRelatedInformation(MD->getParent());
 
     ThunksMapTy::const_iterator I = Thunks.find(MD);
@@ -334,6 +353,8 @@ public:
 
     return &I->second;
   }
+
+  const ThunkInfoVectorTy *getThunkInfoMS(const CXXMethodDecl *MD);
 
   /// getNumVirtualFunctionPointers - Return the number of virtual function
   /// pointers in the vtable for a given record decl.

@@ -102,5 +102,9 @@ OVERLOADED_OPERATOR_MULTI(Subscript      , "[]"                       , false, t
 // resolution machinery for it.
 OVERLOADED_OPERATOR_MULTI(Conditional    , "?"                        , false, true , false)
 
+// r4start
+// Operators for Microsoft.
+// OVERLOADED_OPERATOR_MULTI(ScalarDeletingDestructor, ""	              , false, false, true)
+
 #undef OVERLOADED_OPERATOR_MULTI
 #undef OVERLOADED_OPERATOR
