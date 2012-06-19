@@ -1095,6 +1095,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   if (getLangOpts().MicrosoftExt)
       attrs.takeAllFrom(DS.getAttributes());
 #endif
+
   // If attributes exist after tag, parse them.
   if (Tok.is(tok::kw___attribute))
     ParseGNUAttributes(attrs);
@@ -3389,16 +3390,9 @@ void Parser::ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
 ///             ms-attribute ms-attribute-seq
 void Parser::ParseMicrosoftAttributes(ParsedAttributes &attrs,
                                       SourceLocation *endLoc) {
-  assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
   //assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
 
-  while (Tok.is(tok::l_square)) {
-    // FIXME: If this is actually a C++11 attribute, parse it as one.
-    ConsumeBracket();
-    SkipUntil(tok::r_square, true, true);
-    if (endLoc) *endLoc = Tok.getLocation();
-    ExpectAndConsume(tok::r_square, diag::err_expected_rsquare);
-  }
+
 #if 0
   //SourceLocation StartLoc = Tok.getLocation(), Loc;
   //if (!endLoc)

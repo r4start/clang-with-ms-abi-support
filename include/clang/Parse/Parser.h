@@ -44,7 +44,7 @@ namespace clang {
   class InMessageExpressionRAIIObject;
   class PoisonSEHIdentifiersRAIIObject;
   class VersionTuple;
-
+  
 /// Parser - This implements a parser for the C family of languages.  After
 /// parsing units of the grammar, productions are invoked to handle whatever has
 /// been read.
@@ -73,7 +73,7 @@ class Parser : public CodeCompletionHandler {
   unsigned short ParenCount, BracketCount, BraceCount;
   
   /// Actions - These are the callbacks we invoke as we parse various constructs
-  /// in the file.
+  /// in the file. 
   Sema &Actions;
 
   DiagnosticsEngine &Diags;
@@ -181,7 +181,7 @@ class Parser : public CodeCompletionHandler {
   SmallVector<IdentifierInfo *, 8> TentativelyDeclaredIdentifiers;
 
   IdentifierInfo *getSEHExceptKeyword();
-
+  
   /// True if we are within an Objective-C container while parsing C-like decls.
   ///
   /// This is necessary because Sema thinks we have left the container
@@ -289,6 +289,7 @@ private:
   /// \brief Returns true if the current token is '=' or is a type of '='.
   /// For typos, give a fixit to '='
   bool isTokenEqualOrEqualTypo();
+
 
   /// ConsumeAnyToken - Dispatch to the right Consume* method based on the
   /// current token type.  This should only be used in cases where the type of
@@ -620,7 +621,7 @@ private:
   /// or, if there's just some closing-delimiter noise (e.g., ')' or ']') prior
   /// to the semicolon, consumes that extra token.
   bool ExpectAndConsumeSemi(unsigned DiagID);
-
+  
   /// \brief The kind of extra semi diagnostic to emit.
   enum ExtraSemiKind {
     OutsideFunction = 0,
@@ -781,9 +782,9 @@ private:
     ParsingClass *Class;
   };
 
-  /// Contains the lexed tokens of an attribute with arguments that
-  /// may reference member variables and so need to be parsed at the
-  /// end of the class declaration after parsing all other member
+  /// Contains the lexed tokens of an attribute with arguments that 
+  /// may reference member variables and so need to be parsed at the 
+  /// end of the class declaration after parsing all other member 
   /// member declarations.
   /// FIXME: Perhaps we should change the name of LateParsedDeclaration to
   /// LateParsedTokens.
@@ -794,7 +795,7 @@ private:
     SourceLocation AttrNameLoc;
     SmallVector<Decl*, 2> Decls;
 
-    explicit LateParsedAttribute(Parser *P, IdentifierInfo &Name,
+    explicit LateParsedAttribute(Parser *P, IdentifierInfo &Name, 
                                  SourceLocation Loc)
       : Self(P), AttrName(Name), AttrNameLoc(Loc) {}
 
@@ -909,7 +910,7 @@ private:
   /// the method declarations and possibly attached inline definitions
   /// will be stored here with the tokens that will be parsed to create those 
   /// entities.
-  typedef SmallVector<LateParsedDeclaration*,2> LateParsedDeclarationsContainer;
+  typedef SmallVector<LateParsedDeclaration*, 2> LateParsedDeclarationsContainer;
 
   /// \brief Representation of a class that has been parsed, including
   /// any member function declarations or definitions that need to be
@@ -987,7 +988,7 @@ private:
                        bool isSpecialization,
                        bool lastParameterListWasEmpty = false)
       : Kind(isSpecialization? ExplicitSpecialization : Template),
-        TemplateParams(TemplateParams),
+        TemplateParams(TemplateParams), 
         LastParameterListWasEmpty(lastParameterListWasEmpty) { }
 
     explicit ParsedTemplateInfo(SourceLocation ExternLoc,
@@ -1104,7 +1105,7 @@ private:
   DeclGroupPtrTy ParseDeclOrFunctionDefInternal(ParsedAttributesWithRange &attrs,
                                                 ParsingDeclSpec &DS,
                                                 AccessSpecifier AS);
-
+  
   Decl *ParseFunctionDefinition(ParsingDeclarator &D,
                  const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
                  LateParsedAttrList *LateParsedAttrs = 0);
@@ -1316,6 +1317,10 @@ private:
   ExprResult ParseCXXUuidof();
 
   //===--------------------------------------------------------------------===//
+  //  C++ : Microsoft __identifier Expression
+  void TryAnnotateIdentifier();
+
+  //===--------------------------------------------------------------------===//
   // C++ 5.2.4: C++ Pseudo-Destructor Expressions
   ExprResult ParseCXXPseudoDestructor(ExprArg Base, SourceLocation OpLoc,
                                             tok::TokenKind OpKind,
@@ -1485,14 +1490,15 @@ private:
   };
 
   /// \brief Describes the condition of a Microsoft __if_exists or
+
   /// __if_not_exists block.
   struct IfExistsCondition {
     /// \brief The location of the initial keyword.
     SourceLocation KeywordLoc;
-    /// \brief Whether this is an __if_exists block (rather than an
+    /// \brief Whether this is an __if_exists block (rather than an 
     /// __if_not_exists block).
     bool IsIfExists;
-
+    
     /// \brief Nested-name-specifier preceding the name.
     CXXScopeSpec SS;
 
@@ -1629,7 +1635,7 @@ private:
   bool isDeclarationSpecifier(bool DisambiguatingWithExpression = false);
   bool isTypeSpecifierQualifier();
   bool isTypeQualifier() const;
-
+  
   /// isKnownToBeTypeSpecifier - Return true if we know that the specified token
   /// is definitely a type-specifier.  Return false if it isn't part of a type
   /// specifier or if we're not sure.
@@ -1886,8 +1892,8 @@ private:
 
   void MaybeParseMicrosoftAttributes(ParsedAttributes &attrs,
                                      SourceLocation *endLoc = 0) {
-    if (getLangOpts().MicrosoftExt && Tok.is(tok::l_square))
-      ParseMicrosoftAttributes(attrs, endLoc);
+    if (getLangOpts().MicrosoftExt && isMicrosoftAttributeSpecifier())
+        ParseMicrosoftAttributes(attrs, endLoc);
   }
   
   //DAEMON
@@ -2031,7 +2037,7 @@ private:
   // DAEMON
   bool isMicrosoftAttributeSpecifier(bool FullLookahead = false, 
                                  tok::TokenKind *After = 0);
-  
+
   Decl *ParseNamespace(unsigned Context, SourceLocation &DeclEnd,
                        SourceLocation InlineLoc = SourceLocation());
   void ParseInnerNamespace(std::vector<SourceLocation>& IdentLoc,
@@ -2086,13 +2092,13 @@ private:
 
   //===--------------------------------------------------------------------===//
   // C++ 10: Derived classes [class.derived]
-  TypeResult ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
+  TypeResult ParseBaseTypeSpecifier(SourceLocation &BaseLoc, 
                                     SourceLocation &EndLocation);
   void ParseBaseClause(Decl *ClassDecl);
   BaseResult ParseBaseSpecifier(Decl *ClassDecl);
   AccessSpecifier getAccessSpecifierIfPresent() const;
 
-  bool ParseUnqualifiedIdTemplateId(CXXScopeSpec &SS,
+  bool ParseUnqualifiedIdTemplateId(CXXScopeSpec &SS, 
                                     SourceLocation TemplateKWLoc,
                                     IdentifierInfo *Name,
                                     SourceLocation NameLoc,
@@ -2111,7 +2117,7 @@ public:
                           ParsedType ObjectType,
                           SourceLocation& TemplateKWLoc,
                           UnqualifiedId &Result);
-
+    
 private:
   //===--------------------------------------------------------------------===//
   // C++ 14: Templates [temp]
