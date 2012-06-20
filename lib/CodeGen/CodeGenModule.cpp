@@ -1421,11 +1421,6 @@ CodeGenModule::getVTableLinkage(const CXXRecordDecl *RD) {
   if (RD->getLinkage() != ExternalLinkage)
     return llvm::GlobalVariable::InternalLinkage;
 
-  // r4start
-  /*if (getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
-    return llvm::GlobalVariable::WeakODRLinkage;
-  }*/
-
   if (const CXXMethodDecl *KeyFunction
                                     = RD->getASTContext().getKeyFunction(RD)) {
     // If this class has a key function, use that to determine the linkage of
