@@ -3148,7 +3148,7 @@ void Parser::ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
     attr = attrs.addNew(AttrName, SourceRange(AttrNameLoc, argsEnd), 
                 ApplicationScopeName, ApplicationScopeLoc,
                 0, SourceLocation(),
-                ArgExprs.take(), ArgExprs.size());
+                ArgExprs.take(), ArgExprs.size(), AttributeList::AS_GNU);
     attr->setMsAttributeRecordDecl(RD);
   }
 

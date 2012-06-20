@@ -657,25 +657,26 @@ def VecTypeHint : Attr {
   let SemaHandler = 0;
   let Ignored = 1;
 }
+
 def UnknownDeclspec : InheritableAttr {
-  let Spellings = ["unknown_declspec"];
+  let Spellings = [Declspec<"unknown_declspec">];
   let Args = [StringArgument<"Name">];
 }
 
 def MsAttributeAttribute : InheritableAttr {
-  let Spellings = ["attribute"];
+  let Spellings = [Declspec<"attribute">];
   let Args = [IntArgument<"ValidOn">,
 			  BoolArgument<"AllowMultiple">];
 }
 
 def MsSourceAnnotationAttributeAttribute : InheritableAttr {
-  let Spellings = ["source_annotation_attribute"];
+  let Spellings = [Declspec<"source_annotation_attribute">];
   let Args = [IntArgument<"ValidOn">,
 			  BoolArgument<"AllowMultiple">];
 }
 
 def MsDefaultValueAttribute : InheritableAttr {
-  let Spellings = ["default_value"];
+  let Spellings = [Declspec<"default_value">];
   let Args = [ExprArgument<"Value">];
 }
 
