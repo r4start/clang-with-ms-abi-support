@@ -410,7 +410,7 @@ void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
   
   // This is always reference?
   Out << "?A";
-  //mangleType(RD->getASTContext().getRecordType(RD)); // DAEMON! Todo!
+  mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
   // End magic number
   Out << "@8";
 }
@@ -1990,7 +1990,7 @@ MicrosoftMangleContext::mangleCXXRTTITypeDescriptor(const CXXRecordDecl *RD,
 void MicrosoftMangleContext::mangleCXXRTTIName(QualType T,
                                                raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
-  //mangler.mangleType(T); //DAEMON! Todo!
+  mangler.mangleType(T, SourceRange());
 }
 
 MSMangleContextExtensions* MicrosoftMangleContext::getMsExtensions() {
