@@ -835,6 +835,36 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
 
   InitializeVTablePointers(ClassDecl);
 
+  // Vtordisp fields initialization if needed.
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
+      ClassDecl->getNumVBases()) {
+    
+    const ASTRecordLayout::VBaseOffsetsMapTy &vbasesOffsets = 
+      CGM.getContext().getASTRecordLayout(ClassDecl).getVBaseOffsetsMap();
+
+    VBTableContext& vbContext = CGM.getVBTableContext();
+    
+    llvm::GlobalVariable *vbTable = 
+      CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
+
+    for (ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
+         I = vbasesOffsets.begin(), E = vbasesOffsets.end(); I != E; ++I) {
+      if (!I->second.hasVtorDisp())
+        continue;
+      auto vbEntry = vbContext.getEntryFromVBTable(ClassDecl, ClassDecl,
+                                                   I->first);
+      /*llvm::Value *VBTableAddressPoint = 
+        Builder.CreateConstInBoundsGEP1_64(vbTable, 0, "vbtable.addr2");
+
+      llvm::Value *indexVal = 
+        Builder.CreateConstInBoundsGEP2_32(vbTable, 0, vbEntry.index,
+                                           "offset.from.vbtable");*/
+      //indexVal = Builder.CreateBitCast(indexVal, CGM.Int32Ty);
+      //llvm::Value *vtValue = Builder.CreateAlloca(CGM.Int32Ty, 0, "vb.offset");
+      //Builder.CreateStore(vtValue, indexVal);
+    }
+  }
+
   for (unsigned I = 0, E = MemberInitializers.size(); I != E; ++I)
     EmitMemberInitializer(*this, ClassDecl, MemberInitializers[I], CD, Args);
 }
