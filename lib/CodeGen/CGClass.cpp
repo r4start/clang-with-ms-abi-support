@@ -819,6 +819,11 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
        B != E; ++B) {
     CXXCtorInitializer *Member = (*B);
     
+    // r4start
+    // Skip all added initializers at vbtable.init section.
+    if (VisitedCtorInitializers.count(Member))
+      continue;
+
     if (Member->isBaseInitializer()) {
       EmitBaseInitializer(*this, ClassDecl, Member, CtorType);
     } else {
