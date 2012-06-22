@@ -1657,13 +1657,18 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
   llvm::GlobalVariable *vbTable = 
                         CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
 
-  for (ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
-       I = vbasesOffsets.begin(), E = vbasesOffsets.end(); I != E; ++I) {
-    if (!I->second.hasVtorDisp())
+  for (CXXRecordDecl::base_class_const_iterator I = ClassDecl->vbases_begin(),
+       E = ClassDecl->vbases_end(); I != E; ++I) {
+
+    auto vbaseOffset = vbasesOffsets.find(I->getType()->getAsCXXRecordDecl());
+    assert(vbaseOffset != vbasesOffsets.end() && 
+                                           "VBase is not present in vb-table!");
+
+    if (!vbaseOffset->second.hasVtorDisp())
       continue;
 
     const VBTableContext::VBTableEntry vbEntry = 
-      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, I->first);
+      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, vbaseOffset->first);
 
     llvm::Value *thisPtr = LoadCXXThis();
     thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
@@ -1682,7 +1687,7 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
       Builder.CreateLoad(vbOffsetFromTable, "vb.offset");
 
     llvm::Value *number = llvm::ConstantInt::get(CGM.Int32Ty, 
-      I->second.VBaseOffset.getQuantity());
+      vbaseOffset->second.VBaseOffset.getQuantity());
 
     llvm::Value *vtordispVal = 
       Builder.CreateSub(vbOffset, number, "vtordisp.val");
@@ -1691,7 +1696,7 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     // In MS ABI
     // mov dword ptr [ecx+eax-4],edx 
     llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
-                                      I->second.VBaseOffset.getQuantity() - 4);
+                                      vbaseOffset->second.VBaseOffset.getQuantity() - 4);
 
     vtordispPtr = Builder.CreateBitCast(vtordispPtr, Int32PtrTy);
     Builder.CreateStore(vtordispVal, vtordispPtr);
@@ -1741,6 +1746,7 @@ CodeGenFunction::MSInsertVBtableInitializationBlock(const CXXRecordDecl *Class,
   Builder.SetInsertPoint(VBTableSkipInit);
 }
 
+// r4start
 void CodeGenFunction::MSInitializeVBTablePointer(llvm::Constant *VBTable,
                                                  CharUnits Offset) {
   llvm::Value *ThisPtr = LoadCXXThis();
