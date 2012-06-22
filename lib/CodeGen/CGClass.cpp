@@ -881,6 +881,7 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
       llvm::Value *vtordispVal = 
         Builder.CreateSub(vbOffset, number, "vtordisp.val");
 
+      // r4start
       // In MS ABI
       // mov dword ptr [ecx+eax-4],edx 
       llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
