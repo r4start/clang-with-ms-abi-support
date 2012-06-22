@@ -771,10 +771,11 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
 
   const CXXRecordDecl *ClassDecl = CD->getParent();
   llvm::SmallPtrSet<CXXCtorInitializer *, 8> VisitedCtorInitializers;
+  bool isMSABI = 
+              CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
 
   // r4start
-  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
-      ClassDecl->getNumVBases()) {
+  if (isMSABI && ClassDecl->getNumVBases()) {
     llvm::Constant *Zero = llvm::ConstantInt::get(CGM.Int32Ty, 0);
     llvm::Value *FlagParam = 
       (++(CurFn->arg_begin()))->getValueName()->getValue();
@@ -836,60 +837,8 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
   InitializeVTablePointers(ClassDecl);
 
   // Vtordisp fields initialization if needed.
-  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
-      ClassDecl->getNumVBases()) {
-    
-    const ASTRecordLayout &L = CGM.getContext().getASTRecordLayout(ClassDecl);
-    llvm::Type *Int32PtrTy = llvm::Type::getInt32PtrTy(CGM.getLLVMContext());
-
-    const ASTRecordLayout::VBaseOffsetsMapTy &vbasesOffsets = 
-      L.getVBaseOffsetsMap();
-
-    CharUnits vbTableOffset = L.getVBPtrOffset();
-
-    VBTableContext& vbContext = CGM.getVBTableContext();
-    
-    llvm::GlobalVariable *vbTable = 
-      CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
-
-    for (ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
-         I = vbasesOffsets.begin(), E = vbasesOffsets.end(); I != E; ++I) {
-      if (!I->second.hasVtorDisp())
-        continue;
-
-      auto vbEntry = vbContext.getEntryFromVBTable(ClassDecl, ClassDecl,
-                                                   I->first);
-
-      llvm::Value *thisPtr = LoadCXXThis();
-      thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
-
-      llvm::Value *vbTablePtr = 
-        Builder.CreateConstInBoundsGEP1_32(thisPtr, vbTableOffset.getQuantity(),
-                                          "vbtable.ptr");
-      vbTablePtr = Builder.CreateBitCast(vbTablePtr, Int32PtrTy,
-                                         "vbtable.i32.ptr");
-      llvm::Value *vbOffsetFromTable = 
-        Builder.CreateConstGEP1_32(vbTablePtr, vbEntry.index, 
-                                   "offset.from.table");
-
-      llvm::Value *vbOffset = 
-        Builder.CreateLoad(vbOffsetFromTable, "vb.offset");
-
-      llvm::Value *number = llvm::ConstantInt::get(CGM.Int32Ty, 
-                                           I->second.VBaseOffset.getQuantity());
-      
-      llvm::Value *vtordispVal = 
-        Builder.CreateSub(vbOffset, number, "vtordisp.val");
-
-      // r4start
-      // In MS ABI
-      // mov dword ptr [ecx+eax-4],edx 
-      llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
-                                       I->second.VBaseOffset.getQuantity() - 4);
-
-      vtordispPtr = Builder.CreateBitCast(vtordispPtr, Int32PtrTy);
-      Builder.CreateStore(vtordispVal, vtordispPtr);
-    }
+  if (isMSABI && ClassDecl->getNumVBases()) {
+    MSInitilizeVtordisps(ClassDecl);
   }
 
   for (unsigned I = 0, E = MemberInitializers.size(); I != E; ++I)
@@ -1719,6 +1668,64 @@ void CodeGenFunction::InitializeVTablePointers(const CXXRecordDecl *RD) {
                            /*OffsetFromNearestVBase=*/CharUnits::Zero(),
                            /*BaseIsNonVirtualPrimaryBase=*/false, 
                            VTable, RD, VBases);
+}
+
+void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
+  assert(ClassDecl->getNumVBases() && 
+                                 "Vtordisps present only if class has vbases!");
+
+  const ASTRecordLayout &L = CGM.getContext().getASTRecordLayout(ClassDecl);
+  llvm::Type *Int32PtrTy = llvm::Type::getInt32PtrTy(CGM.getLLVMContext());
+
+  const ASTRecordLayout::VBaseOffsetsMapTy &vbasesOffsets = 
+                                                         L.getVBaseOffsetsMap();
+
+  CharUnits vbTableOffset = L.getVBPtrOffset();
+
+  VBTableContext& vbContext = CGM.getVBTableContext();
+
+  llvm::GlobalVariable *vbTable = 
+                        CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
+
+  for (ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
+       I = vbasesOffsets.begin(), E = vbasesOffsets.end(); I != E; ++I) {
+    if (!I->second.hasVtorDisp())
+      continue;
+
+    const VBTableContext::VBTableEntry vbEntry = 
+      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, I->first);
+
+    llvm::Value *thisPtr = LoadCXXThis();
+    thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
+
+    llvm::Value *vbTablePtr = 
+      Builder.CreateConstInBoundsGEP1_32(thisPtr, vbTableOffset.getQuantity(),
+                                          "vbtable.ptr");
+    vbTablePtr = Builder.CreateBitCast(vbTablePtr, Int32PtrTy,
+      "vbtable.i32.ptr");
+
+    llvm::Value *vbOffsetFromTable = 
+      Builder.CreateConstGEP1_32(vbTablePtr, vbEntry.index, 
+                                  "offset.from.table");
+
+    llvm::Value *vbOffset = 
+      Builder.CreateLoad(vbOffsetFromTable, "vb.offset");
+
+    llvm::Value *number = llvm::ConstantInt::get(CGM.Int32Ty, 
+      I->second.VBaseOffset.getQuantity());
+
+    llvm::Value *vtordispVal = 
+      Builder.CreateSub(vbOffset, number, "vtordisp.val");
+
+    // r4start
+    // In MS ABI
+    // mov dword ptr [ecx+eax-4],edx 
+    llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
+                                      I->second.VBaseOffset.getQuantity() - 4);
+
+    vtordispPtr = Builder.CreateBitCast(vtordispPtr, Int32PtrTy);
+    Builder.CreateStore(vtordispVal, vtordispPtr);
+  }
 }
 
 void CodeGenFunction::MSInitializeVBTablePointer(llvm::Constant *VBTable,

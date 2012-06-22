@@ -1447,6 +1447,9 @@ public:
   /// r4start
   void MSInitializeVFTablePointers(const CXXRecordDecl *Class);
 
+  /// r4start
+  void MSInitilizeVtordisps(const CXXRecordDecl *Class);
+
   /// GetVTablePtr - Return the Value of the vtable pointer member pointed
   /// to by This.
   llvm::Value *GetVTablePtr(llvm::Value *This, llvm::Type *Ty);
