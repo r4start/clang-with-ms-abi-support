@@ -337,16 +337,32 @@ static bool IsClassHasOneVFTable(const ASTContext &Ctx,
 
   if (vftableCount) {
     Counter += vftableCount;
-    return false;
   }
 
-  return true;
+  return Counter == 1;
 }
 
 static bool IsClassHasOneVFTable(const ASTContext &Ctx, 
                                  const CXXRecordDecl *Class) {
   int vftableCount = 0;
   return IsClassHasOneVFTable(Ctx, Class, vftableCount);
+}
+
+static const CXXRecordDecl *ClassForVFTableName(const ASTContext &Ctx,
+                                                const CXXRecordDecl *Base,
+                                                CXXBasePath &Path) {
+  bool isPrimary = true;
+  for (auto I = Path.rbegin(), E = Path.rend(); I != E - 1; ++I) {
+    const ASTRecordLayout &L = Ctx.getASTRecordLayout(I->Class);
+    isPrimary = isPrimary && 
+                 L.getPrimaryBase() == I->Base->getType()->getAsCXXRecordDecl();
+  }
+
+  if (isPrimary) {
+    return Path.begin()->Base->getType()->getAsCXXRecordDecl();
+  }
+
+  return 0;
 }
 
 void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
@@ -370,11 +386,36 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
                     const_cast<CXXRecordDecl *>(BaseClass->getCanonicalDecl()),
                       Paths);
 
-    if (!IsPrimaryBase(Context.getASTContext(), Paths.front()) &&
-        !IsClassHasOneVFTable(getASTContext(), RD)) {
-      mangleName(BaseClass);
+    bool isPrimary = IsPrimaryBase(Context.getASTContext(), Paths.front());
+    bool isClassHasOneVFTable = IsClassHasOneVFTable(getASTContext(), RD);
+    
+    if ((!isPrimary && !isClassHasOneVFTable)) {
+      if (auto CX = ClassForVFTableName(Context.getASTContext(),
+                                                    BaseClass, Paths.front())) {
+        mangleName(CX);
+      } else {
+        mangleName(BaseClass);
+      }
+    } else if (isPrimary && !isClassHasOneVFTable && 
+               BaseClass->isPolymorphic()) {
+      if (auto CX = ClassForVFTableName(Context.getASTContext(),
+                                                  BaseClass, Paths.front())) {
+        mangleName(CX);
+      } else {
+        mangleName(BaseClass);
+      }
+    } else if ((!isPrimary || !isClassHasOneVFTable) && 
+               !ClassDeclaresNewVirtualFunction(RD) && 
+               (!isClassHasOneVFTable || RD->field_empty())) {
+      // field empty means that RD doesn`t declare any new
+      if (auto CX = ClassForVFTableName(Context.getASTContext(),
+                                                  BaseClass, Paths.front())) {
+        mangleName(CX);
+      } else {
+        mangleName((Paths.front().begin())->Base->getType()->getAsCXXRecordDecl());
+      }
+      
     }
-
   } else if (Layout.hasOwnVFPtr() && 
                                     IsVBasesHasVFTables(getASTContext(), RD)) {
     Out << "0@";
