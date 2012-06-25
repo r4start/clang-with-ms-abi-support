@@ -1696,7 +1696,7 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     // In MS ABI
     // mov dword ptr [ecx+eax-4],edx 
     llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
-                                      vbaseOffset->second.VBaseOffset.getQuantity() - 4);
+                             vbaseOffset->second.VBaseOffset.getQuantity() - 4);
 
     vtordispPtr = Builder.CreateBitCast(vtordispPtr, Int32PtrTy);
     Builder.CreateStore(vtordispVal, vtordispPtr);
