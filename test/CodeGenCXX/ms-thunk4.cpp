@@ -26,9 +26,7 @@ int main() {
 
 // CHECK: @"\01??_7second@@6Bfirst@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6Bfirst@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@$4-VTORDISP-PPPPPPPM@UAEXXZ" to i8*)]
 
-// FIXME: @"\01??_7second@@6Bnull@"
-
-// CHECK: @"\01??_7second@@6B@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6B@" to i8*), i8* bitcast (void (%class.second*)* @"\01?uiiiii@second@@UAEXXZ" to i8*), i8* bitcast (void (%class.second*)* @"\01??1second@@UAE@XZ" to i8*)]
+// CHECK: @"\01??_7second@@6Bnull@@@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6Bnull@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?uiiiii@second@@UAEXXZ" to i8*), i8* bitcast (void (%class.second*)* @"\01??1second@@UAE@XZ" to i8*)]
 
 // CHECK:      define linkonce_odr void @"\01?asdf@second@@$4-VTORDISP-PPPPPPPM@UAEXXZ"(%class.second* %this) {
 // CHECK-NEXT: entry:

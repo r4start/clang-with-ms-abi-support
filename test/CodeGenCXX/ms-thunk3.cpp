@@ -41,7 +41,7 @@ int main() {
 // FIXME: @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ"
 // FIXME: @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ"
 
-// CHECK: @"\01??_7sd@@6Bf@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6Bf@@@" to i8*), i8* bitcast (i32 (%struct.sd*)* @"\01?asd@sd@@$4-VTORDISP-PPPPPPPM@UAEHXZ" to i8*)]
+// CHECK: @"\01??_7sd@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6B@" to i8*), i8* bitcast (i32 (%struct.sd*)* @"\01?asd@sd@@$4-VTORDISP-PPPPPPPM@UAEHXZ" to i8*)]
 
 // CHECK: @"\01??_7sd@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$R4-VTORDISP-BI@PPPPPPPM@UAEXXZ" to i8*)]
 
@@ -65,7 +65,7 @@ int main() {
 // FIXME: @"\01??_R4s@@6B@@@"
 // FIXME: @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ"
 
-// CHECK: @"\01??_7s@@6Bf@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6Bf@@@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4-VTORDISP-PPPPPPPM@UAEHXZ" to i8*)]
+// CHECK: @"\01??_7s@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6B@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4-VTORDISP-PPPPPPPM@UAEHXZ" to i8*)]
 
 /////////  VFTables in s end
 
