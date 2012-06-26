@@ -365,6 +365,17 @@ static const CXXRecordDecl *ClassForVFTableName(const ASTContext &Ctx,
   return 0;
 }
 
+static bool IsClassHasVFunctionDecl(const CXXRecordDecl *Class) {
+  for (auto I = Class->method_begin(), E = Class->method_end();
+       I != E; ++I) {
+    if (I->isVirtual() && I->getKind() != Decl::CXXDestructor) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
                                         const CXXRecordDecl *RD,
                                         const CXXRecordDecl *BaseClass,
@@ -388,33 +399,38 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
 
     bool isPrimary = IsPrimaryBase(Context.getASTContext(), Paths.front());
     bool isClassHasOneVFTable = IsClassHasOneVFTable(getASTContext(), RD);
+    bool isClassDeclaresNewVFunc = ClassDeclaresNewVirtualFunction(RD);
     
-    if ((!isPrimary && !isClassHasOneVFTable)) {
-      if (auto CX = ClassForVFTableName(Context.getASTContext(),
-                                                    BaseClass, Paths.front())) {
-        mangleName(CX);
-      } else {
-        mangleName(BaseClass);
-      }
-    } else if (isPrimary && !isClassHasOneVFTable && 
-               BaseClass->isPolymorphic()) {
-      if (auto CX = ClassForVFTableName(Context.getASTContext(),
-                                                  BaseClass, Paths.front())) {
-        mangleName(CX);
-      } else {
-        mangleName(BaseClass);
-      }
-    } else if ((!isPrimary || !isClassHasOneVFTable) && 
-               !ClassDeclaresNewVirtualFunction(RD) && 
-               (!isClassHasOneVFTable || RD->field_empty())) {
-      // field empty means that RD doesn`t declare any new
-      if (auto CX = ClassForVFTableName(Context.getASTContext(),
-                                                  BaseClass, Paths.front())) {
-        mangleName(CX);
-      } else {
-        mangleName((Paths.front().begin())->Base->getType()->getAsCXXRecordDecl());
-      }
+    if (!isPrimary) {
+      const CXXBaseSpecifier *base = Paths.front().begin()->Base;
       
+      // if class not first in base list or it is abstract then _7class@6Bbase.
+      // If class has new v-function, then it has _7class@6B0, 
+      // so vf-table mangles like _7class@6Bbase.
+      if (base != RD->bases_begin() || BaseClass->isAbstract() || 
+          isClassDeclaresNewVFunc || Layout.getPrimaryBase()) {
+        if (auto CX = ClassForVFTableName(Context.getASTContext(),
+                                                      BaseClass, Paths.front())) {
+          mangleName(CX);
+        } else {
+          mangleName(BaseClass);
+        }
+      } else if ((base == RD->bases_begin() && 
+                  base->isVirtual()) && !IsClassHasVFunctionDecl(RD)) {
+        // ms-thunk.cpp case.
+        // IsClassHasVFunctionDecl allow pass ms-thunk2.cpp test.
+        // Also need to investigate when use base-class name and when base.
+        mangleName(base->getType()->getAsCXXRecordDecl());
+      }
+    } else if (!isClassDeclaresNewVFunc && !isClassHasOneVFTable) {
+      // This case very strange, but we have ms-thunk4.cpp.
+      // Why cl mangle primary base vf-table like normal base?
+      if (auto CX = ClassForVFTableName(Context.getASTContext(),
+        BaseClass, Paths.front())) {
+          mangleName(CX);
+      } else {
+        mangleName(BaseClass);
+      }
     }
   } else if (Layout.hasOwnVFPtr() && 
                                     IsVBasesHasVFTables(getASTContext(), RD)) {
