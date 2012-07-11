@@ -36,14 +36,9 @@ int main() {
 
 /////////  VFTables in sd start
 
-// FIXME: @"\01??_7sd@@6B@@@"
-// FIXME: @"\01??_R4sd@@6B@@@"
-// FIXME: @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ"
-// FIXME: @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ"
+// CHECK: @"\01??_7sd@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6B@" to i8*), i8* bitcast (i32 (%struct.sd*)* @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ" to i8*)]
 
-// CHECK: @"\01??_7sd@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6B@" to i8*), i8* bitcast (i32 (%struct.sd*)* @"\01?asd@sd@@$4-VTORDISP-PPPPPPPM@UAEHXZ" to i8*)]
-
-// CHECK: @"\01??_7sd@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$R4-VTORDISP-BI@PPPPPPPM@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7sd@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ" to i8*)]
 
 // CHECK: @"\01??_7sd@@6BICh@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BICh@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?iCh@ICh@@UAEXXZ" to i8*)]
 
@@ -51,11 +46,9 @@ int main() {
 
 /////////  VFTables in ICh start
 
-// FIXME:@"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ"
-
 // CHECK: @"\01??_7ICh@@6B0@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6B0@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?iCh@ICh@@UAEXXZ" to i8*)]
 
-// CHECK: @"\01??_7ICh@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$4-VTORDISP-PPPPPPPM@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7ICh@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ" to i8*)]
 
 /////////  VFTables in ICh end
 
@@ -63,14 +56,12 @@ int main() {
 
 // FIXME: @"\01??_7s@@6B@@@"
 // FIXME: @"\01??_R4s@@6B@@@"
-// FIXME: @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ"
 
-// CHECK: @"\01??_7s@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6B@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4-VTORDISP-PPPPPPPM@UAEHXZ" to i8*)]
+// CHECK: @"\01??_7s@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6B@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ" to i8*)]
 
 /////////  VFTables in s end
 
-
-// CHECK:      define linkonce_odr i32 @"\01?asd@sd@@$4-VTORDISP-PPPPPPPM@UAEHXZ"(%struct.sd* %this) {
+// CHECK:      define linkonce_odr i32 @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ"(%struct.sd* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %struct.sd*, align 4
 // CHECK-NEXT:   store %struct.sd* %this, %struct.sd** %this.addr, align 4
@@ -85,7 +76,7 @@ int main() {
 // CHECK-NEXT:   ret i32 %call
 // CHECK-NEXT: }
 
-// CHECK:      define linkonce_odr void @"\01?ia@ICh@@$R4-VTORDISP-BI@PPPPPPPM@UAEXXZ"(%class.ICh* %this) {
+// CHECK:      define linkonce_odr void @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ"(%class.ICh* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.ICh*, align 4
 // CHECK-NEXT:   store %class.ICh* %this, %class.ICh** %this.addr, align 4
@@ -106,7 +97,7 @@ int main() {
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
 
-// CHECK:      define available_externally void @"\01?ia@ICh@@$4-VTORDISP-PPPPPPPM@UAEXXZ"(%class.ICh* %this) {
+// CHECK:      define available_externally void @"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ"(%class.ICh* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.ICh*, align 4
 // CHECK-NEXT:   store %class.ICh* %this, %class.ICh** %this.addr, align 4
@@ -121,7 +112,7 @@ int main() {
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
 
-// CHECK:      define linkonce_odr i32 @"\01?asd@s@@$4-VTORDISP-PPPPPPPM@UAEHXZ"(%struct.s* %this) {
+// CHECK:      define linkonce_odr i32 @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ"(%struct.s* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %struct.s*, align 4
 // CHECK-NEXT:   store %struct.s* %this, %struct.s** %this.addr, align 4

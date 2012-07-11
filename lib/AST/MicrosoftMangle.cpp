@@ -45,7 +45,7 @@ public:
 
   void mangle(const NamedDecl *D, StringRef Prefix = "\01?");
   void mangleName(const NamedDecl *ND);
-  void mangleFunctionEncoding(const FunctionDecl *FD);
+  void mangleFunctionEncoding(const FunctionDecl *FD, bool IsThunk = false);
   void mangleVariableEncoding(const VarDecl *VD);
   void mangleNumber(int64_t Number);
   void mangleNumber(const llvm::APSInt &Value);
@@ -513,7 +513,8 @@ void MicrosoftCXXNameMangler::mangleCXXRTTIVBTable(
   Out << "@";
 }
 
-void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD) {
+void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD,
+                                                     bool IsThunk) {
   // <type-encoding> ::= <function-class> <function-type>
 
   // Don't mangle in the type if this isn't a decl we should typically mangle.
@@ -533,9 +534,10 @@ void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD) {
       InStructor = true;
   }
 
-  // First, the function class.
-  mangleFunctionClass(FD);
-
+  if (!IsThunk) {
+    // First, the function class.
+    mangleFunctionClass(FD);
+  }
   mangleType(FT, FD, InStructor, InInstMethod);
 }
 
@@ -1836,6 +1838,7 @@ void MicrosoftMangleContext::mangleThunk(const CXXMethodDecl *MD,
                      Layout.getVBaseOffsetsMap().end(),
                      CheckVtordisp());
 
+  bool isThunkVtordisp = false;
   if (I == Layout.getVBaseOffsetsMap().end()) {
     // Unknown prefix for number.
     Out << "W";
@@ -1847,15 +1850,29 @@ void MicrosoftMangleContext::mangleThunk(const CXXMethodDecl *MD,
       Out << "$R4";
     else
       Out << "$4";
-    Out << "-VTORDISP-";
     
-    if (Thunk.VFPtrOffset != uint32_t(-1))
+    if (Thunk.VFPtrOffset != uint32_t(-1)) {
       mangler.mangleNumber(Thunk.VFPtrOffset);
+    }
+    
+    if (Thunk.IsVtordispEx) {
+      mangler.mangleNumber((uint32_t)(-(Thunk.This.NonVirtual + 
+                                                Thunk.This.VCallOffsetOffset)));
+    }
     // When we have vtordisp thunk, number always is -4.
     mangler.mangleNumber(uint32_t(-4));
-  }
 
-  mangler.mangleFunctionEncoding(MD);
+    // I do not know why is this need, insted of mangle function type.
+    if (!Thunk.IsVtordispEx) {
+      Out << "A@";
+    } else {
+      Out << "M@";
+    }
+
+    isThunkVtordisp = true;
+  }
+  
+  mangler.mangleFunctionEncoding(MD, isThunkVtordisp);
 }
 void MicrosoftMangleContext::mangleCXXDtorThunk(const CXXDestructorDecl *DD,
                                                 CXXDtorType Type,

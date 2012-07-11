@@ -24,11 +24,11 @@ int main() {
 // Насколько я понимаю PPPPPPPM@A@A это все какие-то числа и скорее всего всякие оффсеты, аналогично как и некоторые структуры RTTI "манглятся".
 // FIXME: @"\01?asdf@second@@$4PPPPPPPM@A@AEXXZ"
 
-// CHECK: @"\01??_7second@@6Bfirst@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6Bfirst@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@$4-VTORDISP-PPPPPPPM@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7second@@6Bfirst@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6Bfirst@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@$4PPPPPPPM@A@AEXXZ" to i8*)]
 
 // CHECK: @"\01??_7second@@6Bnull@@@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6Bnull@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?uiiiii@second@@UAEXXZ" to i8*), i8* bitcast (void (%class.second*)* @"\01??1second@@UAE@XZ" to i8*)]
 
-// CHECK:      define linkonce_odr void @"\01?asdf@second@@$4-VTORDISP-PPPPPPPM@UAEXXZ"(%class.second* %this) {
+// CHECK:      define linkonce_odr void @"\01?asdf@second@@$4PPPPPPPM@A@AEXXZ"(%class.second* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.second*, align 4
 // CHECK-NEXT:   store %class.second* %this, %class.second** %this.addr, align 4
