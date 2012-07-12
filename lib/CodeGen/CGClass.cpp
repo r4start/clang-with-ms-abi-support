@@ -1728,7 +1728,7 @@ CodeGenFunction::MSInsertVBtableInitializationBlock(const CXXRecordDecl *Class,
                                                            llvm::Value *Flag) {
   llvm::Constant *Zero = llvm::ConstantInt::get(CGM.Int32Ty, 0);
   
-  llvm::Value *Condition = Builder.CreateICmpEQ(Zero, Flag, "spices");
+  llvm::Value *Condition = Builder.CreateICmpEQ(Zero, Flag, "ctor.flag.cmp");
 
   llvm::BasicBlock *VBTableInit = 
     llvm::BasicBlock::Create(CGM.getLLVMContext(), "vbtable.init", CurFn);
