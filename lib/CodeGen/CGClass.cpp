@@ -918,6 +918,22 @@ void CodeGenFunction::EmitDestructorBody(FunctionArgList &Args) {
     return;
   }
 
+  // r4start
+  // I do not know why Microsoft do such thing,
+  // but in dtor we have vftable init code.
+  const CXXRecordDecl *classDecl = Dtor->getParent();
+  bool isMSABI = 
+    CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
+
+  if (isMSABI) {
+    InitializeVTablePointers(classDecl);
+
+    // Vtordisp fields initialization if needed.
+    if (classDecl->getNumVBases()) {
+      MSInitilizeVtordisps(classDecl);
+    }
+  }
+
   Stmt *Body = Dtor->getBody();
 
   // If the body is a function-try-block, enter the try before
@@ -940,7 +956,7 @@ void CodeGenFunction::EmitDestructorBody(FunctionArgList &Args) {
     // Enter the cleanup scopes for virtual bases.
     EnterDtorCleanups(Dtor, Dtor_Complete);
 
-    if (!isTryBody && CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+    if (!isTryBody && !isMSABI) {
       EmitCXXDestructorCall(Dtor, Dtor_Base, /*ForVirtualBase=*/false,
                             LoadCXXThis());
       break;
