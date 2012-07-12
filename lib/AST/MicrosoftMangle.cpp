@@ -401,6 +401,8 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
     bool isClassHasOneVFTable = IsClassHasOneVFTable(getASTContext(), RD);
     bool isClassDeclaresNewVFunc = ClassDeclaresNewVirtualFunction(RD);
     
+    // When base class name with namespaces was magled,
+    // usage of back refernces is necessary.
     if (!isPrimary) {
       const CXXBaseSpecifier *base = Paths.front().begin()->Base;
       
@@ -434,6 +436,7 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
     }
   } else if (Layout.hasOwnVFPtr() && 
                                     IsVBasesHasVFTables(getASTContext(), RD)) {
+    // This is just back reference to class_name.
     Out << "0@";
   }
 
