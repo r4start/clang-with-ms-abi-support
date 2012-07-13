@@ -34,7 +34,7 @@ void test() { B b; }
 // FIXME: ??_7B@test2@@6B@
 // FIXME: ??_R4B@test2@@6B@ 
 
-// CHECK: @"\01??_7B@test2@@6BA@test2@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4B@test2@@6BA@test2@@@" to i8*), i8* bitcast (void (%"struct.test2::A"*)* @"\01?foo@A@test2@@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7B@test2@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4B@test2@@6B@" to i8*), i8* bitcast (void (%"struct.test2::A"*)* @"\01?foo@A@test2@@UAEXXZ" to i8*)]
 
 // CHECK: @"\01??_7A@test1@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4A@test1@@6B@" to i8*), i8* bitcast (void (%"struct.test1::A"*)* @"\01?foo@A@test1@@UAEXXZ" to i8*)]
 
@@ -75,7 +75,7 @@ void test() { B b; }
 // CHECK-NEXT:   %4 = bitcast %"struct.test2::B"* %this1 to i8*
 // CHECK-NEXT:   %vfptr.field = getelementptr inbounds i8* %4, i64 4
 // CHECK-NEXT:   %vfptr = bitcast i8* %vfptr.field to i8***
-// CHECK-NEXT:   store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7B@test2@@6BA@test2@@@", i64 0, i64 1), i8*** %vfptr
+// CHECK-NEXT:   store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7B@test2@@6B@", i64 0, i64 1), i8*** %vfptr
 // CHECK-NEXT:   %5 = load %"struct.test2::B"** %retval
 // CHECK-NEXT:   ret %"struct.test2::B"* %5
 // CHECK-NEXT: }

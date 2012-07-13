@@ -49,11 +49,11 @@ namespace test1 {
 // CHECK-NEXT:   %1 = bitcast %"struct.test1::sd"* %this1 to i8*
 // CHECK-NEXT:   %vfptr.field2 = getelementptr inbounds i8* %1, i64 24
 // CHECK-NEXT:   %vfptr3 = bitcast i8* %vfptr.field2 to i8***
-// CHECK-NEXT:   store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7sd@test1@@6BIA@test1@@@", i64 0, i64 1), i8*** %vfptr3
+// CHECK-NEXT:   store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7sd@test1@@6BIA@1@@", i64 0, i64 1), i8*** %vfptr3
 // CHECK-NEXT:   %2 = bitcast %"struct.test1::sd"* %this1 to i8*
 // CHECK-NEXT:   %vfptr.field4 = getelementptr inbounds i8* %2, i64 28
 // CHECK-NEXT:   %vfptr5 = bitcast i8* %vfptr.field4 to i8***
-// CHECK-NEXT:  store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7sd@test1@@6BICh@test1@@@", i64 0, i64 1), i8*** %vfptr5
+// CHECK-NEXT:  store i8** getelementptr inbounds ([2 x i8*]* @"\01??_7sd@test1@@6BICh@1@@", i64 0, i64 1), i8*** %vfptr5
 // CHECK-NEXT:   %vtordisp.this = bitcast %"struct.test1::sd"* %this1 to i8*
 // CHECK-NEXT:   %vbtable.ptr = getelementptr inbounds i8* %vtordisp.this, i32 0
 // CHECK-NEXT:   %vbtable.i32.ptr = bitcast i8* %vbtable.ptr to i32*

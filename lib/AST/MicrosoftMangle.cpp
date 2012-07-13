@@ -487,35 +487,33 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
           isClassDeclaresNewVFunc || Layout.getPrimaryBase()) {
         if (auto CX = ClassForVFTableName(Context.getASTContext(),
                                                     BaseClass, Paths.front())) {
-          //mangleName(CX);
-          //mangleUnqualifiedName(CX);
           mangleBaseClassNameForVFTable(RD, CX);
         } else {
-          //mangleName(BaseClass);
-          //mangleUnqualifiedName(BaseClass);
           mangleBaseClassNameForVFTable(RD, BaseClass);
         }
       } else if ((base == RD->bases_begin() && 
                   base->isVirtual()) && !IsClassHasVFunctionDecl(RD)) {
+        const CXXRecordDecl *baseClassDecl = 
+                                          base->getType()->getAsCXXRecordDecl();
+        if (baseClassDecl->bases_begin() == baseClassDecl->bases_end()) {
+          // This is interesting case.
+          // Vf-table for this class mangles like for primary base class.
+          // This case for ms-ctor-prologue.cpp.
+          Out << "@";
+          return;
+        }
         // ms-thunk.cpp case.
         // IsClassHasVFunctionDecl allow pass ms-thunk2.cpp test.
         // Also need to investigate when use base-class name and when base.
-        //mangleName(base->getType()->getAsCXXRecordDecl());
-        //mangleUnqualifiedName(base->getType()->getAsCXXRecordDecl());
-        mangleBaseClassNameForVFTable(RD, 
-                                         base->getType()->getAsCXXRecordDecl());
+        mangleBaseClassNameForVFTable(RD, baseClassDecl);
       }
     } else if (!isClassDeclaresNewVFunc && !isClassHasOneVFTable) {
       // This case very strange, but we have ms-thunk4.cpp.
       // Why cl mangle primary base vf-table like normal base?
       if (auto CX = ClassForVFTableName(Context.getASTContext(),
                                         BaseClass, Paths.front())) {
-          //mangleName(CX);
-          //mangleUnqualifiedName(CX);
           mangleBaseClassNameForVFTable(RD, CX);
       } else {
-        //mangleName(BaseClass);
-        //mangleUnqualifiedName(BaseClass);
         mangleBaseClassNameForVFTable(RD, BaseClass);
       }
     }
