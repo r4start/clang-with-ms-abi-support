@@ -8,7 +8,7 @@ struct A {
   virtual void foo(){}
 };
 
-#pragma pop(pop)
+#pragma pack(pop)
 
 void test() { A a; }
 

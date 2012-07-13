@@ -83,6 +83,10 @@ private:
   void mangleObjCMethodName(const ObjCMethodDecl *MD);
   void mangleLocalName(const FunctionDecl *FD);
 
+  // r4start
+  void mangleBaseClassNameForVFTable(const CXXRecordDecl *RD,
+                                     const CXXRecordDecl *Base);
+
   // Declare manglers for every type class.
 #define ABSTRACT_TYPE(CLASS, PARENT)
 #define NON_CANONICAL_TYPE(CLASS, PARENT)
@@ -376,6 +380,76 @@ static bool IsClassHasVFunctionDecl(const CXXRecordDecl *Class) {
   return false;
 }
 
+void 
+MicrosoftCXXNameMangler::mangleBaseClassNameForVFTable(const CXXRecordDecl *RD,
+                                                    const CXXRecordDecl *Base) {
+  assert(Base && "Base must not be zero!");
+
+  const DeclContext *dc = RD->getDeclContext();
+  if (RD == Base) {
+    if (dc->getDeclKind() != Decl::Namespace) {
+      Out << "@";
+      return;
+    }
+
+    int counter = 1;
+    while (dc) {
+      if (dc->getDeclKind() == Decl::Namespace) {
+        if (counter < 10) {
+          Out << counter;
+          counter++;
+        } else {
+          mangleUnqualifiedName(cast<NamedDecl>(dc));
+        }
+      }
+      dc = dc->getParent();
+    }
+
+    Out << "@";
+    return;
+  }
+
+  llvm::DenseMap<const DeclContext *, int> namespaces;
+
+  // Zero type in name is class name.
+  int counter = 1;
+  
+  while (dc) {
+    if (dc->getDeclKind() == Decl::Namespace) {
+      namespaces.insert(std::make_pair(dc, counter));
+      ++counter;
+    }
+    dc = dc->getParent();
+  }
+
+  // RD doesn`t have namespaces, so no back references are presented in name.
+  if (namespaces.empty()) {
+    mangleName(Base);
+    return;
+  }
+
+  mangleUnqualifiedName(Base);
+  
+  dc = Base->getDeclContext(); 
+  while (dc) {
+    if (dc->getDeclKind() == Decl::Namespace) {
+      auto nm = namespaces.find(dc);
+
+      if (nm != namespaces.end() && nm->second < 10) {
+        Out << nm->second;
+      } else {
+        // If namespace doesn`t present in RD namespaces 
+        // then we just mangle it`s name.
+        mangleUnqualifiedName(cast<NamedDecl>(dc));
+      }
+    }
+
+    dc = dc->getParent();
+  }
+
+  Out << "@";
+}
+
 void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
                                         const CXXRecordDecl *RD,
                                         const CXXRecordDecl *BaseClass,
@@ -412,32 +486,44 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
       if (base != RD->bases_begin() || BaseClass->isAbstract() || 
           isClassDeclaresNewVFunc || Layout.getPrimaryBase()) {
         if (auto CX = ClassForVFTableName(Context.getASTContext(),
-                                                      BaseClass, Paths.front())) {
-          mangleName(CX);
+                                                    BaseClass, Paths.front())) {
+          //mangleName(CX);
+          //mangleUnqualifiedName(CX);
+          mangleBaseClassNameForVFTable(RD, CX);
         } else {
-          mangleName(BaseClass);
+          //mangleName(BaseClass);
+          //mangleUnqualifiedName(BaseClass);
+          mangleBaseClassNameForVFTable(RD, BaseClass);
         }
       } else if ((base == RD->bases_begin() && 
                   base->isVirtual()) && !IsClassHasVFunctionDecl(RD)) {
         // ms-thunk.cpp case.
         // IsClassHasVFunctionDecl allow pass ms-thunk2.cpp test.
         // Also need to investigate when use base-class name and when base.
-        mangleName(base->getType()->getAsCXXRecordDecl());
+        //mangleName(base->getType()->getAsCXXRecordDecl());
+        //mangleUnqualifiedName(base->getType()->getAsCXXRecordDecl());
+        mangleBaseClassNameForVFTable(RD, 
+                                         base->getType()->getAsCXXRecordDecl());
       }
     } else if (!isClassDeclaresNewVFunc && !isClassHasOneVFTable) {
       // This case very strange, but we have ms-thunk4.cpp.
       // Why cl mangle primary base vf-table like normal base?
       if (auto CX = ClassForVFTableName(Context.getASTContext(),
-        BaseClass, Paths.front())) {
-          mangleName(CX);
+                                        BaseClass, Paths.front())) {
+          //mangleName(CX);
+          //mangleUnqualifiedName(CX);
+          mangleBaseClassNameForVFTable(RD, CX);
       } else {
-        mangleName(BaseClass);
+        //mangleName(BaseClass);
+        //mangleUnqualifiedName(BaseClass);
+        mangleBaseClassNameForVFTable(RD, BaseClass);
       }
     }
   } else if (Layout.hasOwnVFPtr() && 
                                     IsVBasesHasVFTables(getASTContext(), RD)) {
     // This is just back reference to class_name.
-    Out << "0@";
+    Out << "0";
+    mangleBaseClassNameForVFTable(RD, RD);
   }
 
   Out << "@";
