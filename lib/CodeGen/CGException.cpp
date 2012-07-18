@@ -435,8 +435,15 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
 
   // Now throw the exception.
-  llvm::Constant *TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, 
-                                                         /*ForEH=*/true);
+  // r4start
+  llvm::Constant *TypeInfo;
+
+  if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+    TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
+  } else {
+    TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(ThrowType, ThrowType, 
+                                                                /*ForEH=*/true);
+  }
 
   // The address of the destructor.  If the exception type has a
   // trivial destructor (or isn't a record), we just pass null.
@@ -587,8 +594,15 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
       llvm::Value *TypeInfo = 0;
       if (CaughtType->isObjCObjectPointerType())
         TypeInfo = CGM.getObjCRuntime().GetEHType(CaughtType);
-      else
-        TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
+      else {
+        // r4start
+        if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+          TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
+        } else {
+          TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, 
+                                                                /*ForEH=*/true);
+        }
+      }
       CatchScope->setHandler(I, TypeInfo, Handler);
     } else {
       // No exception decl indicates '...', a catch-all.
