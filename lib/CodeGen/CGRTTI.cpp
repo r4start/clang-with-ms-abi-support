@@ -1641,7 +1641,7 @@ CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
                                          QualType BaseTy) {
   if (!getContext().getLangOpts().RTTI)
     return llvm::Constant::getNullValue(Int8PtrTy);
-  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
+  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy, ForEH);
 }
 
 void CodeGenModule::EmitFundamentalRTTIDescriptor(QualType Type) {
