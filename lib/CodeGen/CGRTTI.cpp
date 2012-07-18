@@ -255,7 +255,7 @@ public:
   /// };
   llvm::Constant *BuildMSTypeInfo(QualType Ty,
                                   QualType BaseTy,
-                                  bool Force = false);
+                                  bool IsForEH = false);
 };
 }
 
@@ -705,16 +705,14 @@ maybeUpdateRTTILinkage(CodeGenModule &CGM, llvm::GlobalVariable *GV,
 }
 
 // r4start
-static llvm::StructType* GetBaseClassDescriptorType(CodeGenModule& CGM)
-{
+static llvm::StructType* GetBaseClassDescriptorType(CodeGenModule& CGM) {
   llvm::SmallVector<llvm::Type*, 4> BaseClassDescrFieldTypes;
 
-  BaseClassDescrFieldTypes.push_back(llvm::Type::getInt8PtrTy(CGM.getLLVMContext()));
+  BaseClassDescrFieldTypes.push_back(CGM.Int8PtrTy);
 
   // Push numContainedBases, PMD fields and attributes.
-  for (int i = 0; i < 5; ++i)
-  {
-    BaseClassDescrFieldTypes.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
+  for (int i = 0; i < 5; ++i) {
+    BaseClassDescrFieldTypes.push_back(CGM.Int32Ty);
   }
 
   return llvm::StructType::get(CGM.getLLVMContext(), BaseClassDescrFieldTypes);
@@ -1295,7 +1293,7 @@ static CharUnits GetClassOffset(const ASTContext &Ctx,
 // r4start
 llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
                                              QualType BaseTy,
-                                             bool Force) {
+                                             bool IsForEH) {
   // We want to operate on the canonical type.
   Ty = CGM.getContext().getCanonicalType(Ty);
 
@@ -1304,6 +1302,15 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   
   MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
   MSMangleContextExtensions* CtxExt = Ctx.getMsExtensions();
+
+  // For exception handling we need only type descritpor.
+  if (IsForEH) {
+    auto oldLinkage = CurLinkage;
+    CurLinkage = llvm::GlobalValue::WeakODRLinkage;
+    llvm::Constant* TypeDescriptor = BuildRTTITypeDescriptor(Ty);
+    CurLinkage = oldLinkage;
+    return llvm::ConstantExpr::getBitCast(TypeDescriptor, Int8PtrTy);
+  }
 
   CXXRecordDecl *Base = 0;
   CXXRecordDecl *LayoutClass = Ty->getAsCXXRecordDecl();
@@ -1349,10 +1356,6 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
     BuildRTTIClassHierarchyDescriptor(Ty->getAsCXXRecordDecl());
   Fields.push_back(llvm::ConstantExpr::getBitCast(CHD, Int8PtrTy));
 
-  // Build virtual bases table.
-  /*if (LayoutClass->getNumVBases())
-    BuildVBTable(LayoutClass);*/
-
   llvm::Constant* Init = llvm::ConstantStruct::getAnon(Fields);
   
   llvm::GlobalVariable* GV = CGM.getModule().getGlobalVariable(COLName);
@@ -1364,559 +1367,6 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   
   return llvm::ConstantExpr::getBitCast(GV, Int8PtrTy);
 }
-
-/*
-// r4start
-static void ParseDeepBases(MangleContext& Context,
-                           const CXXRecordDecl* RD,
-                           llvm::raw_ostream& Out)
-{
-  CXXRecordDecl::reverse_base_class_const_iterator  
-                              baseClass = RD->vbases_rbegin();
-  if (RD->getNumVBases())
-  {
-    // Build vftable for virtual bases.
-
-    for(baseClass;
-        baseClass != RD->vbases_rend();
-        ++baseClass)
-    {
-      Context.mangleCXXVTable(RD,
-        baseClass->getType()->getAsCXXRecordDecl(),
-        Out);
-    }
-  }
-
-  // Built vftables for bases virtual bases. 
-  for(baseClass = RD->bases_rbegin();
-      baseClass != RD->bases_rend();
-      ++baseClass)
-  {
-    if (baseClass->getType()->getAsCXXRecordDecl()->getNumVBases())
-    {
-      ParseDeepBases(Context, baseClass->getType()->getAsCXXRecordDecl(), Out);
-    }
-  }
-}
-
-// r4start
-static bool CXXClassHasNewVirtualFunction(const CXXRecordDecl *RD)
-{
-  for (CXXRecordDecl::method_iterator method = RD->method_begin();
-       method != RD->method_end();
-       ++method)
-  {
-    if (method->isVirtual() &&
-        !method->size_overridden_methods())
-    {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-// r4start
-static bool HasBasesVirtualFunctions(const CXXRecordDecl* RD)
-{
-  for (CXXRecordDecl::base_class_const_iterator base = RD->bases_begin();
-       base != RD->bases_end();
-       ++base)
-  {
-    if (base->getType()->getAsCXXRecordDecl()->isPolymorphic())
-    {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-// r4start
-static bool IsAllBasesVirtual(const CXXRecordDecl *RD)
-{
-  for (CXXRecordDecl::base_class_const_iterator base = RD->bases_begin();
-       base != RD->bases_end();
-       ++base)
-  {
-    if (!base->isVirtual())
-    {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-// r4start
-static bool IsClassDeclareVFunctions(const CXXRecordDecl *RD)
-{
-  for (CXXRecordDecl::method_iterator method = RD->method_begin();
-       method != RD->method_end();
-       ++method)
-  {
-    if (method->isVirtual())
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-// r4start
-static void BuildVFTableForNonVirtualBases(MangleContext& Context,
-                                           const CXXRecordDecl* RD,
-                                           llvm::raw_ostream& Out)
-{
-  CXXRecordDecl::reverse_base_class_const_iterator baseClass;
-
-  // Build vftable for nonvirtual bases.
-  for (baseClass = RD->bases_rbegin();
-    baseClass != RD->bases_rend();
-    ++baseClass)
-  {
-    // If no virtual functions then no vftable ^_^
-    if (!baseClass->isVirtual() &&
-      baseClass->getType()->getAsCXXRecordDecl()->isPolymorphic())
-    {
-      Context.mangleCXXVTable(RD,
-        baseClass->getType()->getAsCXXRecordDecl(),
-        Out);
-    }
-  }
-}
-
-// r4start
-static void GenerateVFTables(MangleContext& Context,
-                             const CXXRecordDecl* RD,
-                             llvm::raw_ostream& Out)
-{
-  if (RD->getNumVBases())
-  {
-  
-    if (!HasBasesVirtualFunctions(RD))
-    {
-      // Bases don`t have any virtual functions,
-      // so we don`t need to build vftable for them.
-      if (RD->isPolymorphic())
-      {
-        // This class have virtual function.
-        // Build vftable.
-        Context.mangleCXXVTable(RD, 0, Out);
-      }
-      return ;
-    }
-    
-    // We have one virtual base class with vfunctions and
-    // no new vfunctions in child class,
-    // so build one vftable.
-    if (RD->getNumVBases() == 1 &&
-        RD->getNumBases() == RD->getNumVBases() &&
-        HasBasesVirtualFunctions(RD) &&
-        !IsClassDeclareVFunctions(RD))
-    {
-      Context.mangleCXXVTable(RD, 0, Out);
-      return ;
-    }
-
-    // MS compiler do this optimization.
-    // For example:
-    // if we have 2 virtual bases and 1 of them have a virtual base,
-    // then class shares vftable with base without base.
-    if (IsAllBasesVirtual(RD) &&
-        RD->getNumVBases() > RD->getNumBases() &&
-        !IsClassDeclareVFunctions(RD))
-    {
-      bool optimized = false;
-
-      for (CXXRecordDecl::reverse_base_class_const_iterator base = RD->bases_rbegin();
-           base != RD->bases_rend();
-           ++base)
-      {
-        CXXRecordDecl* baseClass = base->getType()->getAsCXXRecordDecl();
-        
-        if (!baseClass->getNumBases() &&
-            !optimized)
-        {
-          Context.mangleCXXVTable(RD, 0, Out);
-          optimized = true;
-          continue ;
-        }
-
-        Context.mangleCXXVTable(RD, baseClass, Out);
-        ParseDeepBases(Context, baseClass, Out);
-      }
-
-      return ;
-    }
-
-    // Build vftable for virtual bases.
-    for (CXXRecordDecl::reverse_base_class_const_iterator virt = RD->vbases_rbegin();
-         virt != RD->vbases_rend();
-         ++virt)
-    {
-      // If class not contains virtual function,
-      // We don`t need to construct it`s vftable.
-      if (virt->getType()->getAsCXXRecordDecl()->isPolymorphic())
-      {
-        Context.mangleCXXVTable(RD,
-          virt->getType()->getAsCXXRecordDecl(),
-          Out);
-      }
-    }
-
-    // If all bases are virtual then we must add
-    // vftable record ??_7class_name@@6B0@@.
-    // Maybe this is marker for vftable sharing???
-    if (IsAllBasesVirtual(RD) && 
-        CXXClassHasNewVirtualFunction(RD))
-    {
-      Context.getMsExtensions()->
-        mangleCXXVFTableByClassName(RD->getNameAsString(), "0", Out);
-      return ;
-    }
-
-    BuildVFTableForNonVirtualBases(Context, RD, Out);
-
-  }
-  else if (HasBasesVirtualFunctions(RD))
-  {
-    BuildVFTableForNonVirtualBases(Context, RD, Out);
-  }
-  else if (RD->isPolymorphic())
-  {
-    // If in class contains virtual function.
-    Context.mangleCXXVTable(RD, 0, Out);
-  }
-}
-
-// r4start
-static void GenerateVBTables(MangleContext& Context,
-                             const CXXRecordDecl* RD,
-                             llvm::raw_ostream& Out)
-{
-  bool haveVitualBasesBases = false;
-
-  for (CXXRecordDecl::reverse_base_class_const_iterator base = RD->bases_rbegin();
-       base != RD->bases_rend();
-       ++base)
-  {
-    if (base->getType()->getAsCXXRecordDecl()->getNumVBases())
-    {
-      Context.getMsExtensions()->
-        mangleCXXVBTable(RD, base->getType()->getAsCXXRecordDecl(), Out);
-      haveVitualBasesBases = true;
-    }
-  }
-
-  if (!haveVitualBasesBases)
-  {
-    Context.getMsExtensions()->mangleCXXVBTable(RD, 0, Out);
-  }
-  else
-  {
-    Context.getMsExtensions()->mangleCXXVBTable(RD, "0", Out);
-  }
-}
-
-// r4start
-static void GenerateCompleteObjectLocatorData(MangleContext& Context,
-                                              const CXXRecordDecl* RD,
-                                              llvm::raw_ostream& Out)
-{
-  if (IsAllBasesVirtual(RD))
-  {
-    if (CXXClassHasNewVirtualFunction(RD))
-    {
-      Context.getMsExtensions()->
-        mangleCXXRTTICompleteObjectLocator(
-          RD,
-          "0",
-          Out
-        );
-    }
-    else
-    {
-      Context.getMsExtensions()->
-        mangleCXXRTTICompleteObjectLocator(
-          RD,
-          RD->vbases_begin()->getType()->getAsCXXRecordDecl(),
-          Out
-        );
-    }
-  }
-  else
-  {
-    if (RD->getNumBases() == 1)
-    {
-      Context.getMsExtensions()->
-        mangleCXXRTTICompleteObjectLocator(
-          RD,
-          0,
-          Out
-        );
-
-      return;
-    }
-
-    for (CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
-      baseClass != RD->bases_end();
-      ++baseClass)
-    {
-      if (!baseClass->isVirtual())
-      {
-        // Mangle Complete Object Locator for first nonvirtual base
-         Context.getMsExtensions()->
-          mangleCXXRTTICompleteObjectLocator(
-            RD,
-            // first nonvirtual base class
-            baseClass->getType()->getAsCXXRecordDecl(), 
-            Out
-          );
-        break;
-      }
-    }
-  }
-}
-
-// r4start
-static void GenerateBaseClassDescriptorsArray(MangleContext& Context,
-                                              const CXXRecordDecl* RD,
-                                              llvm::raw_ostream& Out)
-{
-  CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
-
-  int64_t bParameter = 
-    (RD->getNumBases() - RD->getNumVBases()) * 4; // 4 is some magic
-
-  bool isFirstNonVirtualBase = false;
-
-  for (int nonVirtCounter = 0, virtCounter = 4;
-       baseClass != RD->bases_end();
-       ++baseClass)
-  {
-    llvm::StringRef dParameter;
-
-    if (baseClass->isVirtual())
-    {
-      if (baseClass->getAccessSpecifier() == AS_public)
-      {
-        dParameter = "FA";
-      }
-      else
-      {
-        dParameter = "FN";
-      }
-
-      Context.getMsExtensions()->
-        mangleCXXRTTIBaseClassDescriptor(
-          baseClass->getType()->getAsCXXRecordDecl(),
-          0,
-          bParameter,
-          virtCounter,
-          dParameter,
-          Out
-        );
-      virtCounter += 4;
-    }
-    else
-    {
-
-      if (baseClass->getAccessSpecifier() == AS_public)
-      {
-        dParameter = "EA";
-      }
-      else
-      {
-        dParameter = "EN";
-      }
-
-      Context.getMsExtensions()->
-        mangleCXXRTTIBaseClassDescriptor(
-          baseClass->getType()->getAsCXXRecordDecl(),
-          nonVirtCounter,
-          0, // "?0" we need this here
-          0,
-          dParameter,
-          Out
-        );
-
-      nonVirtCounter += 4;
-    }
-
-    Context.mangleCXXRTTI(baseClass->getType(), Out);
-
-    Context.getMsExtensions()->
-      mangleCXXRTTIClassHierarhyDescriptor(
-        baseClass->getType()->getAsCXXRecordDecl(),
-        Out
-      );
-
-    Context.getMsExtensions()->
-      mangleCXXRTTIBaseClassArray(
-        baseClass->getType()->getAsCXXRecordDecl(),
-        Out
-      );
-
-    // End of base class RTTI info.
-    // All virtual classes have this tail and
-    // all base, exclude first nonvirtual base.
-    if (baseClass->isVirtual() || 
-        isFirstNonVirtualBase)
-    {
-      Context.getMsExtensions()->
-        mangleCXXRTTIBaseClassDescriptor(
-          baseClass->getType()->getAsCXXRecordDecl(),
-          0,
-          0, // "?0"
-          0,
-          "EA",
-          Out
-        );
-    }
-    else if (!isFirstNonVirtualBase)
-    {
-      isFirstNonVirtualBase = true;
-    }
-
-  }
-}
-
-// r4start
-static void GenerateCOLTail(MangleContext& Context,
-                            const CXXRecordDecl *RD,
-                            llvm::raw_ostream& Out)
-{
-  // In this case we have more than 1 nonvirtual base class.
-  // Nonvirtual _R4 comes first of all.
-  if (RD->getNumBases() - RD->getNumVBases() > 1)
-  {
-    CXXRecordDecl::base_class_const_iterator 
-                        firstNonVirtualBase = RD->bases_begin();
-    for(; firstNonVirtualBase != RD->bases_end(); ++firstNonVirtualBase)
-    {
-      if (!firstNonVirtualBase->isVirtual())
-      {
-        break;
-      }
-    }
-
-    CXXRecordDecl::base_class_const_iterator 
-                        baseClass = firstNonVirtualBase + 1;
-    for (; baseClass != RD->bases_end(); ++baseClass)
-    {
-      if (!baseClass->isVirtual())
-      {
-        Context.getMsExtensions()->
-          mangleCXXRTTICompleteObjectLocator(
-            RD,
-            baseClass->getType()->getAsCXXRecordDecl(),
-            Out
-          );
-      }
-    }
-
-    baseClass = RD->bases_begin();
-    for (; baseClass != RD->bases_end(); ++baseClass)
-    {
-      if (baseClass->isVirtual())
-      {
-        Context.getMsExtensions()->
-          mangleCXXRTTICompleteObjectLocator(
-            RD,
-            baseClass->getType()->getAsCXXRecordDecl(),
-            Out
-          );
-      }
-    }
-  }
-  else if (RD->getNumBases() - RD->getNumVBases() == 1)
-  {
-    for (CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
-         baseClass != RD->bases_end();
-         ++baseClass)
-    {
-      if (baseClass->isVirtual())
-      {
-        Context.getMsExtensions()->
-          mangleCXXRTTICompleteObjectLocator(
-            RD,
-            baseClass->getType()->getAsCXXRecordDecl(),
-            Out
-          );
-      }
-    }
-  }
-  else
-  {
-    for(CXXRecordDecl::base_class_const_iterator baseClass = RD->bases_begin();
-        baseClass != RD->bases_end();
-        ++baseClass)
-    {
-      Context.getMsExtensions()->
-        mangleCXXRTTICompleteObjectLocator(
-          RD,
-          baseClass->getType()->getAsCXXRecordDecl(),
-          Out
-        );
-    }
-  }
-}
-
-// r4start
-static void GenerateRTTI(MangleContext& Context,
-                         const CXXRecordDecl *RD,
-                         llvm::raw_ostream& Out)
-{
-  // If we have base classes
-  // we build vftables, start form last.
-  if (RD->getNumBases() != 0) 
-  {
-    GenerateVFTables(Context, RD, Out);
-
-    if (RD->getNumVBases())
-    {
-      GenerateVBTables(Context, RD, Out);
-    }
-
-    GenerateCompleteObjectLocatorData(Context, RD, Out);
-
-    // Mangle type descriptor
-    Context.mangleCXXRTTI(RD->getASTContext().getRecordType(RD), Out);
-
-    // type_info vftable
-    Context.getMsExtensions()->
-      mangleCXXVFTableByClassName(
-        llvm::StringRef("type_info"),
-        llvm::StringRef(), 
-        Out
-      );
-
-    Context.getMsExtensions()->
-      mangleCXXRTTIClassHierarhyDescriptor(RD, Out);
-
-    Context.getMsExtensions()->
-      mangleCXXRTTIBaseClassArray(RD, Out);
-
-    // For this class
-    Context.getMsExtensions()->
-      mangleCXXRTTIBaseClassDescriptor(RD, 0, 0, 0, "EA", Out);
-
-    GenerateBaseClassDescriptorsArray(Context, RD, Out);
-
-    // If we have more than 1 base class then
-    // their COL just appends to the end
-    if (RD->getNumBases() > 1) 
-    {
-      GenerateCOLTail(Context, RD, Out);
-    }
-  }
-  else
-  {
-   Context.mangleCXXVTable(RD, 0, Out);
-  }
-}
-*/
 
 llvm::Constant *RTTIBuilder::BuildTypeInfo(QualType Ty, bool Force) {
   // r4start
@@ -2383,7 +1833,7 @@ CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
     return ObjCRuntime->GetEHType(Ty);
   }
 
-  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
+  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy, ForEH);
 }
 
 void CodeGenModule::EmitFundamentalRTTIDescriptor(QualType Type) {
