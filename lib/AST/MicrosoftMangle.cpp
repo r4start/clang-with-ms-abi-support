@@ -177,7 +177,11 @@ public:
                                 const CXXRecordDecl *BaseDecl,
                                 raw_ostream &);
 
+  // Microsoft EH specific.
+
   virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
+
+  virtual void mangleThrowInfo(const CXXRecordDecl *RD, raw_ostream &Out);
 };
 
 }
@@ -2105,6 +2109,15 @@ void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
                                               raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangle(F, "\01__ehfuncinfo$");
+}
+
+void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
+                                             raw_ostream &Out) {
+  Out << '\01';
+  Out << "__TI1?A";
+  
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
