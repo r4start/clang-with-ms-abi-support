@@ -1306,9 +1306,12 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   // For exception handling we need only type descritpor.
   if (IsForEH) {
     auto oldLinkage = CurLinkage;
-    CurLinkage = llvm::GlobalValue::WeakODRLinkage;
+    CurLinkage = llvm::GlobalValue::ExternalLinkage;
+
     llvm::Constant* TypeDescriptor = BuildRTTITypeDescriptor(Ty);
+
     CurLinkage = oldLinkage;
+
     return llvm::ConstantExpr::getBitCast(TypeDescriptor, Int8PtrTy);
   }
 

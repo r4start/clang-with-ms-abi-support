@@ -15,6 +15,7 @@
 #include "CGCleanup.h"
 #include "CGObjCRuntime.h"
 #include "TargetInfo.h"
+#include "CGCXXABI.h"
 #include "clang/AST/StmtCXX.h"
 #include "llvm/Intrinsics.h"
 #include "llvm/Support/CallSite.h"
@@ -567,6 +568,38 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
   }
 }
 
+// r4start
+// This function is generate __ehfuncinfo$_{func_name} structure.
+// It is meaningful only for MS C++ ABI.
+static void generateEHFuncInfo(CodeGenFunction &CGF) {
+  assert(CGF.CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
+         "__ehfuncinfo is MS C++ specific!");
+
+  const FunctionDecl *function = 
+                                cast_or_null<FunctionDecl>(CGF.CurGD.getDecl());
+  if (!function) {
+    return;
+  }
+
+  llvm::SmallString<256> structName;
+  llvm::raw_svector_ostream out(structName);
+
+  MSMangleContextExtensions *mangler = 
+    CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
+  
+  mangler->mangleEHFuncInfo(function, out);
+
+  out.flush();
+  StringRef ehName(structName);
+
+  llvm::Constant *val = llvm::ConstantInt::get(CGF.CGM.Int32Ty, 10);
+
+  llvm::GlobalVariable *ehFuncInfo = 
+    new llvm::GlobalVariable(CGF.CGM.getModule(), CGF.CGM.Int32Ty, true,
+                             llvm::GlobalValue::InternalLinkage, val,
+                             ehName);
+}
+
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
@@ -576,10 +609,12 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
+  
+  generateEHFuncInfo(*this);
 
   for (unsigned I = 0; I != NumHandlers; ++I) {
     const CXXCatchStmt *C = S.getHandler(I);
-
+    
     llvm::BasicBlock *Handler = createBasicBlock("catch");
     if (C->getExceptionDecl()) {
       // FIXME: Dropping the reference type on the type into makes it

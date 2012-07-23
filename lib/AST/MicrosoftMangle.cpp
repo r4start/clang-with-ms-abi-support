@@ -176,6 +176,8 @@ public:
   virtual void mangleCXXVBTable(const CXXRecordDecl *RD,
                                 const CXXRecordDecl *BaseDecl,
                                 raw_ostream &);
+
+  virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
 };
 
 }
@@ -2097,6 +2099,12 @@ void MicrosoftMangleContext::mangleReferenceTemporary(const clang::VarDecl *VD,
   unsigned DiagID = getDiags().getCustomDiagID(DiagnosticsEngine::Error,
     "cannot mangle this reference temporary yet");
   getDiags().Report(VD->getLocation(), DiagID);
+}
+
+void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
+                                              raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangle(F, "\01__ehfuncinfo$");
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
