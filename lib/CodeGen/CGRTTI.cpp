@@ -1053,6 +1053,7 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
   MSMangleContextExtensions* CtxExt = Ctx.getMsExtensions();
 
+
   CXXRecordDecl *Base = 0;
   CXXRecordDecl *LayoutClass = Ty->getAsCXXRecordDecl();
 

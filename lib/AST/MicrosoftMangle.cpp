@@ -192,9 +192,9 @@ public:
   virtual void mangleCXXVBTable(const CXXRecordDecl *RD,
                                 const CXXRecordDecl *BaseDecl,
                                 raw_ostream &);
-
   virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
                                             raw_ostream &Out);
+  virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
 };
 
 }
@@ -2262,6 +2262,12 @@ MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
   // Prefix for spare.
   Out << ".?A";
   mangler.mangleType(getASTContext().getRecordType(RD), SourceRange());
+}
+
+void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
+                                              raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangle(F, "\01__ehfuncinfo$");
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
