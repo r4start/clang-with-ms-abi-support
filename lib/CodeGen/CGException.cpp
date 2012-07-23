@@ -52,6 +52,14 @@ static llvm::Constant *getThrowFn(CodeGenFunction &CGF) {
   return CGF.CGM.CreateRuntimeFunction(FTy, "__cxa_throw");
 }
 
+static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF) {
+  llvm::Type *Args[2] = { CGF.Int8PtrTy, CGF.Int8PtrTy };
+  llvm::FunctionType *FTy =
+    llvm::FunctionType::get(CGF.VoidTy, Args, /*IsVarArgs=*/false);
+
+  return CGF.CGM.CreateRuntimeFunction(FTy, "__CxxThrowException@8");
+}
+
 static llvm::Constant *getReThrowFn(CodeGenFunction &CGF) {
   // void __cxa_rethrow();
 
@@ -451,8 +459,10 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   // Now throw the exception.
   // r4start
   llvm::Constant *TypeInfo;
+  bool isMSABI = 
+    CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
 
-  if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+  if (!isMSABI) {
     TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
   } else {
     TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(ThrowType, ThrowType, 
@@ -472,19 +482,27 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   }
   if (!Dtor) Dtor = llvm::Constant::getNullValue(Int8PtrTy);
 
-  if (getInvokeDest()) {
-    llvm::InvokeInst *ThrowCall =
-      Builder.CreateInvoke3(getThrowFn(*this),
-                            getUnreachableBlock(), getInvokeDest(),
-                            ExceptionPtr, TypeInfo, Dtor);
-    ThrowCall->setDoesNotReturn();
-  } else {
-    llvm::CallInst *ThrowCall =
-      Builder.CreateCall3(getThrowFn(*this), ExceptionPtr, TypeInfo, Dtor);
-    ThrowCall->setDoesNotReturn();
-    Builder.CreateUnreachable();
-  }
+  if (isMSABI) {
+    // TODO: change parameters!
+    llvm::Value *A[] = { Dtor, TypeInfo };
 
+    llvm::InvokeInst *ThrowCall = 
+      Builder.CreateInvoke(getMSThrowFn(*this), getUnreachableBlock(),
+                           getInvokeDest(), A);
+  } else {
+    if (getInvokeDest()) {
+      llvm::InvokeInst *ThrowCall =
+        Builder.CreateInvoke3(getThrowFn(*this),
+                              getUnreachableBlock(), getInvokeDest(),
+                              ExceptionPtr, TypeInfo, Dtor);
+      ThrowCall->setDoesNotReturn();
+    } else {
+      llvm::CallInst *ThrowCall =
+        Builder.CreateCall3(getThrowFn(*this), ExceptionPtr, TypeInfo, Dtor);
+      ThrowCall->setDoesNotReturn();
+      Builder.CreateUnreachable();
+    }
+  }
   // throw is an expression, and the expression emitters expect us
   // to leave ourselves at a valid insertion point.
   EmitBlock(createBasicBlock("throw.cont"));
@@ -802,8 +820,6 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
   
-  generateEHFuncInfo(*this);
-
   for (unsigned I = 0; I != NumHandlers; ++I) {
     const CXXCatchStmt *C = S.getHandler(I);
     
