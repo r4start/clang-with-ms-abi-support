@@ -52,6 +52,7 @@ static llvm::Constant *getThrowFn(CodeGenFunction &CGF) {
   return CGF.CGM.CreateRuntimeFunction(FTy, "__cxa_throw");
 }
 
+// r4start
 static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF) {
   llvm::Type *Args[2] = { CGF.Int8PtrTy, CGF.Int8PtrTy };
   llvm::FunctionType *FTy =
