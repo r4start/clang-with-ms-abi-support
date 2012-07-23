@@ -569,6 +569,184 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 }
 
 // r4start
+//  struct HandlerType {
+//    // 0x01: const, 0x02: volatile, 0x08: reference
+//    DWORD adjectives;
+//
+//    // RTTI descriptor of the exception type. 0=any (ellipsis)
+//    TypeDescriptor* pType;
+//
+//    // ebp-based offset of the exception object in the function stack.
+//    // 0 = no object (catch by type)
+//    int dispCatchObj;
+//
+//    // address of the catch handler code.
+//    // returns address where to continues execution 
+//    // (i.e. code after the try block)
+//    void* addressOfHandler;
+//  };
+static llvm::StructType *getHandlerType(CodeGenModule &CGM) {
+  SmallVector<llvm::Type *, 4> fields;
+
+  fields.push_back(CGM.Int32Ty);
+
+  // TODO: remove with TypeDescriptorType.
+  fields.push_back(CGM.Int32Ty);
+  
+  fields.push_back(CGM.Int32Ty);
+  
+  fields.push_back(CGM.VoidPtrTy);
+
+  return llvm::StructType::get(CGM.getLLVMContext(), fields);
+}
+
+// r4start
+//  struct ESTypeList {
+//    // number of entries in the list
+//    int nCount;
+//
+//    // list of exceptions; it seems only pType field in HandlerType is used
+//    HandlerType* pTypeArray;
+//  };
+static llvm::StructType *getESListEntryType(CodeGenModule &CGM) {
+  llvm::SmallVector<llvm::Type *, 2> fieldTypes;
+
+  fieldTypes.push_back(CGM.Int32Ty);
+
+  // TODO: remove this with actual code.
+  fieldTypes.push_back(getHandlerType(CGM)->getPointerTo());
+
+  return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
+}
+
+//  r4start
+//  struct TryBlockMapEntry {
+//    int tryLow;
+//    
+//    // this try {} covers states ranging from tryLow to tryHigh
+//    int tryHigh;
+//
+//    // highest state inside catch handlers of this try
+//    int catchHigh;
+//
+//    // number of catch handlers
+//    int nCatches;
+//
+//    //catch handlers table
+//    HandlerType* pHandlerArray;
+//  };
+static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM) {
+  llvm::SmallVector<llvm::Type *, 5> mapEntryTypes;
+
+  for (int i = 0; i < 4; ++i) {
+    mapEntryTypes.push_back(CGM.Int32Ty);
+  }
+
+  // TODO: remove it with actual code!
+  mapEntryTypes.push_back(getHandlerType(CGM)->getPointerTo());
+
+  return llvm::StructType::get(CGM.getLLVMContext(), mapEntryTypes);
+}
+
+// r4start
+// This function is generate type for UnwindMapEntry structure.
+//  struct UnwindMapEntry {
+//    int toState;        // target state
+//    void (*action)();   // action to perform (unwind funclet address)
+//  };
+static llvm::StructType *getUnwindMapTy(CodeGenModule &CGM) {
+  llvm::SmallVector<llvm::Type *, 2> fieldTypes;
+  
+  fieldTypes.push_back(CGM.Int32Ty);
+
+  // TODO: remove this with actual code.
+  fieldTypes.push_back(CGM.Int32Ty);
+
+  return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
+}
+
+// r4start
+// This function is generate __ehfuncinfo type.
+//
+// struct FuncInfo {
+//    // compiler version.
+//    // 0x19930520: up to VC6, 0x19930521: VC7.x(2002-2003), 
+//    // 0x19930522: VC8 (2005)
+//    DWORD magicNumber;
+//
+//    // number of entries in unwind table
+//    int maxState;
+//
+//    // table of unwind destructors
+//    UnwindMapEntry* pUnwindMap;
+//
+//    // number of try blocks in the function
+//    DWORD nTryBlocks;
+//
+//    // mapping of catch blocks to try blocks
+//    TryBlockMapEntry* pTryBlockMap;
+//
+//    // not used on x86
+//    DWORD nIPMapEntries;
+//
+//    // not used on x86
+//    void* pIPtoStateMap;
+//
+//    // VC7+ only, expected exceptions list (function "throw" specifier) 
+//    ESTypeList* pESTypeList;
+//
+//    // VC8+ only, bit 0 set if function was compiled with /EHs
+//    int EHFlags;
+//  };
+static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
+  llvm::SmallVector<llvm::Type *, 9> ehfuncinfoFields;
+
+  // magic number.
+  ehfuncinfoFields.push_back(CGM.Int32Ty);
+
+  // max state.
+  ehfuncinfoFields.push_back(CGM.Int32Ty);
+
+  // TODO: remove it with UnwindMapEntry* type.
+  ehfuncinfoFields.push_back(getUnwindMapTy(CGM)->getPointerTo());
+
+  // try blocks count.
+  ehfuncinfoFields.push_back(CGM.Int32Ty);
+
+  // TODO: remove it with TryBlockMapEntry* type.
+  ehfuncinfoFields.push_back(getTryBlockMapEntryTy(CGM)->getPointerTo());
+
+  // nIPMapEntries.
+  ehfuncinfoFields.push_back(CGM.Int32Ty);
+
+  // TODO: remove it with void*.
+  ehfuncinfoFields.push_back(CGM.VoidPtrTy);
+
+  // TODO: remove it with ESTypeList* type.
+  ehfuncinfoFields.push_back(getESListEntryType(CGM)->getPointerTo());
+
+  // EHFlags.
+  ehfuncinfoFields.push_back(CGM.Int32Ty);
+
+  return llvm::StructType::get(CGM.getLLVMContext(), ehfuncinfoFields);
+}
+
+// r4start
+static llvm::Constant *getEHFuncInfoInit(CodeGenModule &CGM, 
+                                         llvm::StructType *EHFuncInfoTy) {
+  assert(EHFuncInfoTy && "EHFuncInfoTy must be not null!");
+  llvm::SmallVector<llvm::Constant *, 9> initVals;
+
+  // TODO: This must be removed with actual code!
+  llvm::Constant *initVal = llvm::ConstantInt::get(CGM.Int32Ty, 0);
+  for (int i = 0; i < 9; ++i) {
+    initVals.push_back(initVal);
+  }
+
+  return llvm::ConstantStruct::get(EHFuncInfoTy, initVals);
+}
+
+// r4start
 // This function is generate __ehfuncinfo$_{func_name} structure.
 // It is meaningful only for MS C++ ABI.
 static void generateEHFuncInfo(CodeGenFunction &CGF) {
@@ -592,11 +770,12 @@ static void generateEHFuncInfo(CodeGenFunction &CGF) {
   out.flush();
   StringRef ehName(structName);
 
-  llvm::Constant *val = llvm::ConstantInt::get(CGF.CGM.Int32Ty, 10);
+  auto ehFuncInfoTy = generateEHFuncInfoType(CGF.CGM);
+  auto init = getEHFuncInfoInit(CGF.CGM, ehFuncInfoTy);
 
   llvm::GlobalVariable *ehFuncInfo = 
-    new llvm::GlobalVariable(CGF.CGM.getModule(), CGF.CGM.Int32Ty, true,
-                             llvm::GlobalValue::InternalLinkage, val,
+    new llvm::GlobalVariable(CGF.CGM.getModule(), ehFuncInfoTy, true,
+                             llvm::GlobalValue::InternalLinkage, init,
                              ehName);
 }
 
