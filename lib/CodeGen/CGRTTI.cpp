@@ -1229,7 +1229,7 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty)
   llvm::Constant* TypeInfo = Fields.pop_back_val();
 
   llvm::StructType* DescrTy = CGM.GetTypeDescriptorType(TypeInfo->getType(), 
-                                                        NameField.length() + 1);
+                                                        NameField.size() + 1);
 
   llvm::SmallVector<llvm::Constant*, 3> TypeDescrVals;
 
