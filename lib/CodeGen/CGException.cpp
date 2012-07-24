@@ -605,11 +605,23 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 //    // copy constructor address
 //    void (*copyFunction)();
 //  };
-static llvm::StructType *getCatchableType(CodeGenModule &CGM) {
+static llvm::StructType *getCatchableType(CodeGenModule &CGM, 
+                                          const CXXRecordDecl *RD) {
   llvm::SmallVector<llvm::Type *, 5> types;
 
+  types.push_back(CGM.Int32Ty);
+
+  // Type descriptor.
+  llvm::Constant *typeInfo = 
+    CGM.getModule().getGlobalVariable("\01??_7type_info@@6B@");
+
+  // Name in TypeDecriptor is ".?A{V, U}class_name@@" + terminating null.
+  // So we need extra memory to fit this name.
+  types.push_back(CGM.GetTypeDescriptorType(typeInfo->getType(), 
+                                            RD->getName().size() + 7));
+
   // TODO: remove it!
-  for (int i = 0; i < 6; ++i) {
+  for (int i = 0; i < 4; ++i) {
     types.push_back(CGM.Int32Ty);
   }
 
@@ -625,12 +637,17 @@ static llvm::StructType *getCatchableType(CodeGenModule &CGM) {
 //    CatchableType* arrayOfCatchableTypes[0];
 //  };
 static llvm::StructType *getCatchableArrayType(CodeGenModule &CGM, 
-                                              llvm::Type *CatchableType) {
+                                              llvm::Type *CatchableType,
+                                              uint32_t NumberOfTypes) {
   assert(CatchableType && "CatchableType must be not null pointer!");
+  assert(NumberOfTypes && "Catchable array size must be > 0");
 
   llvm::SmallVector<llvm::Type *, 2> types;
   types.push_back(CGM.Int32Ty);
-  types.push_back(CatchableType->getPointerTo()->getPointerTo());
+
+  for (uint32_t i = 0; i < NumberOfTypes; ++i) {
+    types.push_back(CatchableType->getPointerTo());
+  }
 
   return llvm::StructType::get(CGM.getLLVMContext(), types);
 }
@@ -650,8 +667,9 @@ static llvm::StructType *getCatchableArrayType(CodeGenModule &CGM,
 //    // i.e. the actual type and all its ancestors.
 //    CatchableTypeArray* pCatchableTypeArray;
 //  };
-static llvm::StructType *getThrowInfoType(CodeGenModule &CGM) {
-  llvm::Type *catchableTy = getCatchableType(CGM);
+static llvm::StructType *getThrowInfoType(CodeGenModule &CGM,
+                                          const CXXRecordDecl *CaughtClass) {
+  llvm::Type *catchableTy = getCatchableType(CGM, CaughtClass);
 
   llvm::SmallVector<llvm::Type *, 4> types;
 
@@ -660,9 +678,56 @@ static llvm::StructType *getThrowInfoType(CodeGenModule &CGM) {
   types.push_back(llvm::FunctionType::get(CGM.VoidTy, false)->getPointerTo());
   types.push_back(llvm::FunctionType::get(CGM.Int32Ty, false)->getPointerTo());
 
-  types.push_back(getCatchableArrayType(CGM, catchableTy)->getPointerTo());
+  types.push_back(getCatchableArrayType(CGM, catchableTy, 1)->getPointerTo());
 
   return llvm::StructType::get(CGM.getLLVMContext(), types);
+}
+
+// r4start
+static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF, 
+                                             llvm::StructType *ThrowInfoTy) {
+  llvm::SmallVector<llvm::Constant *, 4> initVals;
+
+  // TODO: remove it!
+  llvm::Constant *initVal = llvm::ConstantInt::get(CGF.CGM.Int32Ty, 0);
+  for (int i = 0; i < 4; ++i) {
+    initVals.push_back(initVal);
+  }
+
+  return llvm::ConstantStruct::get(ThrowInfoTy, initVals);
+}
+
+// r4start
+// This function is generate throw info for catch type.
+static void generateThrowInfo(CodeGenFunction &CGF, const QualType &CatchType) {
+  assert(CGF.CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
+    "_s_ThrowInfo is MS C++ specific!");
+
+  const CXXRecordDecl *catchDecl = CatchType->getAsCXXRecordDecl();
+  if (!catchDecl) {
+    assert(false && 
+      "At now I don`t know how build throw info for builtin types.");
+    return;
+  }
+
+  MSMangleContextExtensions *msMangler = 
+    CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
+
+  llvm::SmallString<256> buffer;
+  llvm::raw_svector_ostream out(buffer);
+
+  msMangler->mangleThrowInfo(catchDecl, out);
+  out.flush();
+
+  StringRef throwInfo(buffer);
+
+  auto throwInfoTy = getThrowInfoType(CGF.CGM, catchDecl);
+  auto throwInfoInit = generateThrowInfoInit(CGF, throwInfoTy);
+
+  llvm::GlobalVariable *gv = 
+    new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
+    llvm::GlobalValue::InternalLinkage,
+    throwInfoInit, throwInfo);
 }
 
 // r4start
@@ -874,53 +939,6 @@ static void generateEHFuncInfo(CodeGenFunction &CGF) {
     new llvm::GlobalVariable(CGF.CGM.getModule(), ehFuncInfoTy, true,
                              llvm::GlobalValue::InternalLinkage, init,
                              ehName);
-}
-
-// r4start
-static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF, 
-                                             llvm::StructType *ThrowInfoTy) {
-  llvm::SmallVector<llvm::Constant *, 4> initVals;
-
-  // TODO: remove it!
-  llvm::Constant *initVal = llvm::ConstantInt::get(CGF.CGM.Int32Ty, 0);
-  for (int i = 0; i < 4; ++i) {
-    initVals.push_back(initVal);
-  }
-
-  return llvm::ConstantStruct::get(ThrowInfoTy, initVals);
-}
-
-// r4start
-// This function is generate throw info for catch type.
-static void generateThrowInfo(CodeGenFunction &CGF, const QualType &CatchType) {
-  assert(CGF.CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
-    "_s_ThrowInfo is MS C++ specific!");
-
-  const CXXRecordDecl *catchDecl = CatchType->getAsCXXRecordDecl();
-  if (!catchDecl) {
-    assert(false && 
-                 "At now I don`t know how build throw info for builtin types.");
-    return;
-  }
-
-  MSMangleContextExtensions *msMangler = 
-    CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
-
-  llvm::SmallString<256> buffer;
-  llvm::raw_svector_ostream out(buffer);
-
-  msMangler->mangleThrowInfo(catchDecl, out);
-  out.flush();
-
-  StringRef throwInfo(buffer);
-
-  auto throwInfoTy = getThrowInfoType(CGF.CGM);
-  auto throwInfoInit = generateThrowInfoInit(CGF, throwInfoTy);
-
-  llvm::GlobalVariable *gv = 
-    new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
-                             llvm::GlobalValue::InternalLinkage,
-                             throwInfoInit, throwInfo);
 }
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {

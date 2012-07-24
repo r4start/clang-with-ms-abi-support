@@ -1238,8 +1238,8 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty)
 
   llvm::Constant* TypeInfo = Fields.pop_back_val();
 
-  llvm::StructType* DescrTy = 
-    GetTypeDescriptorType(CGM, TypeInfo->getType(), NameField.length() + 1);
+  llvm::StructType* DescrTy = CGM.GetTypeDescriptorType(TypeInfo->getType(), 
+                                                        NameField.length() + 1);
 
   llvm::SmallVector<llvm::Constant*, 3> TypeDescrVals;
 
@@ -1804,6 +1804,17 @@ void RTTIBuilder::BuildPointerToMemberTypeInfo(const MemberPointerType *Ty) {
   //   class type containing the member pointed to 
   //   (e.g., the "A" in "int A::*").
   Fields.push_back(RTTIBuilder(CGM).BuildTypeInfo(QualType(ClassType, 0)));
+}
+
+llvm::StructType *CodeGenModule::GetTypeDescriptorType(llvm::Type *TypeInfo,
+                                                       uint64_t NameLength) {
+  llvm::SmallVector<llvm::Type*, 3> descrTy;
+
+  descrTy.push_back(TypeInfo);
+  descrTy.push_back(Int32Ty);
+  descrTy.push_back(llvm::ArrayType::get(Int8Ty, NameLength));
+
+  return llvm::StructType::get(getLLVMContext(), descrTy);
 }
 
 llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
