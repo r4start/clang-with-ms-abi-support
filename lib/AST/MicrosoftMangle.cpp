@@ -176,6 +176,9 @@ public:
   virtual void mangleCXXVBTable(const CXXRecordDecl *RD,
                                 const CXXRecordDecl *BaseDecl,
                                 raw_ostream &);
+
+  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
+                                            raw_ostream &Out);
 };
 
 }
@@ -2097,6 +2100,16 @@ void MicrosoftMangleContext::mangleReferenceTemporary(const clang::VarDecl *VD,
   unsigned DiagID = getDiags().getCustomDiagID(DiagnosticsEngine::Error,
     "cannot mangle this reference temporary yet");
   getDiags().Report(VD->getLocation(), DiagID);
+}
+
+void 
+MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
+                                                     raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+
+  // Prefix for spare.
+  Out << ".?A";
+  mangler.mangleType(getASTContext().getRecordType(RD), SourceRange());
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
