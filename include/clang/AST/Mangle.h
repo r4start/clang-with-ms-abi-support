@@ -93,6 +93,9 @@ public:
                                 const CXXRecordDecl *,
                                 raw_ostream &) = 0;
 
+  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *,
+                                            raw_ostream &) = 0;
+
   virtual void mangleEHFuncInfo(const FunctionDecl *, raw_ostream &) = 0;
 
   virtual void mangleThrowInfo(const CXXRecordDecl *, raw_ostream &) = 0;

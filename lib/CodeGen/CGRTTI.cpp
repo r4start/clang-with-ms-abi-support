@@ -982,22 +982,6 @@ RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD,
   BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty,
                                                       MemberDisplacement));
 
-  /*int64_t Displacement = -1;
-  int32_t VBTableIndex = 0;
-  
-  if (RD->isVirtuallyDerivedFrom(Base)) {
-    const VBTableContext::VBTableEntry &RDEntry = 
-      CGM.getVBTableContext().getEntryFromVBTable(RD, RD);
-
-    Displacement = -RDEntry.offset;
-
-    const VBTableContext::VBTableEntry &BaseEntry = 
-      CGM.getVBTableContext().getEntryFromVBTable(RD, Base);
-
-    // Maybe not 4 but Int size.
-    VBTableIndex = BaseEntry.index * 4;
-  }*/
-
   VBTableContext::VBTableEntry VBTableDisps = GetVBaseDisplacement(RD, Base);
 
   // Vbtable displacement.
@@ -1227,12 +1211,18 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty)
   if (TypeDescriptor)
     return TypeDescriptor;
 
+  SmallString<256> Spare;
+  llvm::raw_svector_ostream OutSpare(Spare);
   // Last field of type descriptor contains mangled name of class
-  std::string NameField = ".?AV" + RD->getNameAsString() + "@@";
+  Ctx.getMsExtensions()->mangleSpareForTypeDescriptor(RD, OutSpare);
+
+  OutSpare.flush();
+
+  StringRef NameField(Spare);
 
   llvm::Constant* Array = 
     llvm::ConstantDataArray::getString(CGM.getLLVMContext(), 
-                                       StringRef(NameField));
+                                       NameField);
 
   BuildVTablePointer(cast<Type>(Ty));
 
