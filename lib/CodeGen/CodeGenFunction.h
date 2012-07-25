@@ -2741,6 +2741,12 @@ private:
   /// GetPointeeAlignment - Given an expression with a pointer type, emit the
   /// value and compute our best estimate of the alignment of the pointee.
   std::pair<llvm::Value*, unsigned> EmitPointerWithAlignment(const Expr *Addr);
+
+  /// r4start
+  void IncrementMSTryState();
+
+  /// r4start
+  void DecrementMSTryState();
 };
 
 /// Helper class with most of the code for saving a value for a
