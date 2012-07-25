@@ -628,6 +628,11 @@ public:
   /// into this alloca.
   llvm::Value *ExceptionSlot;
 
+  /// r4start
+  /// MS C++ EH specific.
+  /// State of current try level.
+  llvm::Value *MSTryState;
+
   /// The selector slot.  Under the MandatoryCleanup model, all landing pads
   /// write the current selector value into this alloca.
   llvm::AllocaInst *EHSelectorSlot;
@@ -1221,6 +1226,8 @@ public:
   /// which is assigned in every landing pad.
   llvm::Value *getExceptionSlot();
   llvm::Value *getEHSelectorSlot();
+
+  llvm::Value *getMSTryState();
 
   /// Returns the contents of the function's exception object and selector
   /// slots.

@@ -549,6 +549,14 @@ llvm::Value *CodeGenFunction::getEHSelectorSlot() {
   return EHSelectorSlot;
 }
 
+llvm::Value *CodeGenFunction::getMSTryState() {
+  if (!MSTryState) {
+    MSTryState = CreateTempAlloca(Int32Ty, "try.id");
+    Builder.CreateStore(llvm::ConstantInt::get(Int32Ty, 0), MSTryState);
+  }
+  return MSTryState;
+}
+
 llvm::Value *CodeGenFunction::getExceptionFromSlot() {
   return Builder.CreateLoad(getExceptionSlot(), "exn");
 }
@@ -990,6 +998,18 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
   
+  // Generate id in start of try block.
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    if (!MSTryState) {
+      getMSTryState();
+    } else {
+      llvm::Value *StateVal = Builder.CreateLoad(MSTryState);
+      StateVal = Builder.CreateAdd(llvm::ConstantInt::get(Int32Ty, 1),
+                                   StateVal);
+      Builder.CreateStore(StateVal, MSTryState);
+    }
+  } 
+
   for (unsigned I = 0; I != NumHandlers; ++I) {
     const CXXCatchStmt *C = S.getHandler(I);
     
@@ -1720,6 +1740,12 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   }
 
   EmitBlock(ContBB);
+
+  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+    llvm::Value *TryState = Builder.CreateLoad(MSTryState);
+    TryState = Builder.CreateSub(llvm::ConstantInt::get(Int32Ty, 1), TryState);
+    Builder.CreateStore(TryState, MSTryState);
+  }
 }
 
 namespace {
