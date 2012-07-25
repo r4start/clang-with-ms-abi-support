@@ -557,6 +557,19 @@ llvm::Value *CodeGenFunction::getMSTryState() {
   return MSTryState;
 }
 
+void CodeGenFunction::IncrementMSTryState() {
+  llvm::Value *StateVal = Builder.CreateLoad(MSTryState);
+  StateVal = Builder.CreateAdd(llvm::ConstantInt::get(Int32Ty, 1),
+                               StateVal);
+  Builder.CreateStore(StateVal, MSTryState);
+}
+
+void CodeGenFunction::DecrementMSTryState() {
+  llvm::Value *TryState = Builder.CreateLoad(MSTryState);
+  TryState = Builder.CreateSub(llvm::ConstantInt::get(Int32Ty, 1), TryState);
+  Builder.CreateStore(TryState, MSTryState);
+}
+
 llvm::Value *CodeGenFunction::getExceptionFromSlot() {
   return Builder.CreateLoad(getExceptionSlot(), "exn");
 }
@@ -579,6 +592,9 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
 
   llvm::AllocaInst *ThrowObj = Builder.CreateAlloca(throwTy, 0,
                                                     "throw.object");
+
+  /*EmitAnyExprToMem(E->getSubExpr(), ThrowObj,
+                   E->getSubExpr()->getType().getQualifiers(), true);*/
 
   llvm::Value *CXXThrowExParam = Builder.CreateBitCast(ThrowObj, CGM.Int8PtrTy);
 
@@ -1003,10 +1019,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     if (!MSTryState) {
       getMSTryState();
     } else {
-      llvm::Value *StateVal = Builder.CreateLoad(MSTryState);
-      StateVal = Builder.CreateAdd(llvm::ConstantInt::get(Int32Ty, 1),
-                                   StateVal);
-      Builder.CreateStore(StateVal, MSTryState);
+      IncrementMSTryState();
     }
   } 
 
@@ -1741,10 +1754,9 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
 
   EmitBlock(ContBB);
 
+  // r4start
   if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
-    llvm::Value *TryState = Builder.CreateLoad(MSTryState);
-    TryState = Builder.CreateSub(llvm::ConstantInt::get(Int32Ty, 1), TryState);
-    Builder.CreateStore(TryState, MSTryState);
+    DecrementMSTryState();
   }
 }
 

@@ -2668,6 +2668,12 @@ private:
   /// the alignment of the type referenced by the pointer.  Skip over implicit
   /// casts.  Return the alignment as an llvm::Value.
   llvm::Value *GetPointeeAlignmentValue(const Expr *Addr);
+
+  /// r4start
+  void IncrementMSTryState();
+
+  /// r4start
+  void DecrementMSTryState();
 };
 
 /// Helper class with most of the code for saving a value for a
