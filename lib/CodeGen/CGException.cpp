@@ -62,6 +62,16 @@ static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF,
   return CGF.CGM.CreateRuntimeFunction(FTy, "__CxxThrowException@8");
 }
 
+// r4start
+static llvm::Constant *getMSFrameHandlerFunction(CodeGenFunction &CGF) {
+  llvm::Type *Args[4] = { CGF.Int8PtrTy, CGF.Int8PtrTy,
+                          CGF.Int8PtrTy, CGF.Int8PtrTy };
+  llvm::FunctionType *FTy = 
+    llvm::FunctionType::get(CGF.VoidTy, Args, /*IsVarArgs=*/false);
+
+  return CGF.CGM.CreateRuntimeFunction(FTy, "__CxxFrameHandler");
+}
+
 static llvm::Constant *getReThrowFn(CodeGenFunction &CGF) {
   // void __cxa_rethrow();
 
@@ -562,12 +572,11 @@ llvm::Value *CodeGenFunction::getEHSelectorSlot() {
   return EHSelectorSlot;
 }
 
-llvm::Value *CodeGenFunction::getMSTryState() {
+void CodeGenFunction::initMSTryState() {
   if (!MSTryState) {
     MSTryState = CreateTempAlloca(Int32Ty, "try.id");
     Builder.CreateStore(llvm::ConstantInt::get(Int32Ty, 0), MSTryState);
   }
-  return MSTryState;
 }
 
 void CodeGenFunction::IncrementMSTryState() {
@@ -828,8 +837,8 @@ static llvm::StructType *getHandlerType(CodeGenModule &CGM) {
 
   fields.push_back(CGM.Int32Ty);
 
-  // TODO: remove with TypeDescriptorType.
-  fields.push_back(CGM.Int32Ty);
+  // Type descriptor.
+  fields.push_back(CGM.VoidPtrTy);
   
   fields.push_back(CGM.Int32Ty);
   
@@ -851,7 +860,6 @@ static llvm::StructType *getESListEntryType(CodeGenModule &CGM) {
 
   fieldTypes.push_back(CGM.Int32Ty);
 
-  // TODO: remove this with actual code.
   fieldTypes.push_back(getHandlerType(CGM)->getPointerTo());
 
   return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
@@ -880,7 +888,6 @@ static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM) {
     mapEntryTypes.push_back(CGM.Int32Ty);
   }
 
-  // TODO: remove it with actual code!
   mapEntryTypes.push_back(getHandlerType(CGM)->getPointerTo());
 
   return llvm::StructType::get(CGM.getLLVMContext(), mapEntryTypes);
@@ -897,8 +904,7 @@ static llvm::StructType *getUnwindMapTy(CodeGenModule &CGM) {
   
   fieldTypes.push_back(CGM.Int32Ty);
 
-  // TODO: remove this with actual code.
-  fieldTypes.push_back(CGM.Int32Ty);
+  fieldTypes.push_back(llvm::FunctionType::get(CGM.VoidTy, false));
 
   return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
 }
@@ -945,13 +951,13 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
   // max state.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
-  // TODO: remove it with UnwindMapEntry* type.
+  // UnwindMapEntry* .
   ehfuncinfoFields.push_back(getUnwindMapTy(CGM)->getPointerTo());
 
   // try blocks count.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
-  // TODO: remove it with TryBlockMapEntry* type.
+  // TryBlockMapEntry*.
   ehfuncinfoFields.push_back(getTryBlockMapEntryTy(CGM)->getPointerTo());
 
   // nIPMapEntries.
@@ -960,7 +966,7 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
   // TODO: remove it with void*.
   ehfuncinfoFields.push_back(CGM.VoidPtrTy);
 
-  // TODO: remove it with ESTypeList* type.
+  // ESTypeList*.
   ehfuncinfoFields.push_back(getESListEntryType(CGM)->getPointerTo());
 
   // EHFlags.
@@ -989,9 +995,6 @@ static llvm::Constant *getEHFuncInfoInit(CodeGenModule &CGM,
 // This function is generate __ehfuncinfo$_{func_name} structure.
 // It is meaningful only for MS C++ ABI.
 static void generateEHFuncInfo(CodeGenFunction &CGF) {
-  assert(CGF.CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
-         "__ehfuncinfo is MS C++ specific!");
-
   const FunctionDecl *function = 
                                 cast_or_null<FunctionDecl>(CGF.CurGD.getDecl());
   if (!function) {
@@ -1018,6 +1021,21 @@ static void generateEHFuncInfo(CodeGenFunction &CGF) {
                              ehName);
 }
 
+// r4start
+static void generateEHHandler(CodeGenFunction &CGF) {
+  llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
+
+  llvm::Function *F = llvm::Function::Create(FTy,
+        llvm::GlobalValue::InternalLinkage, "__ehhandler",
+        &CGF.CGM.getModule());
+
+  CodeGenFunction cgf(CGF.CGM);
+  llvm::BasicBlock *BB = 
+    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", F);
+  cgf.Builder.SetInsertPoint(BB);
+  cgf.Builder.CreateRetVoid();
+}
+
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
@@ -1029,9 +1047,10 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
   
   // Generate id in start of try block.
-  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+  if (IsMSABI) {
+    generateEHHandler(*this);
     if (!MSTryState) {
-      getMSTryState();
+      initMSTryState();
     } else {
       IncrementMSTryState();
     }
@@ -1056,7 +1075,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
         TypeInfo = CGM.getObjCRuntime().GetEHType(CaughtType);
       else {
         // r4start
-        if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+        if (!IsMSABI) {
           TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
         } else {
           TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, 
@@ -1769,7 +1788,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   EmitBlock(ContBB);
 
   // r4start
-  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+  if (IsMSABI) {
     DecrementMSTryState();
   }
 }
