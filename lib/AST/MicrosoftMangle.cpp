@@ -2137,13 +2137,13 @@ void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
 
 void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
                                                      raw_ostream &Out) {
-  Out << "\01__ehhandler$";
   if (F->isMain()) {
-    Out << "_";
+    Out << "\01__ehhandler$_main";
+    return;
   }
 
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangle(F, "");
+  mangler.mangle(F, "\01__ehhandler$");
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
