@@ -185,6 +185,8 @@ public:
   virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
 
   virtual void mangleThrowInfo(const CXXRecordDecl *RD, raw_ostream &Out);
+
+  virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &);
 };
 
 }
@@ -2131,6 +2133,17 @@ void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
   
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
+}
+
+void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
+                                                     raw_ostream &Out) {
+  Out << "\01__ehhandler$";
+  if (F->isMain()) {
+    Out << "_";
+  }
+
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangle(F, "");
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,

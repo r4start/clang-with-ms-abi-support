@@ -1012,14 +1012,25 @@ static void generateEHFuncInfo(CodeGenFunction &CGF) {
 static void generateEHHandler(CodeGenFunction &CGF) {
   llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
 
+  llvm::SmallString<256> nameBuffer;
+  llvm::raw_svector_ostream nameStream(nameBuffer);
+
+  CGF.CGM.getCXXABI().getMangleContext().getMsExtensions()->
+    mangleEHHandlerFunction(cast<FunctionDecl>(CGF.CurFuncDecl), nameStream);
+
+  nameStream.flush();
+  StringRef mangledName(nameBuffer);
+
   llvm::Function *F = llvm::Function::Create(FTy,
-        llvm::GlobalValue::InternalLinkage, "__ehhandler",
+        llvm::GlobalValue::InternalLinkage, mangledName,
         &CGF.CGM.getModule());
 
   CodeGenFunction cgf(CGF.CGM);
+
   llvm::BasicBlock *BB = 
     llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", F);
   cgf.Builder.SetInsertPoint(BB);
+  
   cgf.Builder.CreateRetVoid();
 }
 
