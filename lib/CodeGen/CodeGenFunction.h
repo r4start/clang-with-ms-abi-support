@@ -628,11 +628,6 @@ public:
   /// into this alloca.
   llvm::Value *ExceptionSlot;
 
-  /// r4start
-  /// MS C++ EH specific.
-  /// State of current try level.
-  llvm::Value *MSTryState;
-
   /// The selector slot.  Under the MandatoryCleanup model, all landing pads
   /// write the current selector value into this alloca.
   llvm::AllocaInst *EHSelectorSlot;
@@ -1121,6 +1116,14 @@ private:
   CGDebugInfo *DebugInfo;
   bool DisableDebugInfo;
 
+  /// r4start
+  /// MS C++ EH specific.
+  /// State of current try level.
+  llvm::Value *MSTryState;
+
+  /// r4start
+  bool IsMSABI;
+
   /// DidCallStackSave - Whether llvm.stacksave has been called. Used to avoid
   /// calling llvm.stacksave for multiple VLAs in the same scope.
   bool DidCallStackSave;
@@ -1227,7 +1230,7 @@ public:
   llvm::Value *getExceptionSlot();
   llvm::Value *getEHSelectorSlot();
 
-  llvm::Value *getMSTryState();
+  void initMSTryState();
 
   /// Returns the contents of the function's exception object and selector
   /// slots.
