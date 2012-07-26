@@ -593,8 +593,9 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
   llvm::AllocaInst *ThrowObj = Builder.CreateAlloca(throwTy, 0,
                                                     "throw.object");
 
-  /*EmitAnyExprToMem(E->getSubExpr(), ThrowObj,
-                   E->getSubExpr()->getType().getQualifiers(), true);*/
+  // If need emits ctor call.
+  EmitAnyExprToMem(E->getSubExpr(), ThrowObj,
+                   E->getSubExpr()->getType().getQualifiers(), true);
 
   llvm::Value *CXXThrowExParam = Builder.CreateBitCast(ThrowObj, CGM.Int8PtrTy);
 
