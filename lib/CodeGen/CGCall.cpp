@@ -2081,7 +2081,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
     // r4start
     // This needs for Microsoft C++ EH.
-    if (IsMSABI && MSTryState) {
+    const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
+    if (IsMSABI && MSTryState && MD && MD->getKind() == Decl::CXXConstructor) {
       IncrementMSTryState();
     }
   }
