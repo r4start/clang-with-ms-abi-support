@@ -1230,8 +1230,6 @@ public:
   llvm::Value *getExceptionSlot();
   llvm::Value *getEHSelectorSlot();
 
-  void initMSTryState();
-
   /// Returns the contents of the function's exception object and selector
   /// slots.
   llvm::Value *getExceptionFromSlot();
@@ -2677,6 +2675,9 @@ private:
 
   /// r4start
   void DecrementMSTryState();
+
+  /// r4start
+  void initMSTryState();
 };
 
 /// Helper class with most of the code for saving a value for a

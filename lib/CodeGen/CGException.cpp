@@ -587,6 +587,7 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
   return Builder.CreateLoad(getEHSelectorSlot(), "sel");
 }
 
+// r4start
 void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
   if (!E->getSubExpr()) {
     assert(false && "I do not know how ms do throw without sub expression!");
@@ -1010,13 +1011,19 @@ static void generateEHFuncInfo(CodeGenFunction &CGF) {
 
 // r4start
 static void generateEHHandler(CodeGenFunction &CGF) {
+  const FunctionDecl *func = cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
+  if (!func) {
+    return;
+  }
+
   llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
 
   llvm::SmallString<256> nameBuffer;
   llvm::raw_svector_ostream nameStream(nameBuffer);
 
+
   CGF.CGM.getCXXABI().getMangleContext().getMsExtensions()->
-    mangleEHHandlerFunction(cast<FunctionDecl>(CGF.CurFuncDecl), nameStream);
+    mangleEHHandlerFunction(func, nameStream);
 
   nameStream.flush();
   StringRef mangledName(nameBuffer);

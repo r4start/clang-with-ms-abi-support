@@ -2078,6 +2078,12 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
     EmitBlock(Cont);
+
+    // r4start
+    // This needs for Microsoft C++ EH.
+    if (IsMSABI && MSTryState) {
+      IncrementMSTryState();
+    }
   }
   if (callOrInvoke)
     *callOrInvoke = CS.getInstruction();
