@@ -63,13 +63,18 @@ static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF,
 }
 
 // r4start
-static llvm::Constant *getMSFrameHandlerFunction(CodeGenFunction &CGF) {
-  llvm::Type *Args[4] = { CGF.Int8PtrTy, CGF.Int8PtrTy,
-                          CGF.Int8PtrTy, CGF.Int8PtrTy };
+static llvm::Function *getMSFrameHandlerFunction(CodeGenFunction &CGF, 
+                                                 llvm::Type *EHFuncInfoTy) {
+  llvm::Type *Args[1] = { EHFuncInfoTy };
   llvm::FunctionType *FTy = 
     llvm::FunctionType::get(CGF.VoidTy, Args, /*IsVarArgs=*/false);
 
-  return CGF.CGM.CreateRuntimeFunction(FTy, "__CxxFrameHandler");
+  llvm::Function *F = llvm::Function::Create(FTy,
+                                llvm::GlobalValue::ExternalLinkage, 
+                                "__CxxFrameHandler",
+                                &CGF.CGM.getModule());
+  F->addAttribute(1, llvm::Attribute::InReg | llvm::Attribute::NoCapture);
+  return F;
 }
 
 static llvm::Constant *getReThrowFn(CodeGenFunction &CGF) {
@@ -559,24 +564,32 @@ llvm::Value *CodeGenFunction::getEHSelectorSlot() {
   return EHSelectorSlot;
 }
 
-void CodeGenFunction::initMSTryState() {
+// r4start
+void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
-    MSTryState = CreateTempAlloca(Int32Ty, "try.id");
-    Builder.CreateStore(llvm::ConstantInt::get(Int32Ty, 0), MSTryState);
+    MSTryState = CGF.CreateTempAlloca(CGF.Int32Ty, "try.id");
+    CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, 0), MSTryState);
   }
 }
 
-void CodeGenFunction::IncrementMSTryState() {
-  llvm::Value *StateVal = Builder.CreateLoad(MSTryState);
-  StateVal = Builder.CreateAdd(llvm::ConstantInt::get(Int32Ty, 1),
+// r4start
+void CodeGenFunction::MSEHState::IncrementMSTryState() {
+  llvm::Value *StateVal = CGF.Builder.CreateLoad(MSTryState);
+  StateVal = CGF.Builder.CreateAdd(llvm::ConstantInt::get(CGF.Int32Ty, 1),
                                StateVal);
-  Builder.CreateStore(StateVal, MSTryState);
+  CGF.Builder.CreateStore(StateVal, MSTryState);
 }
 
-void CodeGenFunction::DecrementMSTryState() {
-  llvm::Value *TryState = Builder.CreateLoad(MSTryState);
-  TryState = Builder.CreateSub(llvm::ConstantInt::get(Int32Ty, 1), TryState);
-  Builder.CreateStore(TryState, MSTryState);
+// r4start
+void CodeGenFunction::MSEHState::DecrementMSTryState() {
+  llvm::Value *TryState = CGF.Builder.CreateLoad(MSTryState);
+  TryState = CGF.Builder.CreateSub(llvm::ConstantInt::get(CGF.Int32Ty, 1), TryState);
+  CGF.Builder.CreateStore(TryState, MSTryState);
+}
+
+// r4start
+void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
+  CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State), MSTryState);
 }
 
 llvm::Value *CodeGenFunction::getExceptionFromSlot() {
@@ -982,11 +995,11 @@ static llvm::Constant *getEHFuncInfoInit(CodeGenModule &CGM,
 // r4start
 // This function is generate __ehfuncinfo$_{func_name} structure.
 // It is meaningful only for MS C++ ABI.
-static void generateEHFuncInfo(CodeGenFunction &CGF) {
+static llvm::GlobalVariable *generateEHFuncInfo(CodeGenFunction &CGF) {
   const FunctionDecl *function = 
                                 cast_or_null<FunctionDecl>(CGF.CurGD.getDecl());
   if (!function) {
-    return;
+    return nullptr;
   }
 
   llvm::SmallString<256> structName;
@@ -1002,11 +1015,10 @@ static void generateEHFuncInfo(CodeGenFunction &CGF) {
 
   auto ehFuncInfoTy = generateEHFuncInfoType(CGF.CGM);
   auto init = getEHFuncInfoInit(CGF.CGM, ehFuncInfoTy);
-
-  llvm::GlobalVariable *ehFuncInfo = 
-    new llvm::GlobalVariable(CGF.CGM.getModule(), ehFuncInfoTy, true,
-                             llvm::GlobalValue::InternalLinkage, init,
-                             ehName);
+ 
+  return new llvm::GlobalVariable(CGF.CGM.getModule(), ehFuncInfoTy, true,
+                                  llvm::GlobalValue::InternalLinkage, init,
+                                  ehName);
 }
 
 // r4start
@@ -1038,6 +1050,15 @@ static void generateEHHandler(CodeGenFunction &CGF) {
     llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", F);
   cgf.Builder.SetInsertPoint(BB);
   
+  // TODO: this must be removed by getEHFuncInfo(CGF, FunctionDecl);
+  // We do not have enough information for ehfuncinfo generation here.
+  llvm::Value *FuncInfo = generateEHFuncInfo(CGF);
+
+  llvm::Function *CxxFramHandler = getMSFrameHandlerFunction(CGF, 
+                                           FuncInfo->getType());
+  llvm::CallInst *Inst = cgf.Builder.CreateCall(CxxFramHandler, FuncInfo);
+  Inst->setTailCall();
+
   cgf.Builder.CreateRetVoid();
 }
 
@@ -1054,11 +1075,13 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   // Generate id in start of try block.
   if (IsMSABI) {
     generateEHHandler(*this);
-    if (!MSTryState) {
-      initMSTryState();
+    if (!EHState.IsInited()) {
+      EHState.InitMSTryState();
     } else {
-      IncrementMSTryState();
+      EHState.IncrementMSTryState();
     }
+
+    EHState.TryLevel++;
   } 
 
   for (unsigned I = 0; I != NumHandlers; ++I) {
@@ -1794,7 +1817,13 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
 
   // r4start
   if (IsMSABI) {
-    DecrementMSTryState();
+    if (EHState.TryLevel == 1) {
+      EHState.SetMSTryState(-1);
+    } else {
+      EHState.DecrementMSTryState();
+    }
+
+    EHState.TryLevel--;
   }
 }
 

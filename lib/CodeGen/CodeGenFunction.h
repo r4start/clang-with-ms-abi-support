@@ -1117,12 +1117,36 @@ private:
   bool DisableDebugInfo;
 
   /// r4start
-  /// MS C++ EH specific.
-  /// State of current try level.
-  llvm::Value *MSTryState;
+  bool IsMSABI;
 
   /// r4start
-  bool IsMSABI;
+  class MSEHState {
+
+    /// MS C++ EH specific.
+    /// State of current try level.
+    llvm::Value *MSTryState;
+
+    CodeGenFunction &CGF;
+  public:
+
+    int TryLevel;
+
+    MSEHState(CodeGenFunction &cgf) 
+     : MSTryState(0), TryLevel(0), CGF(cgf) {}
+
+    void IncrementMSTryState();
+
+    void DecrementMSTryState();
+
+    void SetMSTryState(uint32_t State);
+
+    void InitMSTryState();
+
+    bool IsInited() const { return MSTryState != 0; }
+  };
+
+  /// r4start
+  MSEHState EHState;
 
   /// DidCallStackSave - Whether llvm.stacksave has been called. Used to avoid
   /// calling llvm.stacksave for multiple VLAs in the same scope.
@@ -2669,15 +2693,6 @@ private:
   /// the alignment of the type referenced by the pointer.  Skip over implicit
   /// casts.  Return the alignment as an llvm::Value.
   llvm::Value *GetPointeeAlignmentValue(const Expr *Addr);
-
-  /// r4start
-  void IncrementMSTryState();
-
-  /// r4start
-  void DecrementMSTryState();
-
-  /// r4start
-  void initMSTryState();
 };
 
 /// Helper class with most of the code for saving a value for a

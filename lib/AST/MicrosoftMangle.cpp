@@ -2122,6 +2122,11 @@ MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
 
 void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
                                               raw_ostream &Out) {
+  if (F->isMain()) {
+    Out << "\01__ehfuncinfo$_main";
+    return;
+  }
+
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangle(F, "\01__ehfuncinfo$");
 }
