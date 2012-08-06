@@ -101,6 +101,9 @@ public:
   virtual void mangleThrowInfo(const CXXRecordDecl *, raw_ostream &) = 0;
 
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &) = 0;
+
+  virtual void mangleEHCatchFunction(const FunctionDecl *, uint8_t ,
+                                                             raw_ostream &) = 0;
 };
 
 /// MangleContext - Context for tracking state which persists across multiple

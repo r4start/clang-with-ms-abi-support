@@ -187,6 +187,9 @@ public:
   virtual void mangleThrowInfo(const CXXRecordDecl *RD, raw_ostream &Out);
 
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &);
+
+  virtual void mangleEHCatchFunction(const FunctionDecl *, uint8_t,
+                                     raw_ostream &);
 };
 
 }
@@ -2149,6 +2152,20 @@ void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
 
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangle(F, "\01__ehhandler$");
+}
+
+void MicrosoftMangleContext::mangleEHCatchFunction(const FunctionDecl *F, 
+                                                   uint8_t Number,
+                                                   raw_ostream &Out) {
+  if (F->isMain()) {
+    Out << "\01__catch$_main$";
+    Out << (int64_t)Number;
+    return;
+  }
+
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangle(F, "\01__catch$");
+  Out << (int64_t)Number;
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,

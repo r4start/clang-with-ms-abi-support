@@ -625,12 +625,9 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
   llvm::GlobalVariable *ThrowInfo = getOrGenerateThrowInfo(*this, ThrowType);
 
   llvm::Value *Params[] = { CXXThrowExParam, ThrowInfo };
-
-  llvm::InvokeInst *ThrowCall = 
-    Builder.CreateInvoke(getMSThrowFn(*this, ThrowInfo->getType()),
-                         getUnreachableBlock(), getInvokeDest(), Params);
-                         
-  EmitBlock(createBasicBlock("throw.cont"));
+                        
+  Builder.CreateCall(getMSThrowFn(*this, ThrowInfo->getType()), Params);
+  //EmitBlock(createBasicBlock("throw.cont"));
 }
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
@@ -1065,7 +1062,12 @@ static void generateEHHandler(CodeGenFunction &CGF) {
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
-  ExitCXXTryStmt(S);
+
+  if (IsMSABI) {
+    ExitMSCXXTryStmt(S);
+  } else {
+    ExitCXXTryStmt(S); 
+  }
 }
 
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
@@ -1184,6 +1186,11 @@ llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
 
   if (!CGM.getLangOpts().Exceptions)
     return 0;
+
+  // r4start
+  if (IsMSABI) {
+    return 0;
+  }
 
   // Check the innermost scope for a cached landing pad.  If this is
   // a non-EH cleanup, we'll check enclosing scopes in EmitLandingPad.
@@ -1730,6 +1737,67 @@ void CodeGenFunction::popCatchScope() {
   EHStack.popCatch();
 }
 
+// r4start
+void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
+  unsigned NumHandlers = S.getNumHandlers();
+  EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
+  assert(CatchScope.getNumHandlers() == NumHandlers);
+
+  SmallVector<EHCatchScope::Handler, 8> Handlers(NumHandlers);
+  memcpy(Handlers.data(), CatchScope.begin(),
+         NumHandlers * sizeof(EHCatchScope::Handler));
+
+  EHStack.popCatch();
+
+  const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
+  if (!fd) {
+    assert(false && "Something goes wrong!");
+  }
+
+  MSMangleContextExtensions *msMangler = 
+    CGM.getCXXABI().getMangleContext().getMsExtensions();
+  
+  auto oldBB = Builder.GetInsertBlock();
+  llvm::SmallVector<llvm::BlockAddress *, 4> catchHandlers;
+
+  // In MS do it in straight way.
+  for (unsigned I = 0; I != NumHandlers; ++I) {
+
+    llvm::SmallString<256>  catchHandlerName;
+    llvm::raw_svector_ostream stream(catchHandlerName);
+
+    msMangler->mangleEHCatchFunction(fd, I, stream);
+
+    stream.flush();
+    StringRef mangledCatchName(catchHandlerName);
+
+    const CXXCatchStmt *C = S.getHandler(I);
+
+    llvm::BasicBlock *entryBB = 
+      llvm::BasicBlock::Create(CGM.getLLVMContext(), mangledCatchName, CurFn);
+
+    Builder.SetInsertPoint(entryBB);
+
+    EmitStmt(C->getHandlerBlock());
+
+    // TODO: right handling of return instruction
+    Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
+
+    catchHandlers.push_back(llvm::BlockAddress::get(entryBB));
+  }
+
+  Builder.SetInsertPoint(oldBB);
+
+  if (EHState.TryLevel == 1) {
+    EHState.SetMSTryState(-1);
+  } else {
+    EHState.DecrementMSTryState();
+  }
+
+  EHState.TryLevel--;
+
+}
+
 void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
@@ -1814,17 +1882,6 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   }
 
   EmitBlock(ContBB);
-
-  // r4start
-  if (IsMSABI) {
-    if (EHState.TryLevel == 1) {
-      EHState.SetMSTryState(-1);
-    } else {
-      EHState.DecrementMSTryState();
-    }
-
-    EHState.TryLevel--;
-  }
 }
 
 namespace {
