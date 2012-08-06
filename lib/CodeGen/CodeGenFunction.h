@@ -2099,6 +2099,9 @@ public:
   void EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
   void ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
 
+  /// r4start
+  void ExitMSCXXTryStmt(const CXXTryStmt &S);
+
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
 
