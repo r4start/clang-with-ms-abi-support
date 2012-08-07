@@ -66,6 +66,11 @@ CodeGenFunction::~CodeGenFunction() {
   // something.
   if (FirstBlockInfo)
     destroyBlockInfos(FirstBlockInfo);
+  
+  // r4start
+  if (IsMSABI && EHState.IsInited()) {
+    EmitMSUnwindTable();
+  }
 }
 
 
