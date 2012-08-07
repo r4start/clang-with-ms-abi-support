@@ -2128,15 +2128,20 @@ MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
   mangler.mangleType(getASTContext().getRecordType(RD), SourceRange());
 }
 
-void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
-                                              raw_ostream &Out) {
+static void MangleEHSpecificNames(MicrosoftMangleContext &ctx, const FunctionDecl *F,
+                             raw_ostream &Out, StringRef Prefix) {
   if (F->isMain()) {
-    Out << "\01__ehfuncinfo$_main";
+    Out << Prefix << "_main";
     return;
   }
 
-  MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangle(F, "\01__ehfuncinfo$");
+  MicrosoftCXXNameMangler mangler(ctx, Out);
+  mangler.mangle(F, Prefix);
+}
+
+void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
+                                              raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__ehfuncinfo$");
 }
 
 void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
@@ -2150,47 +2155,25 @@ void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
 
 void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
                                                      raw_ostream &Out) {
-  if (F->isMain()) {
-    Out << "\01__ehhandler$_main";
-    return;
-  }
-
-  MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangle(F, "\01__ehhandler$");
+  MangleEHSpecificNames(*this, F, Out, "\01__ehhandler$");
 }
 
 void MicrosoftMangleContext::mangleEHCatchFunction(const FunctionDecl *F, 
                                                    uint8_t Number,
                                                    raw_ostream &Out) {
-  if (F->isMain()) {
-    Out << "\01__catch$_main$";
-  } else {
-    MicrosoftCXXNameMangler mangler(*this, Out);
-    mangler.mangle(F, "\01__catch$");
-  }
+  MangleEHSpecificNames(*this, F, Out, "\01__catch$");
   Out << (int64_t)Number;
 }
 
 void MicrosoftMangleContext::mangleEHUnwindTable(const FunctionDecl *F,
                                                  raw_ostream &Out) {
-  if (F->isMain()) {
-    Out << "\01__unwindtable$_main";
-    return;
-  }
-
-  MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangle(F, "\01__unwindtable$");
+  MangleEHSpecificNames(*this, F, Out, "\01__unwindtable$");
 }
 
 void MicrosoftMangleContext::mangleEHUnwindFunclet(const FunctionDecl *F,
                                                    uint8_t Number,
                                                    raw_ostream &Out) {
-  if (F->isMain()) {
-    Out << "\01__unwindfunclet$_main$";
-  } else {
-    MicrosoftCXXNameMangler mangler(*this, Out);
-    mangler.mangle(F, "\01__unwindfunclet$");
-  }
+  MangleEHSpecificNames(*this, F, Out, "\01__unwindfunclet$");
   Out << (int64_t)Number;
 }
 
