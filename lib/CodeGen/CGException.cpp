@@ -1099,9 +1099,12 @@ void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This,
 
   llvm::CallInst *call = Builder.CreateCall(ReleaseFunc, This);
   call->setTailCall();
+  call->setDoesNotReturn();
+
+  Builder.CreateUnreachable();
 
   // TODO: remove this with br to unreachable.
-  Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
+  //Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
 
   llvm::BlockAddress *funcletAddr = llvm::BlockAddress::get(CurFn, funclet);
   EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funcletAddr));
