@@ -190,6 +190,11 @@ public:
 
   virtual void mangleEHCatchFunction(const FunctionDecl *, uint8_t,
                                      raw_ostream &);
+
+  virtual void mangleEHUnwindTable(const FunctionDecl *, raw_ostream &);
+
+  virtual void mangleEHUnwindFunclet(const FunctionDecl *, uint8_t ,
+                                     raw_ostream &);
 };
 
 }
@@ -2159,12 +2164,33 @@ void MicrosoftMangleContext::mangleEHCatchFunction(const FunctionDecl *F,
                                                    raw_ostream &Out) {
   if (F->isMain()) {
     Out << "\01__catch$_main$";
-    Out << (int64_t)Number;
+  } else {
+    MicrosoftCXXNameMangler mangler(*this, Out);
+    mangler.mangle(F, "\01__catch$");
+  }
+  Out << (int64_t)Number;
+}
+
+void MicrosoftMangleContext::mangleEHUnwindTable(const FunctionDecl *F,
+                                                 raw_ostream &Out) {
+  if (F->isMain()) {
+    Out << "\01__unwindtable$_main";
     return;
   }
 
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangle(F, "\01__catch$");
+  mangler.mangle(F, "\01__unwindtable$");
+}
+
+void MicrosoftMangleContext::mangleEHUnwindFunclet(const FunctionDecl *F,
+                                                   uint8_t Number,
+                                                   raw_ostream &Out) {
+  if (F->isMain()) {
+    Out << "\01__unwindfunclet$_main$";
+  } else {
+    MicrosoftCXXNameMangler mangler(*this, Out);
+    mangler.mangle(F, "\01__unwindfunclet$");
+  }
   Out << (int64_t)Number;
 }
 

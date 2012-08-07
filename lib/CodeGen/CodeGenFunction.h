@@ -1131,8 +1131,19 @@ private:
 
     int TryLevel;
 
+    /// Counter for unwind funclet mangling.
+    /// Starts from 12.
+    /// TODO: Investigate this.
+    int FuncletCounter;
+
+    /// This value needs for generating unwind map entry.
+    int CurState;
+
+    /// Unwind table map.
+    llvm::SmallDenseMap<int, llvm::Function *> UnwindTable;
+
     MSEHState(CodeGenFunction &cgf) 
-     : MSTryState(0), TryLevel(0), CGF(cgf) {}
+     : MSTryState(0), FuncletCounter(12), CurState(0), TryLevel(0), CGF(cgf) {}
 
     void IncrementMSTryState();
 
@@ -2680,6 +2691,12 @@ private:
   }
 
   void EmitDeclMetadata();
+
+  /// r4start
+  void EmitMSUnwindFunclet(llvm::Value *This, llvm::Value *ReleaseFunc);
+
+  /// r4start
+  llvm::GlobalValue *EmitMSUnwindTable();
 
   CodeGenModule::ByrefHelpers *
   buildByrefHelpers(llvm::StructType &byrefType,

@@ -2082,6 +2082,12 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
       auto kind = MD->getKind();
       if (kind == Decl::CXXConstructor) {
         EHState.IncrementMSTryState();
+      
+        const CXXRecordDecl *Parent = MD->getParent();
+        llvm::Value *dtor = 
+          CGM.GetAddrOfCXXDestructor(Parent->getDestructor(), Dtor_Base);
+        EmitMSUnwindFunclet(Args[0], dtor);
+
       } else if (kind == Decl::CXXDestructor) {
         EHState.DecrementMSTryState();
       }

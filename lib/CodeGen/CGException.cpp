@@ -575,16 +575,25 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
 // r4start
 void CodeGenFunction::MSEHState::IncrementMSTryState() {
   llvm::Value *StateVal = CGF.Builder.CreateLoad(MSTryState);
+  
   StateVal = CGF.Builder.CreateAdd(llvm::ConstantInt::get(CGF.Int32Ty, 1),
                                StateVal);
+  
   CGF.Builder.CreateStore(StateVal, MSTryState);
+  
+  CurState++;
 }
 
 // r4start
 void CodeGenFunction::MSEHState::DecrementMSTryState() {
   llvm::Value *TryState = CGF.Builder.CreateLoad(MSTryState);
-  TryState = CGF.Builder.CreateSub(llvm::ConstantInt::get(CGF.Int32Ty, 1), TryState);
+  
+  TryState = 
+    CGF.Builder.CreateSub(llvm::ConstantInt::get(CGF.Int32Ty, 1), TryState);
+
   CGF.Builder.CreateStore(TryState, MSTryState);
+  
+  CurState--;
 }
 
 // r4start
@@ -897,12 +906,13 @@ static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM) {
 //    int toState;        // target state
 //    void (*action)();   // action to perform (unwind funclet address)
 //  };
-static llvm::StructType *getUnwindMapTy(CodeGenModule &CGM) {
+static llvm::StructType *getUnwindMapEntryTy(CodeGenModule &CGM) {
   llvm::SmallVector<llvm::Type *, 2> fieldTypes;
   
   fieldTypes.push_back(CGM.Int32Ty);
 
-  fieldTypes.push_back(llvm::FunctionType::get(CGM.VoidTy, false));
+  fieldTypes.push_back(
+                    llvm::FunctionType::get(CGM.VoidTy, false)->getPointerTo());
 
   return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
 }
@@ -950,7 +960,7 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
   // UnwindMapEntry* .
-  ehfuncinfoFields.push_back(getUnwindMapTy(CGM)->getPointerTo());
+  ehfuncinfoFields.push_back(getUnwindMapEntryTy(CGM)->getPointerTo());
 
   // try blocks count.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
@@ -1057,6 +1067,77 @@ static void generateEHHandler(CodeGenFunction &CGF) {
   Inst->setTailCall();
 
   cgf.Builder.CreateRetVoid();
+}
+
+// r4start
+void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This, 
+                                          llvm::Value *ReleaseFunc) {
+  const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
+  assert(fd && "Unwind funclet must be emit for function!");
+
+  llvm::SmallString<256> funcletName;
+  llvm::raw_svector_ostream stream(funcletName);
+
+  CGM.getCXXABI().getMangleContext().
+   getMsExtensions()->mangleEHUnwindFunclet(fd, EHState.FuncletCounter, stream);
+
+  EHState.FuncletCounter++;
+
+  stream.flush();
+  StringRef mangledFuncletName(funcletName);
+
+  llvm::FunctionType *fty = llvm::FunctionType::get(VoidTy, false);
+  llvm::Function *funclet = 
+    llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
+                           mangledFuncletName, &CGM.getModule());
+  CodeGenFunction cgf(CGM);
+
+  llvm::BasicBlock *entry = 
+    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", funclet);
+  cgf.Builder.SetInsertPoint(entry);
+
+  //llvm::CallInst *call = cgf.Builder.CreateCall(ReleaseFunc, This);
+  //call->setTailCall();
+  cgf.Builder.CreateRetVoid();
+
+  EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funclet));
+}
+
+llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
+  const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
+  assert(funcDecl && "Unwind table is generating only for functions!");
+
+  llvm::SmallString<256> tableName;
+  llvm::raw_svector_ostream stream(tableName);
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleEHUnwindTable(funcDecl, stream);
+  stream.flush();
+
+  StringRef mangledUnwindTableName(tableName);
+
+  llvm::StructType *entryTy = getUnwindMapEntryTy(CGM);
+
+  llvm::SmallVector<llvm::Constant *, 2> fields;
+  llvm::SmallVector<llvm::Constant *, 4> entries;
+
+  assert(!EHState.UnwindTable.empty() && "Unwind table is empty!");
+
+  for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
+       I != E; ++I) {
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, I->first));
+    fields.push_back(I->second);
+
+    entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
+    fields.clear();
+  }
+
+  llvm::ArrayType *tableTy = llvm::ArrayType::get(entryTy, entries.size());
+  llvm::Constant *init = llvm::ConstantArray::get(tableTy, entries);
+
+  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+                                  llvm::GlobalValue::InternalLinkage, init,
+                                  mangledUnwindTableName);
 }
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
