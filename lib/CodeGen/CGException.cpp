@@ -1035,8 +1035,6 @@ static void generateEHHandler(CodeGenFunction &CGF) {
     return;
   }
 
-  llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
-
   llvm::SmallString<256> nameBuffer;
   llvm::raw_svector_ostream nameStream(nameBuffer);
 
@@ -1047,7 +1045,14 @@ static void generateEHHandler(CodeGenFunction &CGF) {
   nameStream.flush();
   StringRef mangledName(nameBuffer);
 
-  llvm::Function *F = llvm::Function::Create(FTy,
+  llvm::Function *F = CGF.CGM.getModule().getFunction(mangledName);
+  if (F) {
+    return;
+  }
+
+  llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
+
+  F = llvm::Function::Create(FTy,
         llvm::GlobalValue::InternalLinkage, mangledName,
         &CGF.CGM.getModule());
 
@@ -1086,6 +1091,23 @@ void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This,
   stream.flush();
   StringRef mangledFuncletName(funcletName);
 
+  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
+
+  llvm::BasicBlock *funclet = llvm::BasicBlock::Create(CGM.getLLVMContext(),
+                                                     mangledFuncletName, CurFn);
+  Builder.SetInsertPoint(funclet);
+
+  llvm::CallInst *call = Builder.CreateCall(ReleaseFunc, This);
+  call->setTailCall();
+
+  // TODO: remove this with br to unreachable.
+  Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
+
+  llvm::BlockAddress *funcletAddr = llvm::BlockAddress::get(CurFn, funclet);
+  EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funcletAddr));
+
+  Builder.SetInsertPoint(oldBB);
+#if 0
   llvm::FunctionType *fty = llvm::FunctionType::get(VoidTy, false);
   llvm::Function *funclet = 
     llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
@@ -1101,6 +1123,7 @@ void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This,
   cgf.Builder.CreateRetVoid();
 
   EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funclet));
+#endif
 }
 
 llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
@@ -1116,7 +1139,15 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
 
   StringRef mangledUnwindTableName(tableName);
 
-  llvm::StructType *entryTy = getUnwindMapEntryTy(CGM);
+  llvm::SmallVector<llvm::Type *, 2> fieldTypes;
+
+  fieldTypes.push_back(CGM.Int32Ty);
+
+  fieldTypes.push_back(EHState.UnwindTable.begin()->second->
+                                            getType());
+
+  llvm::StructType *entryTy = 
+    llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
 
   llvm::SmallVector<llvm::Constant *, 2> fields;
   llvm::SmallVector<llvm::Constant *, 4> entries;
