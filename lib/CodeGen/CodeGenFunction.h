@@ -1140,7 +1140,7 @@ private:
     int CurState;
 
     /// Unwind table map.
-    llvm::SmallDenseMap<int, llvm::Function *> UnwindTable;
+    llvm::SmallDenseMap<int, llvm::BlockAddress *> UnwindTable;
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), FuncletCounter(12), CurState(0), TryLevel(0), CGF(cgf) {}
