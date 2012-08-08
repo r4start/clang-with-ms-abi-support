@@ -845,15 +845,15 @@ static llvm::StructType *getHandlerType(CodeGenModule &CGM) {
   fields.push_back(CGM.Int32Ty);
 
   // Type descriptor.
-  fields.push_back(CGM.VoidPtrTy);
+  fields.push_back(CGM.Int8PtrTy);
   
   fields.push_back(CGM.Int32Ty);
   
-  fields.push_back(CGM.VoidPtrTy);
+  fields.push_back(CGM.Int32Ty);
 
   return llvm::StructType::get(CGM.getLLVMContext(), fields);
 }
-
+#if 0
 // r4start
 //  struct ESTypeList {
 //    // number of entries in the list
@@ -871,7 +871,7 @@ static llvm::StructType *getESListEntryType(CodeGenModule &CGM) {
 
   return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
 }
-
+#endif
 //  r4start
 //  struct TryBlockMapEntry {
 //    int tryLow;
@@ -888,14 +888,15 @@ static llvm::StructType *getESListEntryType(CodeGenModule &CGM) {
 //    //catch handlers table
 //    HandlerType* pHandlerArray;
 //  };
-static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM) {
+static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM,
+                                               llvm::Type *HandlerTy) {
   llvm::SmallVector<llvm::Type *, 5> mapEntryTypes;
 
   for (int i = 0; i < 4; ++i) {
     mapEntryTypes.push_back(CGM.Int32Ty);
   }
 
-  mapEntryTypes.push_back(getHandlerType(CGM)->getPointerTo());
+  mapEntryTypes.push_back(CGM.Int8PtrTy);
 
   return llvm::StructType::get(CGM.getLLVMContext(), mapEntryTypes);
 }
@@ -911,12 +912,12 @@ static llvm::StructType *getUnwindMapEntryTy(CodeGenModule &CGM) {
   
   fieldTypes.push_back(CGM.Int32Ty);
 
-  fieldTypes.push_back(
-                    llvm::FunctionType::get(CGM.VoidTy, false)->getPointerTo());
+  fieldTypes.push_back(CGM.VoidPtrTy);
 
   return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
 }
 
+#if 0
 // r4start
 // This function is generate __ehfuncinfo type.
 //
@@ -1073,7 +1074,7 @@ static void generateEHHandler(CodeGenFunction &CGF) {
 
   cgf.Builder.CreateRetVoid();
 }
-
+#endif
 // r4start
 void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This, 
                                           llvm::Value *ReleaseFunc) {
@@ -1103,32 +1104,13 @@ void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This,
 
   Builder.CreateUnreachable();
 
-  // TODO: remove this with br to unreachable.
-  //Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
-
   llvm::BlockAddress *funcletAddr = llvm::BlockAddress::get(CurFn, funclet);
   EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funcletAddr));
 
   Builder.SetInsertPoint(oldBB);
-#if 0
-  llvm::FunctionType *fty = llvm::FunctionType::get(VoidTy, false);
-  llvm::Function *funclet = 
-    llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
-                           mangledFuncletName, &CGM.getModule());
-  CodeGenFunction cgf(CGM);
-
-  llvm::BasicBlock *entry = 
-    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", funclet);
-  cgf.Builder.SetInsertPoint(entry);
-
-  //llvm::CallInst *call = cgf.Builder.CreateCall(ReleaseFunc, This);
-  //call->setTailCall();
-  cgf.Builder.CreateRetVoid();
-
-  EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funclet));
-#endif
 }
 
+// r4start
 llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
   const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(funcDecl && "Unwind table is generating only for functions!");
@@ -1142,15 +1124,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
 
   StringRef mangledUnwindTableName(tableName);
 
-  llvm::SmallVector<llvm::Type *, 2> fieldTypes;
-
-  fieldTypes.push_back(CGM.Int32Ty);
-
-  fieldTypes.push_back(EHState.UnwindTable.begin()->second->
-                                            getType());
-
-  llvm::StructType *entryTy = 
-    llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
+  llvm::StructType *entryTy = getUnwindMapEntryTy(CGM);
 
   llvm::SmallVector<llvm::Constant *, 2> fields;
   llvm::SmallVector<llvm::Constant *, 4> entries;
@@ -1174,6 +1148,89 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
                                   mangledUnwindTableName);
 }
 
+// r4start
+static llvm::Constant *getHandlerInitializer(CodeGenFunction &CGF) {
+  llvm::StructType *handlerTy = getHandlerType(CGF.CGM);
+
+  llvm::SmallVector<llvm::Constant *, 4> fields;
+  
+  llvm::Constant *defVal = llvm::ConstantInt::get(CGF.Int32Ty, 0);
+
+  // adjective
+  fields.push_back(defVal);
+
+  // type descriptor
+  fields.push_back(defVal);
+
+  // ebp offset
+  fields.push_back(defVal);
+
+  // address of catch handler
+  fields.push_back(defVal);
+
+  return llvm::ConstantStruct::get(handlerTy, fields);
+}
+
+// r4start
+void CodeGenFunction::MSGenerateTryBlockTableEntry() {
+  llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
+
+  llvm::SmallVector<llvm::Constant *, 5> fields;
+
+  llvm::Constant *defVal = llvm::ConstantInt::get(Int32Ty, 0);
+  for (unsigned I = 0; I != 3; ++I) {
+    fields.push_back(defVal);
+  }
+
+  fields.push_back(llvm::ConstantInt::get(Int32Ty, EHState.TryHandlers.size()));
+
+  llvm::ArrayType *arrayOfHandlersTy = 
+    llvm::ArrayType::get(handlerTy, EHState.TryHandlers.size());
+  llvm::Constant *handlersArray = 
+               llvm::ConstantArray::get(arrayOfHandlersTy, EHState.TryHandlers);
+
+  llvm::GlobalVariable *globalHandlers = 
+    new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), true,
+                             llvm::GlobalValue::InternalLinkage, handlersArray,
+                             "");
+
+  llvm::Constant *addrOfGlobalhandlers = 
+    llvm::ConstantExpr::getBitCast(globalHandlers, Int8PtrTy);
+  fields.push_back(addrOfGlobalhandlers);
+
+  llvm::StructType *entryTy = getTryBlockMapEntryTy(CGM, arrayOfHandlersTy);
+  llvm::Constant *init = llvm::ConstantStruct::get(entryTy, fields);
+  EHState.TryBlockTableEntries.push_back(init);
+}
+
+// r4start
+llvm::GlobalValue *CodeGenFunction::EmitMSTryBlockTable() {
+  const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
+  assert(funcDecl && "Try block table is generating only for functions!");
+
+  llvm::SmallString<256> tableName;
+  llvm::raw_svector_ostream stream(tableName);
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleEHTryBlockTable(funcDecl, stream);
+  stream.flush();
+
+  StringRef mangledTryBlockTableName(tableName);
+
+  assert(!EHState.TryBlockTableEntries.empty() && 
+                                                "Try block can not be empty!");
+
+  llvm::ArrayType *tableTy = 
+    llvm::ArrayType::get((*EHState.TryBlockTableEntries.begin())->getType(),
+                         EHState.TryBlockTableEntries.size());
+  llvm::Constant *init = 
+    llvm::ConstantArray::get(tableTy, EHState.TryBlockTableEntries);
+
+  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+                                  llvm::GlobalValue::InternalLinkage, init,
+                                  mangledTryBlockTableName);
+}
+
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
@@ -1191,7 +1248,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   
   // Generate id in start of try block.
   if (IsMSABI) {
-    generateEHHandler(*this);
+
     if (!EHState.IsInited()) {
       EHState.InitMSTryState();
     } else {
@@ -1865,9 +1922,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   EHStack.popCatch();
 
   const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
-  if (!fd) {
-    assert(false && "Something goes wrong!");
-  }
+  assert(fd && "Something goes wrong!");
 
   MSMangleContextExtensions *msMangler = 
     CGM.getCXXABI().getMangleContext().getMsExtensions();
@@ -1899,6 +1954,24 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
 
     catchHandlers.push_back(llvm::BlockAddress::get(entryBB));
+
+    // generate handler for this catch
+    QualType CaughtType = C->getCaughtType();
+    CaughtType = CaughtType.getNonReferenceType().getUnqualifiedType();
+    llvm::Constant *TypeDescriptor = 
+      CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, true);
+
+    llvm::StructType *handlerTy = getHandlerType(CGM);
+    llvm::SmallVector<llvm::Constant *, 4> fields;
+
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+    fields.push_back(TypeDescriptor);
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+
+    llvm::Constant *handler = 
+      llvm::ConstantStruct::get(handlerTy, fields);
+    EHState.TryHandlers.push_back(handler);
   }
 
   Builder.SetInsertPoint(oldBB);
@@ -1910,6 +1983,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   EHState.TryLevel--;
+
+  MSGenerateTryBlockTableEntry();
 
 }
 

@@ -1129,6 +1129,8 @@ private:
     CodeGenFunction &CGF;
   public:
 
+    /// Indicates that current try is nested.
+    /// When TryLevel == 1 we must set try state to -1.
     int TryLevel;
 
     /// Counter for unwind funclet mangling.
@@ -1136,11 +1138,17 @@ private:
     /// TODO: Investigate this.
     int FuncletCounter;
 
-    /// This value needs for generating unwind map entry.
+    /// Stores current try state value.
     int CurState;
 
     /// Unwind table map.
     llvm::SmallDenseMap<int, llvm::BlockAddress *> UnwindTable;
+
+    /// Try block table.
+    llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
+
+    /// Catch handlers for current try.
+    llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), FuncletCounter(12), CurState(0), TryLevel(0), CGF(cgf) {}
@@ -2697,6 +2705,12 @@ private:
 
   /// r4start
   llvm::GlobalValue *EmitMSUnwindTable();
+
+  /// r4start
+  void MSGenerateTryBlockTableEntry();
+
+  /// r4start
+  llvm::GlobalValue *EmitMSTryBlockTable();
 
   CodeGenModule::ByrefHelpers *
   buildByrefHelpers(llvm::StructType &byrefType,

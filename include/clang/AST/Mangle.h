@@ -109,6 +109,8 @@ public:
 
   virtual void mangleEHUnwindFunclet(const FunctionDecl *, uint8_t ,
                                                              raw_ostream &) = 0;
+
+  virtual void mangleEHTryBlockTable(const FunctionDecl *, raw_ostream &) = 0;
 };
 
 /// MangleContext - Context for tracking state which persists across multiple
