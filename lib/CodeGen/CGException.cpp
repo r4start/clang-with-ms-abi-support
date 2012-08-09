@@ -1926,6 +1926,48 @@ void CodeGenFunction::popCatchScope() {
 }
 
 // r4start
+void CodeGenFunction::MSGenerateCatchHandler(QualType &CaughtType,
+                                             llvm::Type *HandlerTy,
+                                           llvm::BlockAddress *HandlerAddress) {
+  // 0x01: const, 0x02: volatile, 0x08: reference
+  int handlerAdjectives = 0;
+  if (CaughtType.isConstQualified()) {
+    handlerAdjectives |= 1;
+  }
+
+  if (CaughtType.isVolatileQualified()) {
+    handlerAdjectives |= 2;
+  }
+
+  if (CaughtType->isReferenceType()) {
+    handlerAdjectives |= 8;
+  }
+
+  CaughtType = CaughtType.getNonReferenceType().getUnqualifiedType();
+  llvm::Constant *TypeDescriptor = 
+    CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, true);
+
+  llvm::SmallVector<llvm::Constant *, 4> fields;
+
+  // adjectives
+  fields.push_back(llvm::ConstantInt::get(Int32Ty, handlerAdjectives));
+
+  // pTypeDescr
+  fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescriptor,
+    CGM.GetDescriptorPtrType(Int8PtrTy)));
+
+  // dispatch obj
+  fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+
+  // address of handler
+  fields.push_back(llvm::ConstantExpr::getBitCast(HandlerAddress, VoidPtrTy));
+
+  llvm::Constant *handler = 
+    llvm::ConstantStruct::get(cast<llvm::StructType>(HandlerTy), fields);
+  EHState.TryHandlers.push_back(handler);
+}
+
+// r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
@@ -1971,45 +2013,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     // generate handler for this catch
     QualType CaughtType = C->getCaughtType();
-
-    // 0x01: const, 0x02: volatile, 0x08: reference
-    int handlerAdjectives = 0;
-    if (CaughtType.isConstQualified()) {
-      handlerAdjectives |= 1;
-    }
-
-    if (CaughtType.isVolatileQualified()) {
-      handlerAdjectives |= 2;
-    }
-
-    if (CaughtType->isReferenceType()) {
-      handlerAdjectives |= 8;
-    }
-
-    CaughtType = CaughtType.getNonReferenceType().getUnqualifiedType();
-    llvm::Constant *TypeDescriptor = 
-      CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, true);
-
-    llvm::SmallVector<llvm::Constant *, 4> fields;
-
-    // adjectives
-    fields.push_back(llvm::ConstantInt::get(Int32Ty, handlerAdjectives));
-
-    // pTypeDescr
-    fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescriptor,
-                                          CGM.GetDescriptorPtrType(Int8PtrTy)));
-    
-    // dispatch obj
-    fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
-
-    // address of handler
-    fields.push_back(llvm::ConstantExpr::getBitCast(
-                                        llvm::BlockAddress::get(CurFn, entryBB),
-                                        VoidPtrTy));
-
-    llvm::Constant *handler = 
-      llvm::ConstantStruct::get(cast<llvm::StructType>(handlerTy), fields);
-    EHState.TryHandlers.push_back(handler);
+    MSGenerateCatchHandler(CaughtType, handlerTy,
+                           llvm::BlockAddress::get(CurFn, entryBB));
   }
 
   Builder.SetInsertPoint(oldBB);
