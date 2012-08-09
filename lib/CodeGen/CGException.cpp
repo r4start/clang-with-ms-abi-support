@@ -839,19 +839,22 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 //    // (i.e. code after the try block)
 //    void* addressOfHandler;
 //  };
-static llvm::StructType *getHandlerType(CodeGenModule &CGM) {
+static llvm::Type *getHandlerType(CodeGenModule &CGM) {
+  if (llvm::Type *handlerTy = CGM.getModule().getTypeByName("handler.type")) {
+    return handlerTy;
+  }
   SmallVector<llvm::Type *, 4> fields;
 
   fields.push_back(CGM.Int32Ty);
 
   // Type descriptor.
-  fields.push_back(CGM.Int8PtrTy);
+  fields.push_back(CGM.GetDescriptorPtrType(CGM.Int8PtrTy));
   
   fields.push_back(CGM.Int32Ty);
   
-  fields.push_back(CGM.Int32Ty);
+  fields.push_back(CGM.VoidPtrTy);
 
-  return llvm::StructType::get(CGM.getLLVMContext(), fields);
+  return llvm::StructType::create(CGM.getLLVMContext(), fields, "handler.type");
 }
 #if 0
 // r4start
@@ -1028,17 +1031,14 @@ static llvm::GlobalVariable *generateEHFuncInfo(CodeGenFunction &CGF) {
                                   llvm::GlobalValue::InternalLinkage, init,
                                   ehName);
 }
-
+#endif
 // r4start
-static void generateEHHandler(CodeGenFunction &CGF) {
+static llvm::Function *generateEHHandler(CodeGenFunction &CGF) {
   const FunctionDecl *func = cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
-  if (!func) {
-    return;
-  }
+  assert(func && "EH handler can be generated only for function or method!");
 
   llvm::SmallString<256> nameBuffer;
   llvm::raw_svector_ostream nameStream(nameBuffer);
-
 
   CGF.CGM.getCXXABI().getMangleContext().getMsExtensions()->
     mangleEHHandlerFunction(func, nameStream);
@@ -1048,7 +1048,7 @@ static void generateEHHandler(CodeGenFunction &CGF) {
 
   llvm::Function *F = CGF.CGM.getModule().getFunction(mangledName);
   if (F) {
-    return;
+    return F;
   }
 
   llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
@@ -1065,24 +1065,28 @@ static void generateEHHandler(CodeGenFunction &CGF) {
   
   // TODO: this must be removed by getEHFuncInfo(CGF, FunctionDecl);
   // We do not have enough information for ehfuncinfo generation here.
+#if 0
   llvm::Value *FuncInfo = generateEHFuncInfo(CGF);
 
   llvm::Function *CxxFramHandler = getMSFrameHandlerFunction(CGF, 
                                            FuncInfo->getType());
   llvm::CallInst *Inst = cgf.Builder.CreateCall(CxxFramHandler, FuncInfo);
   Inst->setTailCall();
-
-  cgf.Builder.CreateRetVoid();
-}
 #endif
+  cgf.Builder.CreateRetVoid();
+
+  return F;
+}
+
 // r4start
 void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This, 
                                           llvm::Value *ReleaseFunc) {
   const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(fd && "Unwind funclet must be emit for function!");
 
-  llvm::SmallString<256> funcletName;
-  llvm::raw_svector_ostream stream(funcletName);
+  MsUnwindInfo funcletInfo = { EHState.CurState, This, ReleaseFunc };
+
+  llvm::raw_svector_ostream stream(funcletInfo.FuncletName);
 
   CGM.getCXXABI().getMangleContext().
    getMsExtensions()->mangleEHUnwindFunclet(fd, EHState.FuncletCounter, stream);
@@ -1090,24 +1094,7 @@ void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This,
   EHState.FuncletCounter++;
 
   stream.flush();
-  StringRef mangledFuncletName(funcletName);
-
-  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
-
-  llvm::BasicBlock *funclet = llvm::BasicBlock::Create(CGM.getLLVMContext(),
-                                                     mangledFuncletName, CurFn);
-  Builder.SetInsertPoint(funclet);
-
-  llvm::CallInst *call = Builder.CreateCall(ReleaseFunc, This);
-  call->setTailCall();
-  call->setDoesNotReturn();
-
-  Builder.CreateUnreachable();
-
-  llvm::BlockAddress *funcletAddr = llvm::BlockAddress::get(CurFn, funclet);
-  EHState.UnwindTable.insert(std::make_pair(EHState.CurState, funcletAddr));
-
-  Builder.SetInsertPoint(oldBB);
+  EHState.UnwindTable.push_back(funcletInfo);
 }
 
 // r4start
@@ -1131,14 +1118,43 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
 
   assert(!EHState.UnwindTable.empty() && "Unwind table is empty!");
 
-  for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
+  auto Prev = ++(EHState.UnwindTable.rbegin());
+  llvm::BasicBlock * nextBlock;
+
+  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
+  for (auto I = EHState.UnwindTable.rbegin(), E = EHState.UnwindTable.rend();
        I != E; ++I) {
-    fields.push_back(llvm::ConstantInt::get(Int32Ty, I->first));
-    fields.push_back(I->second);
+    // creating funclet code
+    StringRef funcletName(I->FuncletName);
+    llvm::BasicBlock *funclet = 
+      llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletName, CurFn);
+
+    Builder.SetInsertPoint(funclet);
+
+    llvm::CallInst *call = 
+      Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
+
+    if (I != EHState.UnwindTable.rbegin()) {
+      // jmp to previous
+      Builder.CreateBr(nextBlock);
+    } else {
+      // jump to ehhandler
+      llvm::Function *ehHandler = generateEHHandler(*this);
+      llvm::CallInst *call = Builder.CreateCall(ehHandler);
+      call->setDoesNotReturn();
+      Builder.CreateUnreachable();
+    }
+
+    nextBlock = funclet;
+
+    // creating unwind table entry
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, I->State));
+    fields.push_back(llvm::BlockAddress::get(CurFn, funclet));
 
     entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
     fields.clear();
   }
+  Builder.SetInsertPoint(oldBB);
 
   llvm::ArrayType *tableTy = llvm::ArrayType::get(entryTy, entries.size());
   llvm::Constant *init = llvm::ConstantArray::get(tableTy, entries);
@@ -1147,7 +1163,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
                                   llvm::GlobalValue::InternalLinkage, init,
                                   mangledUnwindTableName);
 }
-
+#if 0
 // r4start
 static llvm::Constant *getHandlerInitializer(CodeGenFunction &CGF) {
   llvm::StructType *handlerTy = getHandlerType(CGF.CGM);
@@ -1170,7 +1186,7 @@ static llvm::Constant *getHandlerInitializer(CodeGenFunction &CGF) {
 
   return llvm::ConstantStruct::get(handlerTy, fields);
 }
-
+#endif
 // r4start
 void CodeGenFunction::MSGenerateTryBlockTableEntry() {
   llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
@@ -1192,7 +1208,7 @@ void CodeGenFunction::MSGenerateTryBlockTableEntry() {
   llvm::GlobalVariable *globalHandlers = 
     new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), true,
                              llvm::GlobalValue::InternalLinkage, handlersArray,
-                             "");
+                             "handlers.array");
 
   llvm::Constant *addrOfGlobalhandlers = 
     llvm::ConstantExpr::getBitCast(globalHandlers, Int8PtrTy);
@@ -1928,7 +1944,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     CGM.getCXXABI().getMangleContext().getMsExtensions();
   
   auto oldBB = Builder.GetInsertBlock();
-  llvm::SmallVector<llvm::BlockAddress *, 4> catchHandlers;
+  llvm::Type *handlerTy = getHandlerType(CGM);
 
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
@@ -1953,24 +1969,46 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     // TODO: right handling of return instruction
     Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
 
-    catchHandlers.push_back(llvm::BlockAddress::get(entryBB));
-
     // generate handler for this catch
     QualType CaughtType = C->getCaughtType();
+
+    // 0x01: const, 0x02: volatile, 0x08: reference
+    int handlerAdjectives = 0;
+    if (CaughtType.isConstQualified()) {
+      handlerAdjectives |= 1;
+    }
+
+    if (CaughtType.isVolatileQualified()) {
+      handlerAdjectives |= 2;
+    }
+
+    if (CaughtType->isReferenceType()) {
+      handlerAdjectives |= 8;
+    }
+
     CaughtType = CaughtType.getNonReferenceType().getUnqualifiedType();
     llvm::Constant *TypeDescriptor = 
       CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, true);
 
-    llvm::StructType *handlerTy = getHandlerType(CGM);
     llvm::SmallVector<llvm::Constant *, 4> fields;
 
-    fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
-    fields.push_back(TypeDescriptor);
-    fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+    // adjectives
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, handlerAdjectives));
+
+    // pTypeDescr
+    fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescriptor,
+                                          CGM.GetDescriptorPtrType(Int8PtrTy)));
+    
+    // dispatch obj
     fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
 
+    // address of handler
+    fields.push_back(llvm::ConstantExpr::getBitCast(
+                                        llvm::BlockAddress::get(CurFn, entryBB),
+                                        VoidPtrTy));
+
     llvm::Constant *handler = 
-      llvm::ConstantStruct::get(handlerTy, fields);
+      llvm::ConstantStruct::get(cast<llvm::StructType>(handlerTy), fields);
     EHState.TryHandlers.push_back(handler);
   }
 

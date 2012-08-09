@@ -1119,6 +1119,13 @@ private:
   /// r4start
   bool IsMSABI;
 
+  struct MsUnwindInfo {
+    int State;
+    llvm::Value *ThisPtr;
+    llvm::Value *ReleaseFunc;
+    llvm::SmallString<256> FuncletName;
+  };
+
   /// r4start
   class MSEHState {
 
@@ -1142,7 +1149,8 @@ private:
     int CurState;
 
     /// Unwind table map.
-    llvm::SmallDenseMap<int, llvm::BlockAddress *> UnwindTable;
+    /// Holds funclets addresses.
+    std::vector<MsUnwindInfo> UnwindTable;
 
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;

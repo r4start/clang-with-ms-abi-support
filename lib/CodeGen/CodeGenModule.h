@@ -876,7 +876,8 @@ public:
   /// r4start
   /// Specific for MS C++ ABI.
   /// Function generates TypeDescriptor type for MS C++ ABI.
-  llvm::StructType *GetTypeDescriptorType(llvm::Type *TypeInfo, 
+  llvm::Type *GetDescriptorPtrType(llvm::Type *TypeInfo);
+  llvm::StructType *GetTypeDescriptorType(llvm::Type *TypeInfo,
                                           uint64_t NameLength);
 
 private:

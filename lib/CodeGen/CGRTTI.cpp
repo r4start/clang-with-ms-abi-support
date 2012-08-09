@@ -748,19 +748,6 @@ static uint32_t GetBasesCount(const CXXRecordDecl *RD) {
 }
 
 // r4start
-static llvm::StructType* GetTypeDescriptorType(CodeGenModule& CGM,
-                                               llvm::Type* TypeInfoTy,
-                                               uint64_t NameLen) {
-  llvm::SmallVector<llvm::Type*, 3> DescrTy;
-
-  DescrTy.push_back(TypeInfoTy);
-  DescrTy.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
-  DescrTy.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), NameLen));
-
-  return llvm::StructType::get(CGM.getLLVMContext(), DescrTy);
-}
-
-// r4start
 void
 RTTIBuilder::BuildVBTable(const CXXRecordDecl *RD) {
   llvm::SmallString<256> Name;
@@ -1796,15 +1783,30 @@ void RTTIBuilder::BuildPointerToMemberTypeInfo(const MemberPointerType *Ty) {
   Fields.push_back(RTTIBuilder(CGM).BuildTypeInfo(QualType(ClassType, 0)));
 }
 
+llvm::Type *CodeGenModule::GetDescriptorPtrType(llvm::Type *TypeInfo) {
+  if (llvm::Type *descrTy = getModule().getTypeByName("type.descriptor")) {
+    return descrTy->getPointerTo();
+  }
+
+  llvm::SmallVector<llvm::Type*, 3> descrTypes;
+
+  descrTypes.push_back(TypeInfo);
+  descrTypes.push_back(Int32Ty);
+  descrTypes.push_back(llvm::ArrayType::get(Int8Ty, 0));
+
+  return llvm::StructType::create(getLLVMContext(), descrTypes,
+                                  "type.descriptor")->getPointerTo();
+}
+
 llvm::StructType *CodeGenModule::GetTypeDescriptorType(llvm::Type *TypeInfo,
                                                        uint64_t NameLength) {
-  llvm::SmallVector<llvm::Type*, 3> descrTy;
+  llvm::SmallVector<llvm::Type*, 3> descrTypes;
 
-  descrTy.push_back(TypeInfo);
-  descrTy.push_back(Int32Ty);
-  descrTy.push_back(llvm::ArrayType::get(Int8Ty, NameLength));
+  descrTypes.push_back(TypeInfo);
+  descrTypes.push_back(Int32Ty);
+  descrTypes.push_back(llvm::ArrayType::get(Int8Ty, NameLength));
 
-  return llvm::StructType::get(getLLVMContext(), descrTy);
+  return llvm::StructType::get(getLLVMContext(), descrTypes);
 }
 
 llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
