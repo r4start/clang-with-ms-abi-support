@@ -2797,6 +2797,10 @@ private:
   void MSGenerateTryBlockTableEntry();
 
   /// r4start
+  void MSGenerateCatchHandler(QualType &CaughtType, llvm::Type *HandlerTy,
+                              llvm::BlockAddress *HandlerAddress);
+
+  /// r4start
   llvm::GlobalValue *EmitMSTryBlockTable();
 
   CodeGenModule::ByrefHelpers *
