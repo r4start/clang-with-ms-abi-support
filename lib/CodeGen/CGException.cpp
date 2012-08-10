@@ -891,17 +891,20 @@ static llvm::StructType *getESListEntryType(CodeGenModule &CGM) {
 //    //catch handlers table
 //    HandlerType* pHandlerArray;
 //  };
-static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM,
-                                               llvm::Type *HandlerTy) {
+static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM) {
+  if (llvm::Type *ty = CGM.getModule().getTypeByName("tryblock.map.entry")) {
+    return cast<llvm::StructType>(ty);
+  }
   llvm::SmallVector<llvm::Type *, 5> mapEntryTypes;
 
   for (int i = 0; i < 4; ++i) {
     mapEntryTypes.push_back(CGM.Int32Ty);
   }
 
-  mapEntryTypes.push_back(CGM.Int8PtrTy);
+  mapEntryTypes.push_back(getHandlerType(CGM)->getPointerTo());
 
-  return llvm::StructType::get(CGM.getLLVMContext(), mapEntryTypes);
+  return llvm::StructType::create(CGM.getLLVMContext(), mapEntryTypes,
+                                  "tryblock.map.entry");
 }
 
 // r4start
@@ -911,23 +914,28 @@ static llvm::StructType *getTryBlockMapEntryTy(CodeGenModule &CGM,
 //    void (*action)();   // action to perform (unwind funclet address)
 //  };
 static llvm::StructType *getUnwindMapEntryTy(CodeGenModule &CGM) {
+  if (llvm::Type *mapEntryTy = 
+                            CGM.getModule().getTypeByName("unwind.map.entry")) {
+    return cast<llvm::StructType>(mapEntryTy);
+  }
+
   llvm::SmallVector<llvm::Type *, 2> fieldTypes;
   
   fieldTypes.push_back(CGM.Int32Ty);
 
   fieldTypes.push_back(CGM.VoidPtrTy);
 
-  return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
+  return llvm::StructType::create(CGM.getLLVMContext(), fieldTypes,
+                                  "unwind.map.entry");
 }
 
-#if 0
 // r4start
 // This function is generate __ehfuncinfo type.
 //
 // struct FuncInfo {
 //    // compiler version.
 //    // 0x19930520: up to VC6, 0x19930521: VC7.x(2002-2003), 
-//    // 0x19930522: VC8 (2005)
+//    // 0x19930522: VC8 (2005), VC10 (2010)
 //    DWORD magicNumber;
 //
 //    // number of entries in unwind table
@@ -954,7 +962,9 @@ static llvm::StructType *getUnwindMapEntryTy(CodeGenModule &CGM) {
 //    // VC8+ only, bit 0 set if function was compiled with /EHs
 //    int EHFlags;
 //  };
-static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
+static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM,
+                                             llvm::Type *UnwindMapEntriesTy,
+                                             llvm::Type *TryBlockMapEntriesTy) {
   llvm::SmallVector<llvm::Type *, 9> ehfuncinfoFields;
 
   // magic number.
@@ -975,18 +985,19 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
   // nIPMapEntries.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
-  // TODO: remove it with void*.
+  //
   ehfuncinfoFields.push_back(CGM.VoidPtrTy);
 
   // ESTypeList*.
-  ehfuncinfoFields.push_back(getESListEntryType(CGM)->getPointerTo());
+  ehfuncinfoFields.push_back(CGM.VoidPtrTy);
 
   // EHFlags.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
-  return llvm::StructType::get(CGM.getLLVMContext(), ehfuncinfoFields);
+  return llvm::StructType::create(CGM.getLLVMContext(),
+                                  ehfuncinfoFields, "ehfuncinfo");
 }
-
+#if 0
 // r4start
 static llvm::Constant *getEHFuncInfoInit(CodeGenModule &CGM, 
                                          llvm::StructType *EHFuncInfoTy) {
@@ -1009,9 +1020,7 @@ static llvm::Constant *getEHFuncInfoInit(CodeGenModule &CGM,
 static llvm::GlobalVariable *generateEHFuncInfo(CodeGenFunction &CGF) {
   const FunctionDecl *function = 
                                 cast_or_null<FunctionDecl>(CGF.CurGD.getDecl());
-  if (!function) {
-    return nullptr;
-  }
+  assert(function && "Func info can be generated only for functions!");
 
   llvm::SmallString<256> structName;
   llvm::raw_svector_ostream out(structName);
@@ -1032,8 +1041,9 @@ static llvm::GlobalVariable *generateEHFuncInfo(CodeGenFunction &CGF) {
                                   ehName);
 }
 #endif
+
 // r4start
-static llvm::Function *generateEHHandler(CodeGenFunction &CGF) {
+static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
   const FunctionDecl *func = cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
   assert(func && "EH handler can be generated only for function or method!");
 
@@ -1056,25 +1066,6 @@ static llvm::Function *generateEHHandler(CodeGenFunction &CGF) {
   F = llvm::Function::Create(FTy,
         llvm::GlobalValue::InternalLinkage, mangledName,
         &CGF.CGM.getModule());
-
-  CodeGenFunction cgf(CGF.CGM);
-
-  llvm::BasicBlock *BB = 
-    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", F);
-  cgf.Builder.SetInsertPoint(BB);
-  
-  // TODO: this must be removed by getEHFuncInfo(CGF, FunctionDecl);
-  // We do not have enough information for ehfuncinfo generation here.
-#if 0
-  llvm::Value *FuncInfo = generateEHFuncInfo(CGF);
-
-  llvm::Function *CxxFramHandler = getMSFrameHandlerFunction(CGF, 
-                                           FuncInfo->getType());
-  llvm::CallInst *Inst = cgf.Builder.CreateCall(CxxFramHandler, FuncInfo);
-  Inst->setTailCall();
-#endif
-  cgf.Builder.CreateRetVoid();
-
   return F;
 }
 
@@ -1139,7 +1130,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
       Builder.CreateBr(nextBlock);
     } else {
       // jump to ehhandler
-      llvm::Function *ehHandler = generateEHHandler(*this);
+      llvm::Function *ehHandler = getEHHandler(*this);
       llvm::CallInst *call = Builder.CreateCall(ehHandler);
       call->setDoesNotReturn();
       Builder.CreateUnreachable();
@@ -1211,10 +1202,11 @@ void CodeGenFunction::MSGenerateTryBlockTableEntry() {
                              "handlers.array");
 
   llvm::Constant *addrOfGlobalhandlers = 
-    llvm::ConstantExpr::getBitCast(globalHandlers, Int8PtrTy);
+    llvm::ConstantExpr::getBitCast(globalHandlers, 
+                                   getHandlerType(CGM)->getPointerTo());
   fields.push_back(addrOfGlobalhandlers);
 
-  llvm::StructType *entryTy = getTryBlockMapEntryTy(CGM, arrayOfHandlersTy);
+  llvm::StructType *entryTy = getTryBlockMapEntryTy(CGM);
   llvm::Constant *init = llvm::ConstantStruct::get(entryTy, fields);
   EHState.TryBlockTableEntries.push_back(init);
 }
@@ -1245,6 +1237,88 @@ llvm::GlobalValue *CodeGenFunction::EmitMSTryBlockTable() {
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
                                   llvm::GlobalValue::InternalLinkage, init,
                                   mangledTryBlockTableName);
+}
+
+// r4start
+void CodeGenFunction::EmitMSFuncInfo() {
+  llvm::GlobalValue *unwindTable = EmitMSUnwindTable();
+  llvm::GlobalValue *tryBlocksTable = EmitMSTryBlockTable();
+
+  const FunctionDecl *function = 
+    cast_or_null<FunctionDecl>(CurGD.getDecl());
+  assert(function && "Func info can be generated only for functions!");
+
+  llvm::StructType *ehFuncInfoTy;
+  if (llvm::Type *funcInfo = CGM.getModule().getTypeByName("ehfuncinfo")) {
+    ehFuncInfoTy = cast<llvm::StructType>(funcInfo);
+  } else {
+    ehFuncInfoTy = generateEHFuncInfoType(CGM, unwindTable->getType(),
+                                          tryBlocksTable->getType());
+  }
+  assert(ehFuncInfoTy && "Problems with __ehfuncinfo type!");
+
+  llvm::SmallVector<llvm::Constant *, 9> initializerFields;
+
+  // magic number
+  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0x19930522));
+
+  // number of entries in unwind table
+  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty,
+                                                   EHState.UnwindTable.size()));
+
+  // pUnwindTable
+  llvm::Constant *idxList[] = { llvm::ConstantInt::get(Int32Ty, 0),
+                                llvm::ConstantInt::get(Int32Ty, 0)
+  };
+  initializerFields.push_back(
+    llvm::ConstantExpr::getInBoundsGetElementPtr(unwindTable, idxList));
+
+  // number of try blocks in the function
+  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty,
+                                          EHState.TryBlockTableEntries.size()));
+
+  initializerFields.push_back(
+    llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
+
+  // not used on x86
+  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+
+  // not used on x86
+  initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
+
+  // ESTypeList
+  initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
+
+  // EHFlags
+  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+
+  llvm::Constant *init = 
+    llvm::ConstantStruct::get(ehFuncInfoTy, initializerFields);
+
+  llvm::SmallString<256> structName;
+  llvm::raw_svector_ostream out(structName);
+
+  MSMangleContextExtensions *mangler = 
+    CGM.getCXXABI().getMangleContext().getMsExtensions();
+
+  mangler->mangleEHFuncInfo(function, out);
+
+  out.flush();
+  StringRef ehName(structName);
+
+  llvm::GlobalValue *ehFuncInfo = 
+    new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+                             llvm::GlobalValue::InternalLinkage, init, ehName);
+
+  llvm::Function *ehHandler = getEHHandler(*this);
+
+  CodeGenFunction cgf(CGM);
+
+  llvm::BasicBlock *BB = 
+    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", ehHandler);
+  cgf.Builder.SetInsertPoint(BB);
+
+  cgf.Builder.CreateRetVoid();
 }
 
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
