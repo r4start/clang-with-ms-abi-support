@@ -69,7 +69,7 @@ CodeGenFunction::~CodeGenFunction() {
   
   // r4start
   if (IsMSABI && EHState.IsInited()) {
-    EmitMSFuncInfo();
+    EmitMSEHInformation();
   }
 }
 
