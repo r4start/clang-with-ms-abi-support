@@ -47,6 +47,7 @@ add_clang_library(clangCodeGen
   CodeGenTBAA.cpp
   CodeGenTypes.cpp
   ItaniumCXXABI.cpp
+  MicrosoftCGException.cpp
   MicrosoftCXXABI.cpp
   ModuleBuilder.cpp
   TargetInfo.cpp

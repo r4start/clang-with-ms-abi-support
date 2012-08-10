@@ -2725,7 +2725,10 @@ private:
   llvm::GlobalValue *EmitMSTryBlockTable();
 
   /// r4start
-  void EmitMSFuncInfo();
+  llvm::GlobalValue *EmitMSFuncInfo();
+
+  /// r4start
+  void EmitMSEHInformation();
 
   CodeGenModule::ByrefHelpers *
   buildByrefHelpers(llvm::StructType &byrefType,
