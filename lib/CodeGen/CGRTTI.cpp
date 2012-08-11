@@ -636,16 +636,15 @@ void RTTIBuilder::BuildVTablePointer(const Type *Ty) {
     break;
   }
 
-      VTable = 
-      CGM.getModule().getOrInsertGlobal(VTableName, Int8PtrTy);
+    VTable = CGM.getModule().getOrInsertGlobal(VTableName, Int8PtrTy);
     
-  llvm::Type *PtrDiffTy = 
-    CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
+    llvm::Type *PtrDiffTy = 
+      CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
 
-  // The vtable address point is 2.
-  llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
-  VTable = llvm::ConstantExpr::getInBoundsGetElementPtr(VTable, Two);
-    VTable = llvm::ConstantExpr::getBitCast(VTable, Int8PtrTy);
+    // The vtable address point is 2.
+    llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
+    VTable = llvm::ConstantExpr::getInBoundsGetElementPtr(VTable, Two);
+      VTable = llvm::ConstantExpr::getBitCast(VTable, Int8PtrTy);
   }
   Fields.push_back(VTable);
 }
@@ -747,19 +746,6 @@ static uint32_t GetBasesCount(const CXXRecordDecl *RD) {
   }
 
   return BasesCount;
-}
-
-// r4start
-static llvm::StructType* GetTypeDescriptorType(CodeGenModule& CGM,
-                                               llvm::Type* TypeInfoTy,
-                                               uint64_t NameLen) {
-  llvm::SmallVector<llvm::Type*, 3> DescrTy;
-
-  DescrTy.push_back(TypeInfoTy);
-  DescrTy.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
-  DescrTy.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), NameLen));
-
-  return llvm::StructType::get(CGM.getLLVMContext(), DescrTy);
 }
 
 // r4start
@@ -1230,7 +1216,7 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   llvm::Constant* TypeInfo = Fields.pop_back_val();
 
   llvm::StructType* DescrTy = 
-    GetTypeDescriptorType(CGM, TypeInfo->getType(), NameField.size() + 1);
+    CGM.GetTypeDescriptorType(TypeInfo->getType(), NameField.size() + 1);
 
   llvm::SmallVector<llvm::Constant*, 3> TypeDescrVals;
 
@@ -1787,6 +1773,86 @@ void RTTIBuilder::BuildPointerToMemberTypeInfo(const MemberPointerType *Ty) {
   Fields.push_back(RTTIBuilder(CGM).BuildTypeInfo(QualType(ClassType, 0)));
 }
 
+// r4start
+llvm::Type *CodeGenModule::GetDescriptorPtrType(llvm::Type *TypeInfo) {
+  if (llvm::Type *descrTy = getModule().getTypeByName("type.descriptor")) {
+    return descrTy->getPointerTo();
+  }
+
+  llvm::SmallVector<llvm::Type*, 3> descrTypes;
+
+  descrTypes.push_back(TypeInfo);
+  descrTypes.push_back(Int32Ty);
+  descrTypes.push_back(llvm::ArrayType::get(Int8Ty, 0));
+
+  return llvm::StructType::create(getLLVMContext(), descrTypes,
+                                  "type.descriptor")->getPointerTo();
+}
+
+// r4start
+llvm::StructType *CodeGenModule::GetTypeDescriptorType(llvm::Type *TypeInfo,
+                                                       uint64_t NameLength) {
+  llvm::SmallVector<llvm::Type*, 3> descrTypes;
+
+  descrTypes.push_back(TypeInfo);
+  descrTypes.push_back(Int32Ty);
+  descrTypes.push_back(llvm::ArrayType::get(Int8Ty, NameLength));
+
+  return llvm::StructType::get(getLLVMContext(), descrTypes);
+}
+
+// r4start
+llvm::GlobalValue *CodeGenModule::GetTypeDescriptor(QualType ObjectType) {
+  SmallString<256> Name;
+  llvm::raw_svector_ostream Out(Name);
+  const CXXRecordDecl* RD = ObjectType->getAsCXXRecordDecl();
+
+  MangleContext& Ctx = getCXXABI().getMangleContext();
+
+  Ctx.getMsExtensions()->mangleCXXRTTITypeDescriptor(RD, Out);
+  Out.flush();
+
+  StringRef DescrName = Name.str();
+
+  llvm::GlobalVariable* TypeDescriptor = 
+    getModule().getGlobalVariable(DescrName);
+
+  if (TypeDescriptor) {
+    return TypeDescriptor;
+  }
+
+  SmallString<256> Spare;
+  llvm::raw_svector_ostream OutSpare(Spare);
+  // Last field of type descriptor contains mangled name of class
+  Ctx.getMsExtensions()->mangleSpareForTypeDescriptor(RD, OutSpare);
+
+  OutSpare.flush();
+
+  StringRef NameField(Spare);
+
+  llvm::Constant* Array = 
+    llvm::ConstantDataArray::getString(getLLVMContext(), 
+                                       NameField);
+
+  llvm::Constant *typeInfo = 
+    getModule().getOrInsertGlobal("\01??_7type_info@@6B@", Int8PtrTy);
+
+  llvm::StructType* DescrTy = 
+    GetTypeDescriptorType(typeInfo->getType(), NameField.size() + 1);
+
+  llvm::SmallVector<llvm::Constant*, 3> TypeDescrVals;
+
+  TypeDescrVals.push_back(typeInfo);
+  TypeDescrVals.push_back(llvm::ConstantInt::get(DescrTy->getElementType(1), 0));
+  TypeDescrVals.push_back(Array);
+
+  llvm::Constant* Init = llvm::ConstantStruct::get(DescrTy, TypeDescrVals);
+
+  return new llvm::GlobalVariable(getModule(), Init->getType(),
+                                  true, llvm::GlobalValue::ExternalLinkage,
+                                  Init, DescrName);
+}
+
 llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
                                                        bool ForEH) {
   // Return a bogus pointer if RTTI is disabled, unless it's for EH.
@@ -1802,6 +1868,7 @@ llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
   return RTTIBuilder(*this).BuildTypeInfo(Ty);
 }
 
+// r4start
 llvm::Constant *
 CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
                                          QualType BaseTy,
