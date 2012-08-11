@@ -1669,8 +1669,15 @@ llvm::Value *CodeGenFunction::EmitCXXTypeidExpr(const CXXTypeidExpr *E) {
                                 StdTypeInfoPtrTy);
 
   QualType OperandTy = E->getExprOperand()->getType();
-  return Builder.CreateBitCast(CGM.GetAddrOfRTTIDescriptor(OperandTy),
-                               StdTypeInfoPtrTy);
+
+  llvm::Constant *TypeInfo;
+  if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+    TypeInfo = CGM.GetAddrOfRTTIDescriptor(OperandTy);
+  } else {
+    TypeInfo = CGM.GetTypeDescriptor(OperandTy);
+  }
+
+  return Builder.CreateBitCast(TypeInfo, StdTypeInfoPtrTy);
 }
 
 static llvm::Constant *getDynamicCastFn(CodeGenFunction &CGF) {

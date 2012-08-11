@@ -879,6 +879,14 @@ public:
   /// annotations are emitted during finalization of the LLVM code.
   void AddGlobalAnnotations(const ValueDecl *D, llvm::GlobalValue *GV);
 
+  /// r4start
+  /// Specific for MS C++ ABI.
+  /// Function generates TypeDescriptor type for MS C++ ABI.
+  llvm::Type *GetDescriptorPtrType(llvm::Type *TypeInfo);
+  llvm::StructType *GetTypeDescriptorType(llvm::Type *TypeInfo,
+                                          uint64_t NameLength);
+  llvm::GlobalValue *GetTypeDescriptor(QualType ObjectType);
+
 private:
   llvm::GlobalValue *GetGlobalValue(StringRef Ref);
 
