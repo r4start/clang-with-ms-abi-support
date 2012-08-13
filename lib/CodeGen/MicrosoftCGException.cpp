@@ -24,96 +24,6 @@
 using namespace clang;
 using namespace CodeGen;
 
-#if 0
-// r4start
-//  struct ESTypeList {
-//    // number of entries in the list
-//    int nCount;
-//
-//    // list of exceptions; it seems only pType field in HandlerType is used
-//    HandlerType* pTypeArray;
-//  };
-static llvm::StructType *getESListEntryType(CodeGenModule &CGM) {
-  llvm::SmallVector<llvm::Type *, 2> fieldTypes;
-
-  fieldTypes.push_back(CGM.Int32Ty);
-
-  fieldTypes.push_back(getHandlerType(CGM)->getPointerTo());
-
-  return llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
-}
-#endif
-
-#if 0
-// r4start
-static llvm::Constant *getEHFuncInfoInit(CodeGenModule &CGM, 
-  llvm::StructType *EHFuncInfoTy) {
-    assert(EHFuncInfoTy && "EHFuncInfoTy must be not null!");
-    llvm::SmallVector<llvm::Constant *, 9> initVals;
-
-    // TODO: This must be removed with actual code!
-    llvm::Constant *initVal = llvm::ConstantInt::get(CGM.Int32Ty, 0);
-
-    for (int i = 0; i < 9; ++i) {
-      initVals.push_back(initVal);
-    }
-
-    return llvm::ConstantStruct::get(EHFuncInfoTy, initVals);
-}
-
-// r4start
-// This function is generate __ehfuncinfo$_{func_name} structure.
-// It is meaningful only for MS C++ ABI.
-static llvm::GlobalVariable *generateEHFuncInfo(CodeGenFunction &CGF) {
-  const FunctionDecl *function = 
-    cast_or_null<FunctionDecl>(CGF.CurGD.getDecl());
-  assert(function && "Func info can be generated only for functions!");
-
-  llvm::SmallString<256> structName;
-  llvm::raw_svector_ostream out(structName);
-
-  MSMangleContextExtensions *mangler = 
-    CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
-
-  mangler->mangleEHFuncInfo(function, out);
-
-  out.flush();
-  StringRef ehName(structName);
-
-  auto ehFuncInfoTy = generateEHFuncInfoType(CGF.CGM);
-  auto init = getEHFuncInfoInit(CGF.CGM, ehFuncInfoTy);
-
-  return new llvm::GlobalVariable(CGF.CGM.getModule(), ehFuncInfoTy, true,
-    llvm::GlobalValue::InternalLinkage, init,
-    ehName);
-}
-#endif
-
-#if 0
-// r4start
-static llvm::Constant *getHandlerInitializer(CodeGenFunction &CGF) {
-  llvm::StructType *handlerTy = getHandlerType(CGF.CGM);
-
-  llvm::SmallVector<llvm::Constant *, 4> fields;
-
-  llvm::Constant *defVal = llvm::ConstantInt::get(CGF.Int32Ty, 0);
-
-  // adjective
-  fields.push_back(defVal);
-
-  // type descriptor
-  fields.push_back(defVal);
-
-  // ebp offset
-  fields.push_back(defVal);
-
-  // address of catch handler
-  fields.push_back(defVal);
-
-  return llvm::ConstantStruct::get(handlerTy, fields);
-}
-#endif
-
 // r4start
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
@@ -386,6 +296,57 @@ static llvm::Type *getHandlerType(CodeGenModule &CGM) {
   return llvm::StructType::create(CGM.getLLVMContext(), fields, "handler.type");
 }
 
+// r4start
+//  struct ESTypeList {
+//    // number of entries in the list
+//    int nCount;
+//
+//    // list of exceptions; it seems only pType field in HandlerType is used
+//    HandlerType* pTypeArray;
+//  };
+static llvm::Type *getESListType(CodeGenModule &CGM) {
+  if (llvm::Type *esType = CGM.getModule().getTypeByName("estypelist")) {
+    return esType;
+  }
+
+  llvm::SmallVector<llvm::Type *, 2> fieldTypes;
+
+  fieldTypes.push_back(CGM.Int32Ty);
+
+  fieldTypes.push_back(getHandlerType(CGM)->getPointerTo());
+
+  return llvm::StructType::create(CGM.getLLVMContext(), fieldTypes, 
+    "estypelist");
+}
+
+// r4start
+static llvm::GlobalValue *generateESList(CodeGenFunction &CGF,
+                                   const FunctionProtoType *FProtoType) {
+  assert(FProtoType && "ESList builder needs function protype!");
+  llvm::Type *esListTy = getESListType(CGF.CGM);
+
+  llvm::SmallVector<llvm::Constant *, 2> fields;
+  int numExceptions = FProtoType->getNumExceptions();
+
+  fields.push_back(llvm::ConstantInt::get(CGF.Int32Ty, numExceptions));
+
+  // If function doesn`t have throw specs, then we do not need build eslist
+  // handler array.
+  if (!numExceptions) {
+    llvm::StructType *esListStructTy = cast<llvm::StructType>(esListTy);
+    llvm::Type *handlerPtrTy = esListStructTy->getStructElementType(1);
+
+    fields.push_back(llvm::UndefValue::get(handlerPtrTy));
+
+    llvm::Constant *init = 
+      llvm::ConstantStruct::get(esListStructTy, fields);
+
+    return new llvm::GlobalVariable(CGF.CGM.getModule(), init->getType(), true,
+                                   llvm::GlobalValue::InternalLinkage, init, "");
+  }
+  return nullptr;
+}
+
 //  r4start
 //  struct TryBlockMapEntry {
 //    int tryLow;
@@ -496,11 +457,11 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM,
   // nIPMapEntries.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
-  //
+  // not used
   ehfuncinfoFields.push_back(CGM.VoidPtrTy);
 
   // ESTypeList*.
-  ehfuncinfoFields.push_back(CGM.VoidPtrTy);
+  ehfuncinfoFields.push_back(getESListType(CGM)->getPointerTo());
 
   // EHFlags.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
@@ -731,10 +692,17 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
 
   // ESTypeList
-  initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
+  llvm::Constant *esList = generateESList(*this, 
+                     cast<FunctionProtoType>(function->getType().getTypePtr()));
+  initializerFields.push_back(esList);
 
   // EHFlags
-  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+  // Bit 0 was setted, because at now driver doesn`t support MS
+  // specific keys and our code doesn`t support SEH.
+  // So we setted this bit according /EHs cl flag.
+  // In future, when clang will support cl options, we can
+  // get this option from upper code.
+  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 1));
 
   llvm::Constant *init = 
     llvm::ConstantStruct::get(ehFuncInfoTy, initializerFields);
@@ -819,6 +787,7 @@ void CodeGenFunction::MSGenerateCatchHandler(QualType &CaughtType,
     CGM.GetDescriptorPtrType(Int8PtrTy)));
 
   // dispatch obj
+  // TODO: generate right epb offset!
   fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
 
   // address of handler
