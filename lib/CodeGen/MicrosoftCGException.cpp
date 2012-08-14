@@ -546,21 +546,23 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
 }
 
 // r4start
-void CodeGenFunction::EmitUnwindFunclet(llvm::Value *This, 
+void CodeGenFunction::SaveUnwindFuncletForLaterEmit(llvm::Value *This, 
                                           llvm::Value *ReleaseFunc) {
   const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(fd && "Unwind funclet must be emit for function!");
 
   MsUnwindInfo funcletInfo = { EHState.CurState, This, ReleaseFunc };
-
+#if 0
   llvm::raw_svector_ostream stream(funcletInfo.FuncletName);
 
   CGM.getCXXABI().getMangleContext().
-   getMsExtensions()->mangleEHUnwindFunclet(fd, EHState.FuncletCounter, stream);
+   getMsExtensions()->mangleEHUnwindFunclet(fd, EHState.EHManglingCounter,
+                                            stream);
 
-  EHState.FuncletCounter++;
+  EHState.EHManglingCounter++;
 
   stream.flush();
+#endif
   EHState.UnwindTable.push_back(funcletInfo);
 }
 
@@ -592,9 +594,21 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   for (auto I = EHState.UnwindTable.rbegin(), E = EHState.UnwindTable.rend();
        I != E; ++I) {
     // creating funclet code
-    StringRef funcletName(I->FuncletName);
+    llvm::SmallString<256> funcletName;
+    llvm::raw_svector_ostream stream(funcletName);
+
+    CGM.getCXXABI().getMangleContext().
+      getMsExtensions()->mangleEHUnwindFunclet(funcDecl,
+                                               EHState.EHManglingCounter,
+                                               stream);
+
+    EHState.EHManglingCounter++;
+
+    stream.flush();
+    StringRef funcletNameRef(funcletName);
+
     llvm::BasicBlock *funclet = 
-      llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletName, CurFn);
+      llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletNameRef, CurFn);
 
     Builder.SetInsertPoint(funclet);
 
@@ -766,17 +780,6 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
                               llvm::GlobalValue::InternalLinkage, init, ehName);
-#if 0
-  llvm::Function *ehHandler = getEHHandler(*this);
-
-  CodeGenFunction cgf(CGM);
-
-  llvm::BasicBlock *BB = 
-    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", ehHandler);
-  cgf.Builder.SetInsertPoint(BB);
-
-  cgf.Builder.CreateRetVoid();
-#endif
 }
 
 // r4start
@@ -861,6 +864,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   MSMangleContextExtensions *msMangler = 
     CGM.getCXXABI().getMangleContext().getMsExtensions();
+  assert(msMangler && "ExitrMSCXXTryStmt must be called only for MS C++ ABI!");
   
   llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
   
@@ -872,7 +876,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     llvm::SmallString<256>  catchHandlerName;
     llvm::raw_svector_ostream stream(catchHandlerName);
 
-    msMangler->mangleEHCatchFunction(fd, I, stream);
+    msMangler->mangleEHCatchFunction(fd, EHState.EHManglingCounter, stream);
+    EHState.EHManglingCounter++;
 
     stream.flush();
     StringRef mangledCatchName(catchHandlerName);
@@ -903,8 +908,17 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   Builder.SetInsertPoint(oldBB);
 
+  llvm::SmallString<256> tryEndName;
+  llvm::raw_svector_ostream stream(tryEndName);
+
+  msMangler->mangleEHTryEnd(fd, EHState.EHManglingCounter, stream);
+  EHState.EHManglingCounter++;
+
+  stream.flush();
+  StringRef tryEndNameRef(tryEndName);
+
   llvm::BasicBlock *tryEnd = 
-    llvm::BasicBlock::Create(CGM.getLLVMContext(), "try.end", CurFn);
+    llvm::BasicBlock::Create(CGM.getLLVMContext(), tryEndNameRef, CurFn);
   
   Builder.CreateBr(tryEnd);
   
