@@ -504,6 +504,12 @@ void CodeGenFunction::EmitStartEHSpec(const Decl *D) {
   if (Proto == 0)
     return;
 
+  // r4start
+  if (IsMSABI) {
+    EmitESTypeList(Proto);
+    return;
+  }
+
   ExceptionSpecificationType EST = Proto->getExceptionSpecType();
   if (isNoexceptExceptionSpec(EST)) {
     if (Proto->getNoexceptSpec(getContext()) == FunctionProtoType::NR_Nothrow) {
@@ -565,6 +571,9 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
   if (!CGM.getLangOpts().CXXExceptions)
     return;
   
+  if (IsMSABI)
+    return;
+
   const FunctionDecl* FD = dyn_cast_or_null<FunctionDecl>(D);
   if (FD == 0)
     return;

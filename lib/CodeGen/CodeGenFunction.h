@@ -1119,6 +1119,7 @@ private:
   /// r4start
   bool IsMSABI;
 
+  /// r4start
   struct MsUnwindInfo {
     int State;
     llvm::Value *ThisPtr;
@@ -1158,8 +1159,11 @@ private:
     /// Catch handlers for current try.
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
 
+    llvm::Constant *ESTypeList;
+
     MSEHState(CodeGenFunction &cgf) 
-     : MSTryState(0), FuncletCounter(12), CurState(0), TryLevel(0), CGF(cgf) {}
+     : MSTryState(0), FuncletCounter(12), CurState(0), TryLevel(0), CGF(cgf),
+       ESTypeList(0) {}
 
     void IncrementMSTryState();
 
@@ -2709,26 +2713,29 @@ private:
   void EmitDeclMetadata();
 
   /// r4start
-  void EmitMSUnwindFunclet(llvm::Value *This, llvm::Value *ReleaseFunc);
+  void EmitESTypeList(const FunctionProtoType *FuncProto);
 
   /// r4start
-  llvm::GlobalValue *EmitMSUnwindTable();
+  void EmitUnwindFunclet(llvm::Value *This, llvm::Value *ReleaseFunc);
 
   /// r4start
-  void MSGenerateTryBlockTableEntry();
+  llvm::GlobalValue *EmitUnwindTable();
 
   /// r4start
-  void MSGenerateCatchHandler(QualType &CaughtType, llvm::Type *HandlerTy,
+  void GenerateTryBlockTableEntry();
+
+  /// r4start
+  void GenerateCatchHandler(QualType &CaughtType, llvm::Type *HandlerTy,
                               llvm::BlockAddress *HandlerAddress);
 
   /// r4start
-  llvm::GlobalValue *EmitMSTryBlockTable();
+  llvm::GlobalValue *EmitTryBlockTable();
 
   /// r4start
   llvm::GlobalValue *EmitMSFuncInfo();
 
   /// r4start
-  void EmitMSEHInformation();
+  void EmitEHInformation();
 
   CodeGenModule::ByrefHelpers *
   buildByrefHelpers(llvm::StructType &byrefType,
