@@ -306,32 +306,32 @@ static llvm::Type *getESListType(CodeGenModule &CGM) {
     "estypelist");
 }
 
-// r4start
-static llvm::GlobalValue *generateESList(CodeGenFunction &CGF,
-                                   const FunctionProtoType *FProtoType) {
-  assert(FProtoType && "ESList builder needs function protype!");
-  llvm::Type *esListTy = getESListType(CGF.CGM);
+static llvm::Constant *getTypeHandlerForESList(CodeGenModule &CGM,
+                                               llvm::Type *HandlerTy,
+                                               QualType &ExceptionType) {
+  ExceptionType = ExceptionType.getNonReferenceType().getUnqualifiedType();
+  llvm::Constant *TypeDescriptor = 
+    CGM.GetAddrOfMSRTTIDescriptor(ExceptionType, ExceptionType, true);
 
-  llvm::SmallVector<llvm::Constant *, 2> fields;
-  int numExceptions = FProtoType->getNumExceptions();
+  llvm::SmallVector<llvm::Constant *, 4> fields;
 
-  fields.push_back(llvm::ConstantInt::get(CGF.Int32Ty, numExceptions));
+  // adjectives
+  fields.push_back(llvm::ConstantInt::get(CGM.Int32Ty, 0));
 
-  // If function doesn`t have throw specs, then we do not need build eslist
-  // handler array.
-  if (!numExceptions) {
-    llvm::StructType *esListStructTy = cast<llvm::StructType>(esListTy);
-    llvm::Type *handlerPtrTy = esListStructTy->getStructElementType(1);
+  // pTypeDescr
+  fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescriptor,
+    CGM.GetDescriptorPtrType(CGM.Int8PtrTy)));
 
-    fields.push_back(llvm::UndefValue::get(handlerPtrTy));
+  // dispatch obj
+  fields.push_back(llvm::ConstantInt::get(CGM.Int32Ty, 0));
 
-    llvm::Constant *init = 
-      llvm::ConstantStruct::get(esListStructTy, fields);
+  // address of handler
+  fields.push_back(llvm::UndefValue::get(CGM.VoidPtrTy));
 
-    return new llvm::GlobalVariable(CGF.CGM.getModule(), init->getType(), true,
-                                   llvm::GlobalValue::InternalLinkage, init, "");
-  }
-  return nullptr;
+  llvm::Constant *handler = 
+    llvm::ConstantStruct::get(cast<llvm::StructType>(HandlerTy), fields);
+
+  return handler;
 }
 
 //  r4start
@@ -485,7 +485,68 @@ static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
 }
 
 // r4start
-void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This, 
+void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
+  assert(FuncProto && "ESList builder needs function protype!");
+  llvm::Type *esListTy = getESListType(CGM);
+
+  llvm::SmallVector<llvm::Constant *, 2> fields;
+  int numExceptions = FuncProto->getNumExceptions();
+
+  fields.push_back(llvm::ConstantInt::get(Int32Ty, numExceptions));
+
+  // If function doesn`t have throw specs, then we do not need build eslist
+  // handler array.
+  if (!numExceptions) {
+    llvm::StructType *esListStructTy = cast<llvm::StructType>(esListTy);
+    llvm::Type *handlerPtrTy = esListStructTy->getStructElementType(1);
+
+    fields.push_back(llvm::UndefValue::get(handlerPtrTy));
+
+    llvm::Constant *init = 
+      llvm::ConstantStruct::get(esListStructTy, fields);
+
+    EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
+                                                  init->getType(), true,
+                                  llvm::GlobalValue::InternalLinkage, init, "");
+    return;
+  }
+
+  llvm::SmallVector<llvm::Constant *, 2> expectedExceptionsHandlers;
+  llvm::Type *handlerTy = getHandlerType(CGM);
+
+  for (FunctionProtoType::exception_iterator I = FuncProto->exception_begin(),
+       E = FuncProto->exception_end(); I != E; ++I) {
+    QualType excType = *I;
+    expectedExceptionsHandlers.push_back(getTypeHandlerForESList(CGM,
+                                                                 handlerTy,
+                                                                 excType));
+  }
+
+  llvm::ArrayType *arrTy = llvm::ArrayType::get(handlerTy, numExceptions);
+  llvm::Constant *exceptionArray = 
+    llvm::ConstantArray::get(arrTy, expectedExceptionsHandlers);
+  
+  llvm::GlobalValue *handlers = 
+    new llvm::GlobalVariable(CGM.getModule(), exceptionArray->getType(), true,
+                        llvm::GlobalValue::InternalLinkage, exceptionArray, "");
+
+  llvm::Constant *idxs[] = { 
+    llvm::ConstantInt::get(Int32Ty, 0),
+    llvm::ConstantInt::get(Int32Ty, 0) 
+  };
+
+  fields.push_back(llvm::ConstantExpr::getGetElementPtr(handlers, idxs));
+
+  llvm::Constant *init = 
+    llvm::ConstantStruct::get(cast<llvm::StructType>(esListTy), fields);
+  
+  EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
+                                                init->getType(), true,
+                                  llvm::GlobalValue::InternalLinkage, init, "");
+}
+
+// r4start
+void CodeGenFunction::EmitUnwindFunclet(llvm::Value *This, 
                                           llvm::Value *ReleaseFunc) {
   const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(fd && "Unwind funclet must be emit for function!");
@@ -504,7 +565,7 @@ void CodeGenFunction::EmitMSUnwindFunclet(llvm::Value *This,
 }
 
 // r4start
-llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
+llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(funcDecl && "Unwind table is generating only for functions!");
 
@@ -571,7 +632,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSUnwindTable() {
 }
 
 // r4start
-void CodeGenFunction::MSGenerateTryBlockTableEntry() {
+void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
 
   llvm::SmallVector<llvm::Constant *, 5> fields;
@@ -604,7 +665,7 @@ void CodeGenFunction::MSGenerateTryBlockTableEntry() {
 }
 
 // r4start
-llvm::GlobalValue *CodeGenFunction::EmitMSTryBlockTable() {
+llvm::GlobalValue *CodeGenFunction::EmitTryBlockTable() {
   const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(funcDecl && "Try block table is generating only for functions!");
 
@@ -633,8 +694,8 @@ llvm::GlobalValue *CodeGenFunction::EmitMSTryBlockTable() {
 
 // r4start
 llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
-  llvm::GlobalValue *unwindTable = EmitMSUnwindTable();
-  llvm::GlobalValue *tryBlocksTable = EmitMSTryBlockTable();
+  llvm::GlobalValue *unwindTable = EmitUnwindTable();
+  llvm::GlobalValue *tryBlocksTable = EmitTryBlockTable();
 
   const FunctionDecl *function = 
     cast_or_null<FunctionDecl>(CurGD.getDecl());
@@ -679,9 +740,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
 
   // ESTypeList
-  llvm::Constant *esList = generateESList(*this, 
-                     cast<FunctionProtoType>(function->getType().getTypePtr()));
-  initializerFields.push_back(esList);
+  initializerFields.push_back(EHState.ESTypeList);
 
   // EHFlags
   // Bit 0 was setted, because at now driver doesn`t support MS
@@ -721,7 +780,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 }
 
 // r4start
-void CodeGenFunction::EmitMSEHInformation() {
+void CodeGenFunction::EmitEHInformation() {
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
 
   llvm::Function *ehHandler = getEHHandler(*this);
@@ -743,7 +802,7 @@ void CodeGenFunction::EmitMSEHInformation() {
 }
 
 // r4start
-void CodeGenFunction::MSGenerateCatchHandler(QualType &CaughtType,
+void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
                                              llvm::Type *HandlerTy,
                                            llvm::BlockAddress *HandlerAddress) {
   // 0x01: const, 0x02: volatile, 0x08: reference
@@ -834,11 +893,11 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     }
 
     // TODO: right handling of return instruction
-    Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
+    Builder.CreateUnreachable();
 
     // generate handler for this catch
     QualType CaughtType = C->getCaughtType();
-    MSGenerateCatchHandler(CaughtType, handlerTy,
+    GenerateCatchHandler(CaughtType, handlerTy,
                            llvm::BlockAddress::get(CurFn, entryBB));
   }
 
@@ -859,6 +918,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   EHState.TryLevel--;
 
-  MSGenerateTryBlockTableEntry();
+  GenerateTryBlockTableEntry();
 
 }

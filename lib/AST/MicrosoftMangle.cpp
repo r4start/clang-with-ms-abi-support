@@ -2314,7 +2314,7 @@ void MicrosoftMangleContext::mangleEHCatchFunction(const FunctionDecl *F,
                                                    uint8_t Number,
                                                    raw_ostream &Out) {
   MangleEHSpecificNames(*this, F, Out, "\01__catch$");
-  Out << (int64_t)Number;
+  Out << "$" << (int64_t)Number;
 }
 
 void MicrosoftMangleContext::mangleEHUnwindTable(const FunctionDecl *F,
@@ -2326,7 +2326,7 @@ void MicrosoftMangleContext::mangleEHUnwindFunclet(const FunctionDecl *F,
                                                    uint8_t Number,
                                                    raw_ostream &Out) {
   MangleEHSpecificNames(*this, F, Out, "\01__unwindfunclet$");
-  Out << (int64_t)Number;
+  Out << "$" << (int64_t)Number;
 }
 
 void MicrosoftMangleContext::mangleEHTryBlockTable(const FunctionDecl *F,
