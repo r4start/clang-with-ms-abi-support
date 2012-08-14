@@ -2086,7 +2086,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         const CXXRecordDecl *Parent = MD->getParent();
         llvm::Value *dtor = 
           CGM.GetAddrOfCXXDestructor(Parent->getDestructor(), Dtor_Base);
-        EmitUnwindFunclet(Args[0], dtor);
+        SaveUnwindFuncletForLaterEmit(Args[0], dtor);
 
       } else if (kind == Decl::CXXDestructor) {
         EHState.DecrementMSTryState();

@@ -1124,7 +1124,6 @@ private:
     int State;
     llvm::Value *ThisPtr;
     llvm::Value *ReleaseFunc;
-    llvm::SmallString<256> FuncletName;
   };
 
   /// r4start
@@ -1135,16 +1134,16 @@ private:
     llvm::Value *MSTryState;
 
     CodeGenFunction &CGF;
+
   public:
 
     /// Indicates that current try is nested.
     /// When TryLevel == 1 we must set try state to -1.
     int TryLevel;
 
-    /// Counter for unwind funclet mangling.
-    /// Starts from 12.
-    /// TODO: Investigate this.
-    int FuncletCounter;
+    /// This counter increments each time when we mangle some eh symbol.
+    /// Also it passes to mangler.
+    int EHManglingCounter;
 
     /// Stores current try state value.
     int CurState;
@@ -1162,7 +1161,7 @@ private:
     llvm::Constant *ESTypeList;
 
     MSEHState(CodeGenFunction &cgf) 
-     : MSTryState(0), FuncletCounter(12), CurState(0), TryLevel(0), CGF(cgf),
+     : MSTryState(0), EHManglingCounter(0), CurState(0), TryLevel(0), CGF(cgf),
        ESTypeList(0) {}
 
     void IncrementMSTryState();
@@ -2716,7 +2715,7 @@ private:
   void EmitESTypeList(const FunctionProtoType *FuncProto);
 
   /// r4start
-  void EmitUnwindFunclet(llvm::Value *This, llvm::Value *ReleaseFunc);
+  void SaveUnwindFuncletForLaterEmit(llvm::Value *This, llvm::Value *ReleaseFunc);
 
   /// r4start
   llvm::GlobalValue *EmitUnwindTable();

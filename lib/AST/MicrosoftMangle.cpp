@@ -197,6 +197,8 @@ public:
                                      raw_ostream &);
 
   virtual void mangleEHTryBlockTable(const FunctionDecl *, raw_ostream &);
+
+  virtual void mangleEHTryEnd(const FunctionDecl *, uint8_t , raw_ostream &);
 };
 
 }
@@ -2182,6 +2184,13 @@ void MicrosoftMangleContext::mangleEHUnwindFunclet(const FunctionDecl *F,
 void MicrosoftMangleContext::mangleEHTryBlockTable(const FunctionDecl *F,
                                                    raw_ostream &Out) {
   MangleEHSpecificNames(*this, F, Out, "\01__tryblocktable$");
+}
+
+void MicrosoftMangleContext::mangleEHTryEnd(const FunctionDecl *F, 
+                                            uint8_t Number, 
+                                            raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__tryend$");
+  Out << "$" << (int64_t)Number;
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
