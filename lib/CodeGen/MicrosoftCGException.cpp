@@ -34,31 +34,18 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
 
 // r4start
 void CodeGenFunction::MSEHState::IncrementMSTryState() {
-  llvm::Value *StateVal = CGF.Builder.CreateLoad(MSTryState);
-  
-  StateVal = CGF.Builder.CreateAdd(llvm::ConstantInt::get(CGF.Int32Ty, 1),
-                               StateVal);
-  
-  CGF.Builder.CreateStore(StateVal, MSTryState);
-  
-  CurState++;
+  SetMSTryState(++CurState);
 }
 
 // r4start
 void CodeGenFunction::MSEHState::DecrementMSTryState() {
-  llvm::Value *TryState = CGF.Builder.CreateLoad(MSTryState);
-  
-  TryState = 
-    CGF.Builder.CreateSub(llvm::ConstantInt::get(CGF.Int32Ty, 1), TryState);
-
-  CGF.Builder.CreateStore(TryState, MSTryState);
-  
-  CurState--;
+  SetMSTryState(--CurState);
 }
 
 // r4start
 void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
-  CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State), MSTryState);
+  CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
+                          MSTryState);
 }
 
 // r4start
@@ -816,7 +803,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   MSMangleContextExtensions *msMangler = 
     CGM.getCXXABI().getMangleContext().getMsExtensions();
   
-  auto oldBB = Builder.GetInsertBlock();
+  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
+  
   llvm::Type *handlerTy = getHandlerType(CGM);
 
   // In MS do it in straight way.
@@ -839,6 +827,12 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
+    if (EHState.TryLevel == 1) {
+      EHState.SetMSTryState(-1);
+    } else {
+      EHState.DecrementMSTryState();
+    }
+
     // TODO: right handling of return instruction
     Builder.CreateRet(llvm::ConstantInt::get(Int32Ty, 0));
 
@@ -849,6 +843,13 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   Builder.SetInsertPoint(oldBB);
+
+  llvm::BasicBlock *tryEnd = 
+    llvm::BasicBlock::Create(CGM.getLLVMContext(), "try.end", CurFn);
+  
+  Builder.CreateBr(tryEnd);
+  
+  Builder.SetInsertPoint(tryEnd);
 
   if (EHState.TryLevel == 1) {
     EHState.SetMSTryState(-1);
