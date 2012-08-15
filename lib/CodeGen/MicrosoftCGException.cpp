@@ -552,17 +552,7 @@ void CodeGenFunction::SaveUnwindFuncletForLaterEmit(llvm::Value *This,
   assert(fd && "Unwind funclet must be emit for function!");
 
   MsUnwindInfo funcletInfo = { EHState.CurState, This, ReleaseFunc };
-#if 0
-  llvm::raw_svector_ostream stream(funcletInfo.FuncletName);
 
-  CGM.getCXXABI().getMangleContext().
-   getMsExtensions()->mangleEHUnwindFunclet(fd, EHState.EHManglingCounter,
-                                            stream);
-
-  EHState.EHManglingCounter++;
-
-  stream.flush();
-#endif
   EHState.UnwindTable.push_back(funcletInfo);
 }
 
@@ -662,6 +652,10 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
     llvm::ArrayType::get(handlerTy, EHState.TryHandlers.size());
   llvm::Constant *handlersArray = 
                llvm::ConstantArray::get(arrayOfHandlersTy, EHState.TryHandlers);
+
+  // After all we must clear all entries,
+  // because it can be nested try.
+  EHState.TryHandlers.clear();
 
   llvm::GlobalVariable *globalHandlers = 
     new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), true,
