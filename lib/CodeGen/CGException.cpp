@@ -610,13 +610,16 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   
   // Generate id in start of try block.
   if (IsMSABI) {
-
     if (!EHState.IsInited()) {
       EHState.InitMSTryState();
-    } else {
-      EHState.IncrementMSTryState();
+      EHState.PrevLevelLastIdValues.push_back(-1);
     }
 
+    EHState.UnwindTable.push_back(EHState.PrevLevelLastIdValues.back());
+
+    size_t state = EHState.UnwindTable.size() - 1;
+    EHState.SetMSTryState(state);
+    EHState.PrevLevelLastIdValues.push_back(state);
     EHState.TryLevel++;
   } 
 
@@ -715,16 +718,17 @@ static bool isNonEHScope(const EHScope &S) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
-  assert(EHStack.requiresLandingPad());
-  assert(!EHStack.empty());
-
   if (!CGM.getLangOpts().Exceptions)
     return 0;
 
   // r4start
   if (IsMSABI) {
     return 0;
+    //return getInvokeDestImplForMS();
   }
+
+  assert(EHStack.requiresLandingPad());
+  assert(!EHStack.empty());
 
   // Check the innermost scope for a cached landing pad.  If this is
   // a non-EH cleanup, we'll check enclosing scopes in EmitLandingPad.

@@ -637,6 +637,9 @@ public:
 
   llvm::BasicBlock *getInvokeDestImpl();
 
+  /// r4start
+  llvm::BasicBlock *getInvokeDestImplForMS();
+
   template <class T>
   typename DominatingValue<T>::saved_type saveValueInCond(T value) {
     return DominatingValue<T>::save(*this, value);
@@ -1121,9 +1124,15 @@ private:
 
   /// r4start
   struct MsUnwindInfo {
-    int State;
+    int ToState;
     llvm::Value *ThisPtr;
     llvm::Value *ReleaseFunc;
+
+    MsUnwindInfo(int State) 
+     : ToState(State), ThisPtr(0), ReleaseFunc(0) {}
+
+    MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF)
+     : ToState(State), ThisPtr(This), ReleaseFunc(RF) {}
   };
 
   /// r4start
@@ -1145,12 +1154,19 @@ private:
     /// Also it passes to mangler.
     int EHManglingCounter;
 
-    /// Stores current try state value.
-    int CurState;
+    /// If CurState free, then we can emit call
+    /// without incrementing CurState before call.
+    bool IsCurStateFree;
 
     /// Unwind table map.
     /// Holds funclets addresses.
     std::vector<MsUnwindInfo> UnwindTable;
+
+    llvm::StoreInst *LastStoreState;
+
+    /// Here we want to store id value state.
+    /// This is need to restore id value state after exiting nested try.
+    llvm::SmallVector<int, 4> PrevLevelLastIdValues;
 
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
@@ -1160,13 +1176,11 @@ private:
 
     llvm::Constant *ESTypeList;
 
+    llvm::BasicBlock *LandingPad;
+
     MSEHState(CodeGenFunction &cgf) 
-     : MSTryState(0), EHManglingCounter(0), CurState(0), TryLevel(0), CGF(cgf),
-       ESTypeList(0) {}
-
-    void IncrementMSTryState();
-
-    void DecrementMSTryState();
+     : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
+     ESTypeList(0), IsCurStateFree(true), LandingPad(0), LastStoreState(0) {}
 
     void SetMSTryState(uint32_t State);
 
@@ -2715,7 +2729,8 @@ private:
   void EmitESTypeList(const FunctionProtoType *FuncProto);
 
   /// r4start
-  void SaveUnwindFuncletForLaterEmit(llvm::Value *This, llvm::Value *ReleaseFunc);
+  void SaveUnwindFuncletForLaterEmit(int ToState, llvm::Value *This,
+                                     llvm::Value *ReleaseFunc);
 
   /// r4start
   llvm::GlobalValue *EmitUnwindTable();

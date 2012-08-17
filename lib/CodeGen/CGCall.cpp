@@ -2076,22 +2076,44 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     CS = Builder.CreateCall(Callee, Args);
 
     // r4start
-    // This needs for Microsoft C++ EH.
+    // This is need for Microsoft C++ EH.
     const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
-    if (IsMSABI && EHState.IsInited() && MD) {
-      auto kind = MD->getKind();
-      if (kind == Decl::CXXConstructor) {
-        EHState.IncrementMSTryState();
-      
-        const CXXRecordDecl *Parent = MD->getParent();
-        llvm::Value *dtor = 
-          CGM.GetAddrOfCXXDestructor(Parent->getDestructor(), Dtor_Base);
-        SaveUnwindFuncletForLaterEmit(Args[0], dtor);
+    llvm::StoreInst *oldStore = EHState.LastStoreState;
 
+    if (IsMSABI && EHState.IsInited() && MD) {
+      Decl::Kind kind = MD->getKind();
+      if (kind == Decl::CXXConstructor) {
+        llvm::BasicBlock *Cont = 
+          llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
+        Builder.CreateBr(Cont);
+        Builder.SetInsertPoint(Cont);
+
+        const CXXRecordDecl *parent = MD->getParent();
+        llvm::Value *dtor = 
+          CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
+        SaveUnwindFuncletForLaterEmit(EHState.PrevLevelLastIdValues.back(),
+                                      Args[0], dtor);
+
+        size_t state = EHState.UnwindTable.size() - 1;
+        EHState.SetMSTryState(state);
+        EHState.PrevLevelLastIdValues.push_back(state);
       } else if (kind == Decl::CXXDestructor) {
-        EHState.DecrementMSTryState();
+        if (EHState.LastStoreState) {
+          EHState.LastStoreState->eraseFromParent();
+          EHState.LastStoreState = 0;
+        }
+        EHState.PrevLevelLastIdValues.pop_back();
+        EHState.SetMSTryState(EHState.PrevLevelLastIdValues.back());
       }
     }
+
+    // If it was not ctor call then we must save 
+    // this store instruction in ll code.
+    // If it was ctor call then it was already done.
+    if (oldStore == EHState.LastStoreState) {
+      EHState.LastStoreState = 0;
+    }
+
   } else {
     llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
