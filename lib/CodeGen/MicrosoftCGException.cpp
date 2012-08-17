@@ -28,24 +28,16 @@ using namespace CodeGen;
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
     MSTryState = CGF.CreateTempAlloca(CGF.Int32Ty, "try.id");
-    CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, 0), MSTryState);
+    CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, -1),
+                            MSTryState);
   }
 }
 
 // r4start
-void CodeGenFunction::MSEHState::IncrementMSTryState() {
-  SetMSTryState(++CurState);
-}
-
-// r4start
-void CodeGenFunction::MSEHState::DecrementMSTryState() {
-  SetMSTryState(--CurState);
-}
-
-// r4start
 void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
-  CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
-                          MSTryState);
+  LastStoreState = 
+    CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
+                            MSTryState);
 }
 
 // r4start
@@ -546,12 +538,13 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
 }
 
 // r4start
-void CodeGenFunction::SaveUnwindFuncletForLaterEmit(llvm::Value *This, 
-                                          llvm::Value *ReleaseFunc) {
+void CodeGenFunction::SaveUnwindFuncletForLaterEmit(int ToState, 
+                                                    llvm::Value *This, 
+                                                    llvm::Value *ReleaseFunc) {
   const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(fd && "Unwind funclet must be emit for function!");
 
-  MsUnwindInfo funcletInfo = { EHState.CurState, This, ReleaseFunc };
+  MsUnwindInfo funcletInfo(ToState, This, ReleaseFunc);
 
   EHState.UnwindTable.push_back(funcletInfo);
 }
@@ -577,12 +570,25 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   assert(!EHState.UnwindTable.empty() && "Unwind table is empty!");
 
-  auto Prev = ++(EHState.UnwindTable.rbegin());
-  llvm::BasicBlock * nextBlock;
+  llvm::BasicBlock *nextBlock = 0;
 
   llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
-  for (auto I = EHState.UnwindTable.rbegin(), E = EHState.UnwindTable.rend();
+  llvm::Constant *nullVal = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+
+  for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
        I != E; ++I) {
+    if (!I->ReleaseFunc) {
+      // creating unwind table entry
+      fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
+
+      fields.push_back(llvm::ConstantExpr::getBitCast(nullVal, 
+                                                   entryTy->getElementType(1)));
+
+      entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
+      fields.clear();
+      continue;
+    }
+
     // creating funclet code
     llvm::SmallString<256> funcletName;
     llvm::raw_svector_ostream stream(funcletName);
@@ -605,7 +611,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::CallInst *call = 
       Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
 
-    if (I != EHState.UnwindTable.rbegin()) {
+    if (nextBlock) {
       // jmp to previous
       Builder.CreateBr(nextBlock);
     } else {
@@ -619,7 +625,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     nextBlock = funclet;
 
     // creating unwind table entry
-    fields.push_back(llvm::ConstantInt::get(Int32Ty, I->State));
+    fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
     fields.push_back(llvm::BlockAddress::get(CurFn, funclet));
 
     entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
@@ -858,13 +864,16 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   MSMangleContextExtensions *msMangler = 
     CGM.getCXXABI().getMangleContext().getMsExtensions();
-  assert(msMangler && "ExitrMSCXXTryStmt must be called only for MS C++ ABI!");
+  assert(msMangler && "ExitMSCXXTryStmt must be called only for MS C++ ABI!");
   
   llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
   
   llvm::Type *handlerTy = getHandlerType(CGM);
 
   // In MS do it in straight way.
+  EHState.PrevLevelLastIdValues.pop_back();
+  int lastState = EHState.PrevLevelLastIdValues.back();
+
   for (unsigned I = 0; I != NumHandlers; ++I) {
 
     llvm::SmallString<256>  catchHandlerName;
@@ -885,12 +894,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
-    if (EHState.TryLevel == 1) {
-      EHState.SetMSTryState(-1);
-    } else {
-      EHState.DecrementMSTryState();
-    }
-
+    EHState.SetMSTryState(lastState);
+    
     // TODO: right handling of return instruction
     Builder.CreateUnreachable();
 
@@ -918,14 +923,36 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   
   Builder.SetInsertPoint(tryEnd);
 
-  if (EHState.TryLevel == 1) {
-    EHState.SetMSTryState(-1);
-  } else {
-    EHState.DecrementMSTryState();
-  }
-
+  EHState.SetMSTryState(lastState);
   EHState.TryLevel--;
 
   GenerateTryBlockTableEntry();
 
+}
+
+// r4start
+llvm::BasicBlock *CodeGenFunction::getInvokeDestImplForMS() {
+  if (EHState.LandingPad) {
+    return EHState.LandingPad;
+  }
+
+  // Create and configure the landing pad.
+  EHState.LandingPad = createBasicBlock("lpad", CurFn);
+
+  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
+  Builder.SetInsertPoint(EHState.LandingPad);
+
+  llvm::Constant *Fn =
+    CGM.CreateRuntimeFunction(llvm::FunctionType::get(CGM.Int32Ty, true),
+                              "__cxx_fake_ms_personality");
+
+  llvm::LandingPadInst *LPadInst = 
+    Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL), 
+                          llvm::ConstantExpr::getBitCast(Fn, CGM.Int8PtrTy), 0);
+  LPadInst->setCleanup(true);
+  
+  Builder.CreateUnreachable();
+
+  // Restore the old IR generation state.
+  Builder.SetInsertPoint(oldBB);
 }
