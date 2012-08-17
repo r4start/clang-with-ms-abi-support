@@ -1163,10 +1163,13 @@ private:
     std::vector<MsUnwindInfo> UnwindTable;
 
     llvm::StoreInst *LastStoreState;
+    int LastStoreStateValue;
 
     /// Here we want to store id value state.
     /// This is need to restore id value state after exiting nested try.
     llvm::SmallVector<int, 4> PrevLevelLastIdValues;
+
+    llvm::SmallVector<int, 4> ErasedStates;
 
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
@@ -1180,7 +1183,8 @@ private:
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), IsCurStateFree(true), LandingPad(0), LastStoreState(0) {}
+     ESTypeList(0), IsCurStateFree(true), LandingPad(0), LastStoreState(0),
+     LastStoreStateValue(-2) {}
 
     void SetMSTryState(uint32_t State);
 

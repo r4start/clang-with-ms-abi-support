@@ -38,6 +38,7 @@ void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
   LastStoreState = 
     CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
                             MSTryState);
+  LastStoreStateValue = State;
 }
 
 // r4start
