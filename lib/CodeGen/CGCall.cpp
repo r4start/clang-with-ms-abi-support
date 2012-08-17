@@ -2101,6 +2101,9 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         if (EHState.LastStoreState) {
           EHState.LastStoreState->eraseFromParent();
           EHState.LastStoreState = 0;
+          EHState.ErasedStates.push_back(EHState.LastStoreStateValue);
+          EHState.UnwindTable[EHState.LastStoreStateValue].ReleaseFunc = 0;
+          EHState.LastStoreStateValue = -2;
         }
         EHState.PrevLevelLastIdValues.pop_back();
         EHState.SetMSTryState(EHState.PrevLevelLastIdValues.back());
