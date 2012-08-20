@@ -1137,13 +1137,8 @@ private:
 
   /// r4start
   class MSEHState {
-
-    /// MS C++ EH specific.
-    /// State of current try level.
-    llvm::Value *MSTryState;
-
-    CodeGenFunction &CGF;
-
+  public:
+    
     /// This struct holds info about last state store instruction.
     /// If code under this instruction can not throw exception, 
     /// then we does not need hold this instruction in byte code.
@@ -1152,9 +1147,19 @@ private:
       llvm::StoreInst *LastStore;
       int StateValue;
       bool IsUsed;
+      bool IsRestoreOp;
 
-      LastStoreState() : LastStore(0), StateValue(-2), IsUsed(false) {}
+      LastStoreState() 
+       : LastStore(0), StateValue(-2), IsUsed(false), IsRestoreOp(false) {}
     };
+
+  private:
+
+    /// MS C++ EH specific.
+    /// State of current try level.
+    llvm::Value *MSTryState;
+
+    CodeGenFunction &CGF;
 
     LastStoreState StateHolder;
 

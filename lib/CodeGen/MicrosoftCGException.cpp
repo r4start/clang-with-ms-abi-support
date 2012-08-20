@@ -804,6 +804,11 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
 // r4start
 void CodeGenFunction::EmitEHInformation() {
+  for (auto &elem : EHState.States) {
+    if (!elem.second.IsUsed) {
+      elem.second.LastStore->eraseFromParent();
+    }
+  }
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
 
   llvm::Function *ehHandler = getEHHandler(*this);
@@ -826,7 +831,7 @@ void CodeGenFunction::EmitEHInformation() {
 
 // r4start
 void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
-                                             llvm::Type *HandlerTy,
+                                           llvm::Type *HandlerTy,
                                            llvm::BlockAddress *HandlerAddress) {
   // 0x01: const, 0x02: volatile, 0x08: reference
   int handlerAdjectives = 0;
@@ -944,6 +949,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   Builder.SetInsertPoint(tryEnd);
 
   EHState.SetMSTryState(lastState);
+  EHState.States.back().second.IsUsed = true;
   EHState.UnwindTable.push_back(lastState);
   EHState.TryLevel--;
 
