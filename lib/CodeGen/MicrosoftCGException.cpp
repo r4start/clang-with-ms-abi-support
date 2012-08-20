@@ -593,8 +593,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   llvm::BasicBlock *prevBlock = 0;
 
-  for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
-       I != E; ++I) {
+  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
+       E = EHState.UnwindTable.end(); I != E; ++I) {
     if (!I->ReleaseFunc) {
       // creating unwind table entry
       fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
