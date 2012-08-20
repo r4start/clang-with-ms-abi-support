@@ -1151,8 +1151,9 @@ private:
     struct LastStoreState {
       llvm::StoreInst *LastStore;
       int StateValue;
+      bool IsUsed;
 
-      LastStoreState() : LastStore(0), StateValue(-2) {}
+      LastStoreState() : LastStore(0), StateValue(-2), IsUsed(false) {}
     };
 
     LastStoreState StateHolder;
@@ -1179,7 +1180,7 @@ private:
     /// This is need to restore id value state after exiting nested try.
     llvm::SmallVector<int, 4> PrevLevelLastIdValues;
 
-    llvm::SmallVector<int, 4> ErasedStates;
+    std::list< std::pair<int, LastStoreState> > States;
 
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;

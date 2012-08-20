@@ -2269,11 +2269,18 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         EHState.SetMSTryState(state);
         EHState.PrevLevelLastIdValues.push_back(state);
       } else if (kind == Decl::CXXDestructor) {
+        bool wasDelete = false;
         if (EHState.HasLastStoreInst()) {
           EHState.DeleteLastStateStore();
+          wasDelete = true;
         }
         EHState.PrevLevelLastIdValues.pop_back();
-        EHState.SetMSTryState(EHState.PrevLevelLastIdValues.back());
+        
+        int restoringState = EHState.PrevLevelLastIdValues.back();
+        
+        if (!wasDelete) {
+          EHState.SetMSTryState(restoringState);
+        }
       }
     }
 
@@ -2282,6 +2289,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     // If it was ctor call then it was already done.
     if (oldStore == EHState.GetLastStateStore()) {
       EHState.ForgetStateStore();
+      EHState.States.back().second.IsUsed = true;
     }
 
   } else {

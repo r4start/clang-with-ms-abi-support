@@ -39,6 +39,11 @@ void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
     CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
                             MSTryState);
   StateHolder.StateValue = State;
+
+  LastStoreState st;
+  st.LastStore = StateHolder.LastStore;
+  st.StateValue = StateHolder.StateValue;
+  States.push_back(std::make_pair(TryLevel, st));
 }
 
 // r4start
@@ -48,8 +53,7 @@ void CodeGenFunction::MSEHState::DeleteLastStateStore() {
   StateHolder.LastStore->eraseFromParent();
   StateHolder.LastStore = 0;
 
-  ErasedStates.push_back(StateHolder.StateValue);
-  UnwindTable[StateHolder.StateValue].ReleaseFunc = 0;
+  UnwindTable.pop_back();
 
   StateHolder.StateValue = -2;
 }
@@ -938,6 +942,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   Builder.SetInsertPoint(tryEnd);
 
   EHState.SetMSTryState(lastState);
+  EHState.UnwindTable.push_back(lastState);
   EHState.TryLevel--;
 
   GenerateTryBlockTableEntry();
