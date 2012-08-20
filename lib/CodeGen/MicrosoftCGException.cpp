@@ -35,10 +35,23 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
 
 // r4start
 void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
-  LastStoreState = 
+  StateHolder.LastStore = 
     CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
                             MSTryState);
-  LastStoreStateValue = State;
+  StateHolder.StateValue = State;
+}
+
+// r4start
+void CodeGenFunction::MSEHState::DeleteLastStateStore() {
+  assert(StateHolder.LastStore && "Can not erase undefined store insruction!");
+
+  StateHolder.LastStore->eraseFromParent();
+  StateHolder.LastStore = 0;
+
+  ErasedStates.push_back(StateHolder.StateValue);
+  UnwindTable[StateHolder.StateValue].ReleaseFunc = 0;
+
+  StateHolder.StateValue = -2;
 }
 
 // r4start

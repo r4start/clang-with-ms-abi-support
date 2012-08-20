@@ -1144,6 +1144,19 @@ private:
 
     CodeGenFunction &CGF;
 
+    /// This struct holds info about last state store instruction.
+    /// If code under this instruction can not throw exception, 
+    /// then we does not need hold this instruction in byte code.
+    /// Also this help us to not generate unnecessary funclets.
+    struct LastStoreState {
+      llvm::StoreInst *LastStore;
+      int StateValue;
+
+      LastStoreState() : LastStore(0), StateValue(-2) {}
+    };
+
+    LastStoreState StateHolder;
+
   public:
 
     /// Indicates that current try is nested.
@@ -1161,9 +1174,6 @@ private:
     /// Unwind table map.
     /// Holds funclets addresses.
     std::vector<MsUnwindInfo> UnwindTable;
-
-    llvm::StoreInst *LastStoreState;
-    int LastStoreStateValue;
 
     /// Here we want to store id value state.
     /// This is need to restore id value state after exiting nested try.
@@ -1183,14 +1193,31 @@ private:
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), IsCurStateFree(true), LandingPad(0), LastStoreState(0),
-     LastStoreStateValue(-2) {}
+     ESTypeList(0), IsCurStateFree(true), LandingPad(0) {}
 
     void SetMSTryState(uint32_t State);
 
     void InitMSTryState();
 
+    void RememberStoreInst(llvm::StoreInst *Store, int StoreVal) {
+      assert(Store && "Store instruction must be not null!");
+      StateHolder.LastStore = Store;
+      StateHolder.StateValue = StoreVal;
+    }
+
+    void ForgetStateStore() {
+      StateHolder.LastStore = 0;
+    }
+
+    void DeleteLastStateStore();
+
+    const llvm::StoreInst *GetLastStateStore() const { 
+      return StateHolder.LastStore; 
+    }
+
     bool IsInited() const { return MSTryState != 0; }
+
+    bool HasLastStoreInst() const { return StateHolder.LastStore != 0; }
   };
 
   /// r4start
