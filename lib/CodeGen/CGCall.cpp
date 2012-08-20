@@ -2078,11 +2078,25 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     // r4start
     // This is need for Microsoft C++ EH.
     const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
-    const llvm::StoreInst *oldStore = EHState.GetLastStateStore();//.LastStoreState;
+#if 0
+    const llvm::StoreInst *oldStore = EHState.GetLastStateStore();
+#endif
+    
+    auto lastStore = std::find_if(EHState.States.rbegin(), EHState.States.rend(), 
+      [this] (std::pair<int, MSEHState::LastStoreState> elem) -> bool {
+        if (EHState.TryLevel == elem.first) {
+          return true;
+        }
+        return false;
+    });
 
+    Decl::Kind kind;
     if (IsMSABI && EHState.IsInited() && MD) {
-      Decl::Kind kind = MD->getKind();
+      kind = MD->getKind();
       if (kind == Decl::CXXConstructor) {
+        if (lastStore != EHState.States.rend())
+          lastStore->second.IsUsed = true;
+
         llvm::BasicBlock *Cont = 
           llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
         Builder.CreateBr(Cont);
@@ -2098,11 +2112,29 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         EHState.SetMSTryState(state);
         EHState.PrevLevelLastIdValues.push_back(state);
       } else if (kind == Decl::CXXDestructor) {
+        EHState.PrevLevelLastIdValues.pop_back();
+        int restoringState = EHState.PrevLevelLastIdValues.back();
+
+        auto ff = std::find_if(EHState.States.begin(), EHState.States.end(),
+          [this, restoringState] 
+          (std::pair<int, MSEHState::LastStoreState> el) -> bool {
+            if (el.second.StateValue == restoringState) {
+              return true;
+            }
+            return false;
+          });
+
+        EHState.SetMSTryState(restoringState);
+        if (ff != EHState.States.end() && ff->second.IsUsed) {
+          EHState.States.back().second.IsUsed = true;
+        }
+#if 0
         bool wasDelete = false;
         if (EHState.HasLastStoreInst()) {
           EHState.DeleteLastStateStore();
           wasDelete = true;
         }
+
         EHState.PrevLevelLastIdValues.pop_back();
         
         int restoringState = EHState.PrevLevelLastIdValues.back();
@@ -2110,17 +2142,24 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         if (!wasDelete) {
           EHState.SetMSTryState(restoringState);
         }
+#endif
       }
     }
 
     // If it was not ctor call then we must save 
     // this store instruction in ll code.
     // If it was ctor call then it was already done.
+    if ((!MD || 
+         (kind != Decl::CXXConstructor && kind != Decl::CXXDestructor)) &&
+        lastStore != EHState.States.rend()) {
+      lastStore->second.IsUsed = true;
+    }
+#if 0
     if (oldStore == EHState.GetLastStateStore()) {
       EHState.ForgetStateStore();
       EHState.States.back().second.IsUsed = true;
     }
-
+#endif
   } else {
     llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
