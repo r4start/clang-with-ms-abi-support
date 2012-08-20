@@ -1174,7 +1174,8 @@ private:
 
     /// Unwind table map.
     /// Holds funclets addresses.
-    std::vector<MsUnwindInfo> UnwindTable;
+    typedef std::vector<MsUnwindInfo> UnwindTableTy;
+    UnwindTableTy UnwindTable;
 
     /// Here we want to store id value state.
     /// This is need to restore id value state after exiting nested try.
