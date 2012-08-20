@@ -2078,7 +2078,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     // r4start
     // This is need for Microsoft C++ EH.
     const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
-    llvm::StoreInst *oldStore = EHState.LastStoreState;
+    const llvm::StoreInst *oldStore = EHState.GetLastStateStore();//.LastStoreState;
 
     if (IsMSABI && EHState.IsInited() && MD) {
       Decl::Kind kind = MD->getKind();
@@ -2098,12 +2098,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         EHState.SetMSTryState(state);
         EHState.PrevLevelLastIdValues.push_back(state);
       } else if (kind == Decl::CXXDestructor) {
-        if (EHState.LastStoreState) {
-          EHState.LastStoreState->eraseFromParent();
-          EHState.LastStoreState = 0;
-          EHState.ErasedStates.push_back(EHState.LastStoreStateValue);
-          EHState.UnwindTable[EHState.LastStoreStateValue].ReleaseFunc = 0;
-          EHState.LastStoreStateValue = -2;
+        if (EHState.HasLastStoreInst()) {
+          EHState.DeleteLastStateStore();
         }
         EHState.PrevLevelLastIdValues.pop_back();
         EHState.SetMSTryState(EHState.PrevLevelLastIdValues.back());
@@ -2113,8 +2109,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     // If it was not ctor call then we must save 
     // this store instruction in ll code.
     // If it was ctor call then it was already done.
-    if (oldStore == EHState.LastStoreState) {
-      EHState.LastStoreState = 0;
+    if (oldStore == EHState.GetLastStateStore()) {
+      EHState.ForgetStateStore();
     }
 
   } else {
