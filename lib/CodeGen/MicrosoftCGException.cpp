@@ -588,10 +588,10 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   assert(!EHState.UnwindTable.empty() && "Unwind table is empty!");
 
-  llvm::BasicBlock *nextBlock = 0;
-
   llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
   llvm::Constant *nullVal = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+
+  llvm::BasicBlock *prevBlock = 0;
 
   for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
        I != E; ++I) {
@@ -613,8 +613,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
     CGM.getCXXABI().getMangleContext().
       getMsExtensions()->mangleEHUnwindFunclet(funcDecl,
-                                               EHState.EHManglingCounter,
-                                               stream);
+                                                EHState.EHManglingCounter,
+                                                stream);
 
     EHState.EHManglingCounter++;
 
@@ -624,24 +624,17 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::BasicBlock *funclet = 
       llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletNameRef, CurFn);
 
+    if (prevBlock) {
+      Builder.CreateBr(funclet);
+    }
+    prevBlock = funclet;
+
     Builder.SetInsertPoint(funclet);
 
     llvm::CallInst *call = 
       Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
 
-    if (nextBlock) {
-      // jmp to previous
-      Builder.CreateBr(nextBlock);
-    } else {
-      // jump to ehhandler
-      llvm::Function *ehHandler = getEHHandler(*this);
-      llvm::CallInst *call = Builder.CreateCall(ehHandler);
-      call->setDoesNotReturn();
-      Builder.CreateUnreachable();
-    }
-
-    nextBlock = funclet;
-
+    
     // creating unwind table entry
     fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
     fields.push_back(llvm::BlockAddress::get(CurFn, funclet));
@@ -649,6 +642,15 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
     fields.clear();
   }
+
+  if (prevBlock) {
+    // last funclet jumps to ehhandler
+    llvm::Function *ehHandler = getEHHandler(*this);
+    llvm::CallInst *call = Builder.CreateCall(ehHandler);
+    call->setDoesNotReturn();
+    Builder.CreateUnreachable();
+  }
+
   Builder.SetInsertPoint(oldBB);
 
   llvm::ArrayType *tableTy = llvm::ArrayType::get(entryTy, entries.size());
