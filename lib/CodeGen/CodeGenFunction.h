@@ -1123,16 +1123,29 @@ private:
   bool IsMSABI;
 
   /// r4start
+  /// This structer holds information about unwind table entry
+  /// and associated with this entry store operation.
   struct MsUnwindInfo {
     int ToState;
+    int StoreValue;
     llvm::Value *ThisPtr;
     llvm::Value *ReleaseFunc;
+    bool IsUsed;
+    bool IsRestoreOperation;
+    llvm::StoreInst *Store;
+    int StoreInstTryLevel;
 
     MsUnwindInfo(int State) 
-     : ToState(State), ThisPtr(0), ReleaseFunc(0) {}
+     : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
+       IsUsed(false), IsRestoreOperation(false), Store(0), 
+       StoreInstTryLevel(-1) {}
 
-    MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF)
-     : ToState(State), ThisPtr(This), ReleaseFunc(RF) {}
+    MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
+                 int StoreVal = -2, bool Used = false, bool RestoreOp = false,
+                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1)
+     : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
+       IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
+       StoreInstTryLevel(StoreTryLevel) {}
   };
 
   /// r4start
@@ -1164,7 +1177,6 @@ private:
     LastStoreState StateHolder;
 
   public:
-
     /// Indicates that current try is nested.
     /// When TryLevel == 1 we must set try state to -1.
     int TryLevel;
@@ -1179,8 +1191,11 @@ private:
 
     /// Unwind table map.
     /// Holds funclets addresses.
-    typedef std::vector<MsUnwindInfo> UnwindTableTy;
+    typedef std::list<MsUnwindInfo> UnwindTableTy;
     UnwindTableTy UnwindTable;
+
+    typedef std::map<int, MsUnwindInfo&> LastUnwindEntryOnCurLevel;
+    LastUnwindEntryOnCurLevel LastEntry;
 
     /// Here we want to store id value state.
     /// This is need to restore id value state after exiting nested try.
@@ -1203,6 +1218,8 @@ private:
      ESTypeList(0), IsCurStateFree(true), LandingPad(0) {}
 
     void SetMSTryState(uint32_t State);
+
+    void SetTryStateForCatchHandler(uint32_t State);
 
     void InitMSTryState();
 

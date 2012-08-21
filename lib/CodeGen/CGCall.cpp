@@ -2077,89 +2077,65 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
     // r4start
     // This is need for Microsoft C++ EH.
-    const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
-#if 0
-    const llvm::StoreInst *oldStore = EHState.GetLastStateStore();
-#endif
-    
-    auto lastStore = std::find_if(EHState.States.rbegin(), EHState.States.rend(), 
-      [this] (std::pair<int, MSEHState::LastStoreState> elem) -> bool {
-        if (EHState.TryLevel == elem.first) {
-          return true;
-        }
-        return false;
-    });
-
-    Decl::Kind kind;
-    if (IsMSABI && EHState.IsInited() && MD) {
-      kind = MD->getKind();
-      if (kind == Decl::CXXConstructor) {
-        if (lastStore != EHState.States.rend())
-          lastStore->second.IsUsed = true;
-
-        llvm::BasicBlock *Cont = 
-          llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
-        Builder.CreateBr(Cont);
-        Builder.SetInsertPoint(Cont);
-
-        const CXXRecordDecl *parent = MD->getParent();
-        llvm::Value *dtor = 
-          CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
-        SaveUnwindFuncletForLaterEmit(EHState.PrevLevelLastIdValues.back(),
-                                      Args[0], dtor);
-
-        size_t state = EHState.UnwindTable.size() - 1;
-        EHState.SetMSTryState(state);
-        EHState.PrevLevelLastIdValues.push_back(state);
-      } else if (kind == Decl::CXXDestructor) {
-        EHState.PrevLevelLastIdValues.pop_back();
-        int restoringState = EHState.PrevLevelLastIdValues.back();
-
-        auto ff = std::find_if(EHState.States.begin(), EHState.States.end(),
-          [this, restoringState] 
-          (std::pair<int, MSEHState::LastStoreState> el) -> bool {
-            if (el.second.StateValue == restoringState) {
-              return true;
-            }
-            return false;
-          });
-
-        EHState.SetMSTryState(restoringState);
-        if (ff != EHState.States.end() && ff->second.IsUsed) {
-          EHState.States.back().second.IsUsed = true;
-        }
-#if 0
-        bool wasDelete = false;
-        if (EHState.HasLastStoreInst()) {
-          EHState.DeleteLastStateStore();
-          wasDelete = true;
-        }
-
-        EHState.PrevLevelLastIdValues.pop_back();
-        
-        int restoringState = EHState.PrevLevelLastIdValues.back();
-        
-        if (!wasDelete) {
-          EHState.SetMSTryState(restoringState);
-        }
-#endif
+    if (IsMSABI && EHState.IsInited()) {
+      auto last = EHState.LastEntry.find(EHState.TryLevel);
+      
+      MsUnwindInfo *lastEntry = 0;
+      if (last != EHState.LastEntry.end()) {
+        lastEntry = &last->second;
       }
-    }
 
-    // If it was not ctor call then we must save 
-    // this store instruction in ll code.
-    // If it was ctor call then it was already done.
-    if ((!MD || 
-         (kind != Decl::CXXConstructor && kind != Decl::CXXDestructor)) &&
-        lastStore != EHState.States.rend()) {
-      lastStore->second.IsUsed = true;
+      Decl::Kind kind;
+      const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
+      
+      if (MD) {
+        kind = MD->getKind();
+        if (kind == Decl::CXXConstructor) {
+          llvm::BasicBlock *Cont = 
+            llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
+          Builder.CreateBr(Cont);
+          Builder.SetInsertPoint(Cont);
+
+          const CXXRecordDecl *parent = MD->getParent();
+          llvm::Value *dtor = 
+            CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
+          
+          size_t state = EHState.UnwindTable.size() - 1;
+          
+          SaveUnwindFuncletForLaterEmit(EHState.PrevLevelLastIdValues.back(),
+                                        Args[0], dtor);
+
+          EHState.SetMSTryState(state);
+          EHState.PrevLevelLastIdValues.push_back(state);
+
+          if (lastEntry) {
+            lastEntry->IsUsed = true;
+            EHState.LastEntry.erase(EHState.TryLevel);
+            lastEntry = 0;
+          }
+          EHState.LastEntry.insert(
+            std::pair<int, MsUnwindInfo&>(EHState.TryLevel,
+                                          EHState.UnwindTable.back()));
+        } else if (kind == Decl::CXXDestructor) {
+          EHState.PrevLevelLastIdValues.pop_back();
+          int restoringState = EHState.PrevLevelLastIdValues.back();
+          EHState.UnwindTable.push_back(restoringState);
+          EHState.SetMSTryState(restoringState);
+          EHState.UnwindTable.back().IsRestoreOperation = true;
+          lastEntry = 0;
+        }
+      }
+
+      // If it was not ctor call then we must save 
+      // this store instruction in ll code.
+      // If it was ctor call then it was already done.
+      last = EHState.LastEntry.find(EHState.TryLevel);
+      if (last != EHState.LastEntry.end() && lastEntry && 
+          last->second.Store == lastEntry->Store){
+        last->second.IsUsed = true;
+      }
+
     }
-#if 0
-    if (oldStore == EHState.GetLastStateStore()) {
-      EHState.ForgetStateStore();
-      EHState.States.back().second.IsUsed = true;
-    }
-#endif
   } else {
     llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
