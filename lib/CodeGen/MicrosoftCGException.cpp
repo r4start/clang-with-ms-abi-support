@@ -28,22 +28,23 @@ using namespace CodeGen;
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
     MSTryState = CGF.CreateTempAlloca(CGF.Int32Ty, "try.id");
-    CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, -1),
-                            MSTryState);
+    SetMSTryState(-1);
   }
 }
 
 // r4start
 void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
-  StateHolder.LastStore = 
+  UnwindTable.back().Store = 
     CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
                             MSTryState);
-  StateHolder.StateValue = State;
+  UnwindTable.back().StoreValue = State;
+  UnwindTable.back().StoreInstTryLevel = TryLevel;
+}
 
-  LastStoreState st;
-  st.LastStore = StateHolder.LastStore;
-  st.StateValue = StateHolder.StateValue;
-  States.push_back(std::make_pair(TryLevel, st));
+void 
+CodeGenFunction::MSEHState::SetTryStateForCatchHandler(uint32_t State) {
+  CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
+                          MSTryState);
 }
 
 // r4start
@@ -804,11 +805,59 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
 // r4start
 void CodeGenFunction::EmitEHInformation() {
-  for (auto &elem : EHState.States) {
-    if (!elem.second.IsUsed) {
-      elem.second.LastStore->eraseFromParent();
+  MSEHState::UnwindTableTy localTable;
+  for (auto &elem : EHState.UnwindTable) {
+    if (elem.IsUsed) {
+      localTable.push_back(elem);
+    } else if (elem.IsRestoreOperation) {
+      auto I = std::find_if(localTable.begin(), localTable.end(),
+        [&elem] (const MsUnwindInfo &info) -> bool {
+          if (info.StoreValue == elem.StoreValue &&
+              !info.IsRestoreOperation) {
+            return true;
+          }
+          return false;
+        });
+      if (I != localTable.end()) {
+        elem.IsUsed = true;
+        localTable.push_back(elem);
+      }
+    } else {
+      elem.Store->eraseFromParent();
+      elem.Store = 0;
+      elem.IsUsed = false;
     }
   }
+
+  MSEHState::UnwindTableTy::iterator Prev = localTable.begin();
+  int StateCounter = 0;
+  for (MSEHState::UnwindTableTy::iterator I = ++(localTable.begin()),
+       E = localTable.end(); I != E; ++I) {
+    if (I->StoreValue != StateCounter && !I->IsRestoreOperation) {
+      ;
+    }
+    Prev = I;
+  }
+#if 0
+  for (auto &elem : localTable) {
+    if (!elem.Store) {
+      continue;
+    }
+    if (elem.StoreValue != I && !elem.IsRestoreOperation) {
+      elem.StoreValue = I;
+      elem.Store->setOperand(0, llvm::ConstantInt::get(Int32Ty, I));
+    } else if (elem.StoreValue != I && elem.IsRestoreOperation) {
+      --I;
+      elem.StoreValue = I;
+      elem.Store->setOperand(0, llvm::ConstantInt::get(Int32Ty, I));
+      continue;
+    }
+    ++I;
+  }
+#endif
+  EHState.UnwindTable.clear();
+  EHState.UnwindTable.assign(localTable.begin(), localTable.end());
+
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
 
   llvm::Function *ehHandler = getEHHandler(*this);
@@ -919,8 +968,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
-    EHState.SetMSTryState(lastState);
-    
+    EHState.SetTryStateForCatchHandler(lastState);
+
     // TODO: right handling of return instruction
     Builder.CreateUnreachable();
 
@@ -947,11 +996,17 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   Builder.CreateBr(tryEnd);
   
   Builder.SetInsertPoint(tryEnd);
+  
+  auto last = EHState.LastEntry.find(EHState.TryLevel);
+  if (last != EHState.LastEntry.end()) {
+    EHState.LastEntry.erase(last);
+  }
 
-  EHState.SetMSTryState(lastState);
-  EHState.States.back().second.IsUsed = true;
-  EHState.UnwindTable.push_back(lastState);
   EHState.TryLevel--;
+  EHState.UnwindTable.push_back(lastState);
+  EHState.SetMSTryState(lastState);
+  EHState.UnwindTable.back().IsUsed = true;
+  EHState.UnwindTable.back().IsRestoreOperation = true;
 
   GenerateTryBlockTableEntry();
 
