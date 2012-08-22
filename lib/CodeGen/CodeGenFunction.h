@@ -1134,6 +1134,22 @@ private:
     bool IsRestoreOperation;
     llvm::StoreInst *Store;
     int StoreInstTryLevel;
+    int TopLevelTry;
+
+    typedef std::list< std::pair<llvm::StoreInst *, bool> > RestoreList;
+    RestoreList RestoreOps;
+
+    class StoreOpFinder {
+      int State;
+    public:
+      StoreOpFinder(int state) : State(state) {}
+      bool operator()(const CodeGenFunction::MsUnwindInfo &info) {
+        if (State == info.StoreValue) {
+          return true;
+        }
+      return false;
+      }
+    };
 
     MsUnwindInfo(int State) 
      : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
@@ -1142,44 +1158,29 @@ private:
 
     MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
                  int StoreVal = -2, bool Used = false, bool RestoreOp = false,
-                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1)
+                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
+                 int TopLevelTryNumber = -1)
      : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
        IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
-       StoreInstTryLevel(StoreTryLevel) {}
+       StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber) {}
   };
 
   /// r4start
   class MSEHState {
-  public:
-    
-    /// This struct holds info about last state store instruction.
-    /// If code under this instruction can not throw exception, 
-    /// then we does not need hold this instruction in byte code.
-    /// Also this help us to not generate unnecessary funclets.
-    struct LastStoreState {
-      llvm::StoreInst *LastStore;
-      int StateValue;
-      bool IsUsed;
-      bool IsRestoreOp;
-
-      LastStoreState() 
-       : LastStore(0), StateValue(-2), IsUsed(false), IsRestoreOp(false) {}
-    };
-
-  private:
-
     /// MS C++ EH specific.
     /// State of current try level.
     llvm::Value *MSTryState;
 
     CodeGenFunction &CGF;
 
-    LastStoreState StateHolder;
-
   public:
     /// Indicates that current try is nested.
     /// When TryLevel == 1 we must set try state to -1.
     int TryLevel;
+
+    /// This field tracks count of top level tries.
+    /// It is used for optimize unwind table.
+    int TopLevelTryNumber;
 
     /// This counter increments each time when we mangle some eh symbol.
     /// Also it passes to mangler.
@@ -1201,8 +1202,6 @@ private:
     /// This is need to restore id value state after exiting nested try.
     llvm::SmallVector<int, 4> PrevLevelLastIdValues;
 
-    std::list< std::pair<int, LastStoreState> > States;
-
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
 
@@ -1215,33 +1214,20 @@ private:
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), IsCurStateFree(true), LandingPad(0) {}
+     ESTypeList(0), IsCurStateFree(true), LandingPad(0), 
+     TopLevelTryNumber(0) {}
 
     void SetMSTryState(uint32_t State);
 
-    void SetTryStateForCatchHandler(uint32_t State);
+    void RestoreTryState(uint32_t State, 
+                         MsUnwindInfo &RestoringState,
+                         bool IsDtorRestore = false);
 
     void InitMSTryState();
 
-    void RememberStoreInst(llvm::StoreInst *Store, int StoreVal) {
-      assert(Store && "Store instruction must be not null!");
-      StateHolder.LastStore = Store;
-      StateHolder.StateValue = StoreVal;
-    }
-
-    void ForgetStateStore() {
-      StateHolder.LastStore = 0;
-    }
-
-    void DeleteLastStateStore();
-
-    const llvm::StoreInst *GetLastStateStore() const { 
-      return StateHolder.LastStore; 
-    }
+    void ShrinkUnwindTable();
 
     bool IsInited() const { return MSTryState != 0; }
-
-    bool HasLastStoreInst() const { return StateHolder.LastStore != 0; }
   };
 
   /// r4start

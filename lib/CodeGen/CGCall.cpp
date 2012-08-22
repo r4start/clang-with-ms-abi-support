@@ -2117,11 +2117,19 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
             std::pair<int, MsUnwindInfo&>(EHState.TryLevel,
                                           EHState.UnwindTable.back()));
         } else if (kind == Decl::CXXDestructor) {
+          int forState = EHState.PrevLevelLastIdValues.back();
           EHState.PrevLevelLastIdValues.pop_back();
-          int restoringState = EHState.PrevLevelLastIdValues.back();
-          EHState.UnwindTable.push_back(restoringState);
-          EHState.SetMSTryState(restoringState);
-          EHState.UnwindTable.back().IsRestoreOperation = true;
+          int state = EHState.PrevLevelLastIdValues.back();
+          MSEHState::UnwindTableTy::iterator restoringState = 
+            std::find_if(EHState.UnwindTable.begin(), EHState.UnwindTable.end(),
+                         MsUnwindInfo::StoreOpFinder(forState));
+          assert(restoringState != EHState.UnwindTable.end() &&
+                 "Can not find store state for restoring operation");
+          EHState.RestoreTryState(state, *restoringState, 
+                                  /*IsDtorRestore*/true);
+          //EHState.UnwindTable.push_back(restoringState);
+          //EHState.SetMSTryState(restoringState);
+          //EHState.UnwindTable.back().IsRestoreOperation = true;
           lastEntry = 0;
         }
       }
