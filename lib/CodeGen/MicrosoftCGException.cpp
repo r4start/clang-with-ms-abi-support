@@ -614,6 +614,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       MsUnwindInfo info(I->ToState);
       info.Store = restore.RestoreOp;
       info.StoreIndex = restore.Index;
+      info.IsRestoreOperation = true;
       unpackedUnwindTable.push_back(info);
     }
   }
