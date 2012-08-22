@@ -1125,6 +1125,19 @@ private:
   /// r4start
   /// This structer holds information about unwind table entry
   /// and associated with this entry store operation.
+  struct RestoreOpInfo {
+    enum RestoreOpKind {
+      Undef,
+      DtorRestore,
+      CatchRestore,
+      TryEndRestore
+    };
+
+    RestoreOpKind Kind;
+    llvm::StoreInst *RestoreOp;
+    int Index;
+  };
+
   struct MsUnwindInfo {
     int ToState;
     int StoreValue;
@@ -1135,8 +1148,9 @@ private:
     llvm::StoreInst *Store;
     int StoreInstTryLevel;
     int TopLevelTry;
+    int StoreIndex;
 
-    typedef std::list< std::pair<llvm::StoreInst *, bool> > RestoreList;
+    typedef std::list<RestoreOpInfo> RestoreList;
     RestoreList RestoreOps;
 
     class StoreOpFinder {
@@ -1159,10 +1173,11 @@ private:
     MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
                  int StoreVal = -2, bool Used = false, bool RestoreOp = false,
                  llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
-                 int TopLevelTryNumber = -1)
+                 int TopLevelTryNumber = -1, int Index = -1)
      : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
        IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
-       StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber) {}
+       StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber), 
+       StoreIndex(Index) {}
   };
 
   /// r4start
@@ -1182,13 +1197,11 @@ private:
     /// It is used for optimize unwind table.
     int TopLevelTryNumber;
 
+    int StoreIndex;
+
     /// This counter increments each time when we mangle some eh symbol.
     /// Also it passes to mangler.
     int EHManglingCounter;
-
-    /// If CurState free, then we can emit call
-    /// without incrementing CurState before call.
-    bool IsCurStateFree;
 
     /// Unwind table map.
     /// Holds funclets addresses.
@@ -1214,14 +1227,14 @@ private:
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), IsCurStateFree(true), LandingPad(0), 
+     ESTypeList(0), StoreIndex(0), LandingPad(0), 
      TopLevelTryNumber(0) {}
 
     void SetMSTryState(uint32_t State);
 
     void RestoreTryState(uint32_t State, 
                          MsUnwindInfo &RestoringState,
-                         bool IsDtorRestore = false);
+                     RestoreOpInfo::RestoreOpKind Kind = RestoreOpInfo::Undef);
 
     void InitMSTryState();
 

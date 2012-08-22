@@ -2126,10 +2126,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           assert(restoringState != EHState.UnwindTable.end() &&
                  "Can not find store state for restoring operation");
           EHState.RestoreTryState(state, *restoringState, 
-                                  /*IsDtorRestore*/true);
-          //EHState.UnwindTable.push_back(restoringState);
-          //EHState.SetMSTryState(restoringState);
-          //EHState.UnwindTable.back().IsRestoreOperation = true;
+                                  RestoreOpInfo::DtorRestore);
           lastEntry = 0;
         }
       }
