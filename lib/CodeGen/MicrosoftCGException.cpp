@@ -65,7 +65,7 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
     }
 
     I->Store->eraseFromParent();
-    auto last = localTable.back();
+    MsUnwindInfo &last = localTable.back();
     for (auto R = I->RestoreOps.begin(), E = I->RestoreOps.end();
          R != E; ++R) {
       
@@ -81,27 +81,6 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
     }
   }
   
-  int counter = 1;
-  auto prev = ++localTable.begin();
-  for (auto I = localTable.begin(), E = localTable.end();
-       I != E; ++I) {
-    if (I->StoreValue == 0 || I->StoreValue == -1) {
-      // Just skip this values.
-      continue;
-    }
-
-    if (I->StoreValue != counter) {
-      I->StoreValue = counter;
-      I->Store->setOperand(0, llvm::ConstantInt::get(CGF.Int32Ty, counter));
-      if (prev != E)
-        I->ToState = prev->StoreValue;
-    }
-
-    ++counter;
-    if (prev != E)
-      ++prev;
-  }
-
   UnwindTable.clear();
   UnwindTable.assign(localTable.begin(), localTable.end());
 }
