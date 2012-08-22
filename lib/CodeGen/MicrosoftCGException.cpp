@@ -40,15 +40,18 @@ void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
   UnwindTable.back().StoreValue = State;
   UnwindTable.back().StoreInstTryLevel = TryLevel;
   UnwindTable.back().TopLevelTry = TopLevelTryNumber;
+  UnwindTable.back().StoreIndex = StoreIndex++;
 }
 
 // r4start
 void CodeGenFunction::MSEHState::RestoreTryState(uint32_t State,
                                                  MsUnwindInfo &RestoringState,
-                                                 bool IsDtorRestore) {
+                                           RestoreOpInfo::RestoreOpKind Kind) {
   llvm::Constant *state = llvm::ConstantInt::get(CGF.Int32Ty, State);
-  RestoringState.RestoreOps.push_back(
-    std::make_pair(CGF.Builder.CreateStore(state, MSTryState), IsDtorRestore));
+  RestoreOpInfo info = { 
+    Kind, CGF.Builder.CreateStore(state, MSTryState), StoreIndex++
+  };
+  RestoringState.RestoreOps.push_back(info);
 }
 
 // r4start
@@ -66,18 +69,39 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
     for (auto R = I->RestoreOps.begin(), E = I->RestoreOps.end();
          R != E; ++R) {
       
-      if (R->second) {
+      if (R->Kind == RestoreOpInfo::DtorRestore) {
         // If it is destructor restore operation, then
         // we don`t want see it in result byte code.
-        (*R).first->eraseFromParent();
+        R->RestoreOp->eraseFromParent();
         continue;
       }
 
-      (*R).first->setOperand(0, last.Store->getOperand(0));
+      R->RestoreOp->setOperand(0, last.Store->getOperand(0));
       last.RestoreOps.push_back(*R);
     }
   }
   
+  int counter = 1;
+  auto prev = ++localTable.begin();
+  for (auto I = localTable.begin(), E = localTable.end();
+       I != E; ++I) {
+    if (I->StoreValue == 0 || I->StoreValue == -1) {
+      // Just skip this values.
+      continue;
+    }
+
+    if (I->StoreValue != counter) {
+      I->StoreValue = counter;
+      I->Store->setOperand(0, llvm::ConstantInt::get(CGF.Int32Ty, counter));
+      if (prev != E)
+        I->ToState = prev->StoreValue;
+    }
+
+    ++counter;
+    if (prev != E)
+      ++prev;
+  }
+
   UnwindTable.clear();
   UnwindTable.assign(localTable.begin(), localTable.end());
 }
@@ -596,6 +620,31 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(funcDecl && "Unwind table is generating only for functions!");
 
+  MSEHState::UnwindTableTy unpackedUnwindTable;
+  for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
+       I != E; ++I) {
+    if (I != EHState.UnwindTable.begin()) {
+      unpackedUnwindTable.push_back(*I);
+    }
+
+    for (auto restore : I->RestoreOps) {
+      if (restore.Kind == RestoreOpInfo::CatchRestore) {
+        continue;
+      }
+
+      MsUnwindInfo info(I->ToState);
+      info.Store = restore.RestoreOp;
+      info.StoreIndex = restore.Index;
+      unpackedUnwindTable.push_back(info);
+    }
+  }
+
+  auto lessCompare = [] (const MsUnwindInfo &LHS, 
+                         const MsUnwindInfo &RHS) -> bool {
+    return LHS.StoreIndex < RHS.StoreIndex;
+  };
+  unpackedUnwindTable.sort(lessCompare);
+
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
 
@@ -617,8 +666,10 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   llvm::BasicBlock *prevBlock = 0;
 
-  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
-       E = EHState.UnwindTable.end(); I != E; ++I) {
+  // We must skip first element, because it is initial state
+  // and it is not valuable for unwind table.
+  for (MSEHState::UnwindTableTy::iterator I = unpackedUnwindTable.begin(),
+       E = unpackedUnwindTable.end(); I != E; ++I) {
     if (!I->ReleaseFunc) {
       // creating unwind table entry
       fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
@@ -945,7 +996,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
-    EHState.RestoreTryState(lastState, *restoringState);
+    EHState.RestoreTryState(lastState, *restoringState, 
+                            RestoreOpInfo::CatchRestore);
 
     // TODO: right handling of return instruction
     Builder.CreateUnreachable();
@@ -981,7 +1033,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   EHState.TryLevel--;
   
-  EHState.RestoreTryState(lastState, *restoringState);
+  EHState.RestoreTryState(lastState, *restoringState, 
+                          RestoreOpInfo::TryEndRestore);
   //EHState.UnwindTable.push_back(lastState);
   //EHState.SetMSTryState(lastState);
   //EHState.UnwindTable.back().IsUsed = true;
