@@ -61,7 +61,7 @@ int main() {
 
 /////////  VFTables in s end
 
-// CHECK:      define linkonce_odr i32 @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ"(%struct.sd* %this) {
+// CHECK:      define linkonce_odr x86_thiscallcc i32 @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ"(%struct.sd* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %struct.sd*, align 4
 // CHECK-NEXT:   store %struct.sd* %this, %struct.sd** %this.addr, align 4
@@ -72,11 +72,11 @@ int main() {
 // CHECK-NEXT:   %vtordisp.offset = load i32* %vtordisp
 // CHECK-NEXT:   %vtordisp.this = getelementptr inbounds i8* %this.i8.ptr, i32 %vtordisp.offset
 // CHECK-NEXT:   %final.this = bitcast i8* %vtordisp.this to %struct.sd*
-// CHECK-NEXT:   %call = call i32 @"\01?asd@sd@@UAEHXZ"(%struct.sd* %final.this)
+// CHECK-NEXT:   %call = call x86_thiscallcc i32 @"\01?asd@sd@@UAEHXZ"(%struct.sd* %final.this)
 // CHECK-NEXT:   ret i32 %call
 // CHECK-NEXT: }
 
-// CHECK:      define linkonce_odr void @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ"(%class.ICh* %this) {
+// CHECK:      define linkonce_odr x86_thiscallcc void @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ"(%class.ICh* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.ICh*, align 4
 // CHECK-NEXT:   store %class.ICh* %this, %class.ICh** %this.addr, align 4
@@ -93,11 +93,11 @@ int main() {
 // CHECK-NEXT:   %this.plus.vb.offset = getelementptr i8* %vtordisp.this, i32 %vbase.offset
 // CHECK-NEXT:   %adjusted.this = getelementptr i8* %this.plus.vb.offset, i32 -12
 // CHECK-NEXT:   %final.this = bitcast i8* %adjusted.this to %class.ICh*
-// CHECK-NEXT:   call void @"\01?ia@ICh@@UAEXXZ"(%class.ICh* %final.this)
+// CHECK-NEXT:   call x86_thiscallcc void @"\01?ia@ICh@@UAEXXZ"(%class.ICh* %final.this)
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
 
-// CHECK:      define available_externally void @"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ"(%class.ICh* %this) {
+// CHECK:      define available_externally x86_thiscallcc void @"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ"(%class.ICh* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.ICh*, align 4
 // CHECK-NEXT:   store %class.ICh* %this, %class.ICh** %this.addr, align 4
@@ -108,11 +108,11 @@ int main() {
 // CHECK-NEXT:   %vtordisp.offset = load i32* %vtordisp
 // CHECK-NEXT:   %vtordisp.this = getelementptr inbounds i8* %this.i8.ptr, i32 %vtordisp.offset
 // CHECK-NEXT:   %final.this = bitcast i8* %vtordisp.this to %class.ICh*
-// CHECK-NEXT:   call void @"\01?ia@ICh@@UAEXXZ"(%class.ICh* %final.this)
+// CHECK-NEXT:   call x86_thiscallcc void @"\01?ia@ICh@@UAEXXZ"(%class.ICh* %final.this)
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
 
-// CHECK:      define linkonce_odr i32 @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ"(%struct.s* %this) {
+// CHECK:      define linkonce_odr x86_thiscallcc i32 @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ"(%struct.s* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %struct.s*, align 4
 // CHECK-NEXT:   store %struct.s* %this, %struct.s** %this.addr, align 4
@@ -123,6 +123,6 @@ int main() {
 // CHECK-NEXT:   %vtordisp.offset = load i32* %vtordisp
 // CHECK-NEXT:   %vtordisp.this = getelementptr inbounds i8* %this.i8.ptr, i32 %vtordisp.offset
 // CHECK-NEXT:   %final.this = bitcast i8* %vtordisp.this to %struct.s*
-// CHECK-NEXT:   %call = call i32 @"\01?asd@s@@UAEHXZ"(%struct.s* %final.this)
+// CHECK-NEXT:   %call = call x86_thiscallcc i32 @"\01?asd@s@@UAEHXZ"(%struct.s* %final.this)
 // CHECK-NEXT:   ret i32 %call
 // CHECK-NEXT: }

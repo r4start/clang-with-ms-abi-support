@@ -125,19 +125,19 @@ void MicrosoftCXXABI::BuildDestructorSignature(const CXXDestructorDecl *Ctor,
 void MicrosoftCXXABI::BuildInstanceFunctionParams(CodeGenFunction &CGF,
                                                   QualType &ResTy,
                                                   FunctionArgList &Params) {
-    BuildThisParam(CGF, Params);
-    if (NeedThisReturn(CGF.CurGD)) {
-      ResTy = Params[0]->getType();
-    }
+  BuildThisParam(CGF, Params);
+  if (NeedThisReturn(CGF.CurGD)) {
+    ResTy = Params[0]->getType();
+  }
 
-    const CXXMethodDecl *MD = cast<CXXMethodDecl>(CGF.CurGD.getDecl());
-    if (!MD->getParent()->getNumVBases() || !isa<CXXConstructorDecl>(MD))
-      return;
-    ImplicitParamDecl *FlagDecl
-      = ImplicitParamDecl::Create(CGM.getContext(), 0, MD->getLocation(),
-      &CGM.getContext().Idents.get("ctor.flag"),
-      CGM.getContext().Char32Ty);
-    Params.push_back(FlagDecl);
+  const CXXMethodDecl *MD = cast<CXXMethodDecl>(CGF.CurGD.getDecl());
+  if (!MD->getParent()->getNumVBases() || !isa<CXXConstructorDecl>(MD))
+    return;
+  ImplicitParamDecl *FlagDecl = 
+    ImplicitParamDecl::Create(CGM.getContext(), 0, MD->getLocation(),
+                              &CGM.getContext().Idents.get("ctor.flag"),
+                              CGM.getContext().Char32Ty);
+  Params.push_back(FlagDecl);
 }
 
 void MicrosoftCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
@@ -217,7 +217,7 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
 }
 
 void MicrosoftCXXABI::EmitVTables(const CXXRecordDecl *Class) {
-  // FIXME: implement
+  CGM.getVTables().GenerateClassData(CGM.getVTableLinkage(Class), Class);
 }
 
 CGCXXABI *clang::CodeGen::CreateMicrosoftCXXABI(CodeGenModule &CGM) {

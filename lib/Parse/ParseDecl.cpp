@@ -396,22 +396,13 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
   assert(Tok.is(tok::kw___declspec) && "Not a declspec!");
 
   ConsumeToken();
-  if (ExpectAndConsume(tok::l_paren, diag::err_expected_lparen_after,
-                       "declspec")) {
-    SkipUntil(tok::r_paren, true); // skip until ) or ;
   BalancedDelimiterTracker T(*this, tok::l_paren);
   if (T.expectAndConsume(diag::err_expected_lparen_after, "__declspec",
                          tok::r_paren))
     return;
-  }
-
-  while (Tok.getIdentifierInfo()) {
-    IdentifierInfo *AttrName = Tok.getIdentifierInfo();
-    SourceLocation AttrNameLoc = ConsumeToken();
   // DAEMON!!!
 #if 0
-  while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {
-      
+  while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {      
     IdentifierInfo *AttrName;
     SourceLocation AttrNameLoc;
     
@@ -434,7 +425,6 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
         }
         AttrName = PP.getIdentifierInfo(Str->getString());
         AttrNameLoc = Str->getLocStart();
-
     }
     else
     {
@@ -459,6 +449,7 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
       T.skipToEnd();
       return;
     }
+#if 0
     if (Tok.is(tok::l_paren)) {
       ConsumeParen();
       // FIXME: This doesn't parse __declspec(property(get=get_func_name))
@@ -469,7 +460,7 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
         attrs.addNew(AttrName, AttrNameLoc, 0, AttrNameLoc, 0,
                      SourceLocation(), &ExprList, 1,
                      AttributeList::AS_Declspec);
-
+#endif
     IdentifierInfo *AttrName;
     SourceLocation AttrNameLoc;
     if (IsString) {
@@ -480,13 +471,9 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
         T.skipToEnd();
         return;
       }
-      if (ExpectAndConsume(tok::r_paren, diag::err_expected_rparen))
-        SkipUntil(tok::r_paren, false);
       AttrName = PP.getIdentifierInfo(Str);
       AttrNameLoc = ConsumeStringToken();
     } else {
-      attrs.addNew(AttrName, AttrNameLoc, 0, AttrNameLoc,
-                   0, SourceLocation(), 0, 0, AttributeList::AS_Declspec);
       AttrName = Tok.getIdentifierInfo();
       AttrNameLoc = ConsumeToken();
     }
@@ -503,9 +490,6 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
     else
       ParseComplexMicrosoftDeclSpec(AttrName, AttrNameLoc, Attrs);
   }
-  if (ExpectAndConsume(tok::r_paren, diag::err_expected_rparen))
-    SkipUntil(tok::r_paren, false);
-  return;
   T.consumeClose();
 }
 

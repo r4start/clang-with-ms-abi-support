@@ -4845,9 +4845,10 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
             Attr.getName()->getName()));
     }
     // FIXME: Try to deal with other __declspec attributes!
-#endif
     return;
   }
+#endif
+    return;
 
   if (NonInheritable)
     ProcessNonInheritableDeclAttr(S, scope, D, Attr);
@@ -5072,7 +5073,6 @@ static void handleDelayedForbiddenType(Sema &S, DelayedDiagnostic &diag,
     << diag.getForbiddenTypeOperand() << diag.getForbiddenTypeArgument();
   diag.Triggered = true;
 }
-
 void Sema::PopParsingDeclaration(ParsingDeclState state, Decl *decl) {
   assert(DelayedDiagnostics.getCurrentPool());
   DelayedDiagnosticPool &poppedPool = *DelayedDiagnostics.getCurrentPool();
@@ -5188,6 +5188,7 @@ void Sema::EmitDeprecationWarning(NamedDecl *D, StringRef Message,
 }
 
 // DAEMON!
+#if 0
 RecordDecl* Sema::FindMsAttributeInVcAttrs(IdentifierInfo *II)
 {
     if (!MicrosoftVcAttributesNamespace)
@@ -5712,4 +5713,4 @@ void Sema::AddMsAttributeDefaultValues(RecordDecl* RD, ExprVector &ArgExprs)
 Sema::MicrosoftAttributeDescriptor::MicrosoftAttributeDescriptor(RecordDecl* Decl)
 {
 }
-
+#endif

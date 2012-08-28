@@ -2229,7 +2229,8 @@ public:
   StmtResult ProcessStmtAttributes(Stmt *Stmt, AttributeList *Attrs,
                                    SourceRange Range);
 
-
+  /// DAEMON
+#if 0
   class MicrosoftAttributeDescriptor
   {
   private:
@@ -2245,7 +2246,7 @@ public:
       IdentifierInfo *getAttrII() const { return AttrII; }
       bool CheckArgs(ExprVector& args);
   };
-
+#endif
   NamespaceDecl* MicrosoftVcAttributesNamespace;
   bool isPredefinedMsAttribute(RecordDecl* RD);
   bool isMsAttr(RecordDecl* RD);
@@ -2259,6 +2260,7 @@ public:
 
   typedef llvm::SmallVector< std::pair<UnqualifiedId, Expr*>, 8> NamedArgsMap;
   typedef llvm::DenseSet<NamedDecl*> UsedNamesMap;
+#if 0
   bool AddNamedAttributeArg(const UnqualifiedId& Id, 
                             RecordDecl* RD,
                             ExprVector &ArgExprs, 
@@ -2270,7 +2272,7 @@ public:
                             NamedArgsMap& NamedArgs,
                             ExprVector &ArgExprs);  
   void AddMsAttributeDefaultValues(RecordDecl* RD, ExprVector &ArgExprs);  
-
+#endif
   void WarnUndefinedMethod(SourceLocation ImpLoc, ObjCMethodDecl *method,
                            bool &IncompleteImpl, unsigned DiagID);
   void WarnConflictingTypedMethods(ObjCMethodDecl *Method,

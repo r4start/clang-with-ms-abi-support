@@ -340,9 +340,6 @@ public:
                                  const CXXRecordDecl *LayoutClass);
 
   const ThunkInfoVectorTy *getThunkInfo(const CXXMethodDecl *MD) {
-    // r4start
-    assert(Context.getTargetInfo().getCXXABI() != CXXABI_Microsoft &&
-           "getThunkInfo doesn`t work in MS ABI!");
     ComputeVTableRelatedInformation(MD->getParent());
 
     ThunksMapTy::const_iterator I = Thunks.find(MD);

@@ -28,7 +28,7 @@ int main() {
 
 // CHECK: @"\01??_7third@@6B@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6B@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@WPPPPPPPA@UAEXXZ" to i8*), i8* bitcast (void (%class.third*)* @"\01?g@third@@UAEXXZ" to i8*)]
 
-// CHECK:      define linkonce_odr void @"\01?asdf@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
+// CHECK:      define linkonce_odr x86_thiscallcc void @"\01?asdf@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.second*, align 4
 // CHECK-NEXT:   store %class.second* %this, %class.second** %this.addr, align 4
@@ -36,6 +36,6 @@ int main() {
 // CHECK-NEXT:   %this.i8.ptr = bitcast %class.second* %this1 to i8*
 // CHECK-NEXT:   %adjusted.this = getelementptr i8* %this.i8.ptr, i32 16
 // CHECK-NEXT:   %final.this = bitcast i8* %adjusted.this to %class.second*
-// CHECK-NEXT:   call void @"\01?asdf@second@@UAEXXZ"(%class.second* %final.this)
+// CHECK-NEXT:   call x86_thiscallcc void @"\01?asdf@second@@UAEXXZ"(%class.second* %final.this)
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }

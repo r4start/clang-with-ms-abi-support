@@ -201,7 +201,7 @@ private:
                 bool mustBeNull, Syntax syntaxUsed)
     : AttrName(attrName), ScopeName(scopeName), ParmName(argumentKindName),
       AttrRange(attrRange), ScopeLoc(scopeLoc), ParmLoc(argumentKindLoc),
-      NumArgs(0), SyntaxUsed(syntaxUsed), RD(NULL)
+      NumArgs(0), SyntaxUsed(syntaxUsed), RD(NULL),
       Invalid(false), UsedAsTypeAttr(false), IsAvailability(false),
       IsTypeTagForDatatype(true), NextInPosition(NULL), NextInPool(NULL) {
     TypeTagForDatatypeData &ExtraData = getTypeTagForDatatypeDataSlot();
@@ -238,7 +238,7 @@ public:
   /// declspec representing a type specification (like __w64 or __ptr32).
   bool isDeclspecAttribute() const { return SyntaxUsed == AS_Declspec ||
                                             SyntaxUsed == AS_MSTypespec; }
-  bool isMicrosoftAttribute() const { return RD != NULL; }
+  // DAEMON
   bool isMicrosoftAttribute() const { return RD != NULL; }
   bool isCXX0XAttribute() const { return SyntaxUsed == AS_CXX11; }
   bool isMSTypespecAttribute() const { return SyntaxUsed == AS_MSTypespec; }
