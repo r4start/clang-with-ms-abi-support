@@ -1388,6 +1388,11 @@ CodeGenModule::getVTableLinkage(const CXXRecordDecl *RD) {
                    llvm::GlobalVariable::LinkOnceODRLinkage :
                    llvm::Function::InternalLinkage;
         
+        // r4start
+        // FIXME: Add normal support in llvm!
+        if (getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
+          return llvm::GlobalVariable::WeakODRLinkage;
+        }
         return llvm::GlobalVariable::ExternalLinkage;
         
       case TSK_ImplicitInstantiation:

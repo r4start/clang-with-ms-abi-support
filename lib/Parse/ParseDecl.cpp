@@ -396,11 +396,18 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
   assert(Tok.is(tok::kw___declspec) && "Not a declspec!");
 
   ConsumeToken();
+  if (ExpectAndConsume(tok::l_paren, diag::err_expected_lparen_after,
+                       "declspec")) {
+    SkipUntil(tok::r_paren, true); // skip until ) or ;
   BalancedDelimiterTracker T(*this, tok::l_paren);
   if (T.expectAndConsume(diag::err_expected_lparen_after, "__declspec",
                          tok::r_paren))
     return;
+  }
 
+  while (Tok.getIdentifierInfo()) {
+    IdentifierInfo *AttrName = Tok.getIdentifierInfo();
+    SourceLocation AttrNameLoc = ConsumeToken();
   // DAEMON!!!
 #if 0
   while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {
@@ -452,6 +459,16 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
       T.skipToEnd();
       return;
     }
+    if (Tok.is(tok::l_paren)) {
+      ConsumeParen();
+      // FIXME: This doesn't parse __declspec(property(get=get_func_name))
+      // correctly.
+      ExprResult ArgExpr(ParseAssignmentExpression());
+      if (!ArgExpr.isInvalid()) {
+        Expr *ExprList = ArgExpr.take();
+        attrs.addNew(AttrName, AttrNameLoc, 0, AttrNameLoc, 0,
+                     SourceLocation(), &ExprList, 1,
+                     AttributeList::AS_Declspec);
 
     IdentifierInfo *AttrName;
     SourceLocation AttrNameLoc;
@@ -463,9 +480,13 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
         T.skipToEnd();
         return;
       }
+      if (ExpectAndConsume(tok::r_paren, diag::err_expected_rparen))
+        SkipUntil(tok::r_paren, false);
       AttrName = PP.getIdentifierInfo(Str);
       AttrNameLoc = ConsumeStringToken();
     } else {
+      attrs.addNew(AttrName, AttrNameLoc, 0, AttrNameLoc,
+                   0, SourceLocation(), 0, 0, AttributeList::AS_Declspec);
       AttrName = Tok.getIdentifierInfo();
       AttrNameLoc = ConsumeToken();
     }
@@ -482,6 +503,9 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
     else
       ParseComplexMicrosoftDeclSpec(AttrName, AttrNameLoc, Attrs);
   }
+  if (ExpectAndConsume(tok::r_paren, diag::err_expected_rparen))
+    SkipUntil(tok::r_paren, false);
+  return;
   T.consumeClose();
 }
 

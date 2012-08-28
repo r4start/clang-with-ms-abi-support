@@ -412,7 +412,7 @@ static void EmitBaseInitializer(CodeGenFunction &CGF,
                           AggValueSlot::DoesNotNeedGCBarriers,
                           AggValueSlot::IsNotAliased);
 
-  CGF.EmitAggExpr(BaseInit->getInit(), AggSlot, false);
+  CGF.EmitAggExpr(BaseInit->getInit(), AggSlot);
   
   if (CGF.CGM.getLangOpts().Exceptions && 
       !BaseClassDecl->hasTrivialDestructor())
@@ -781,45 +781,15 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
 
   const CXXRecordDecl *ClassDecl = CD->getParent();
   llvm::SmallPtrSet<CXXCtorInitializer *, 8> VisitedCtorInitializers;
+  bool isMSABI = 
+              CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
 
   // r4start
-  if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
-      ClassDecl->getNumVBases()) {
-    llvm::Constant *Zero = llvm::ConstantInt::get(CGM.Int32Ty, 0);
+  if (isMSABI && ClassDecl->getNumVBases()) {
     llvm::Value *FlagParam = 
       (++(CurFn->arg_begin()))->getValueName()->getValue();
-    llvm::Value *Condition = Builder.CreateICmpEQ(Zero, FlagParam, "spices");
-
-    llvm::BasicBlock *VBTableInit = 
-      llvm::BasicBlock::Create(CGM.getLLVMContext(), "vbtable.init", CurFn);
-    llvm::BasicBlock *VBTableSkipInit = 
-      llvm::BasicBlock::Create(CGM.getLLVMContext(), "skip.vbtable.init");
-
-    Builder.CreateCondBr(Condition, VBTableInit, VBTableSkipInit);
-
-    Builder.SetInsertPoint(VBTableInit);
-
-    MSInitializeVBTablePointers(ClassDecl);
-
-    // In MS ABI we must emit virtual base initializers before vf-table init.
-    for (CXXConstructorDecl::init_const_iterator M = CD->init_begin(),
-         E = CD->init_end(); M != E; ++M) {
-      CXXCtorInitializer *Member = *M;
-      
-      if (Member->isBaseInitializer()) {
-        CXXRecordDecl *BaseClass = 
-          Member->getBaseClass()->getAsCXXRecordDecl();
-        if (ClassDecl->isVirtuallyDerivedFrom(BaseClass)) {
-          VisitedCtorInitializers.insert(Member);
-          EmitBaseInitializer(*this, ClassDecl, Member, CtorType);
-        }
-      }
-    }
-
-    Builder.CreateBr(VBTableSkipInit);
-
-    CurFn->getBasicBlockList().push_back(VBTableSkipInit);
-    Builder.SetInsertPoint(VBTableSkipInit);
+    MSInsertVBtableInitializationBlock(ClassDecl, CD, CtorType,
+                                            VisitedCtorInitializers, FlagParam);
   }
 
   SmallVector<CXXCtorInitializer *, 8> MemberInitializers;
@@ -829,6 +799,11 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
        B != E; ++B) {
     CXXCtorInitializer *Member = (*B);
     
+    // r4start
+    // Skip all added initializers at vbtable.init section.
+    if (VisitedCtorInitializers.count(Member))
+      continue;
+
     if (Member->isBaseInitializer()) {
       EmitBaseInitializer(*this, ClassDecl, Member, CtorType);
     } else {
@@ -839,6 +814,11 @@ void CodeGenFunction::EmitCtorPrologue(const CXXConstructorDecl *CD,
   }
 
   InitializeVTablePointers(ClassDecl);
+
+  // Vtordisp fields initialization if needed.
+  if (isMSABI && ClassDecl->getNumVBases()) {
+    MSInitilizeVtordisps(ClassDecl);
+  }
 
   for (unsigned I = 0, E = MemberInitializers.size(); I != E; ++I)
     EmitMemberInitializer(*this, ClassDecl, MemberInitializers[I], CD, Args);
@@ -948,6 +928,22 @@ void CodeGenFunction::EmitDestructorBody(FunctionArgList &Args) {
     return;
   }
 
+  // r4start
+  // I do not know why Microsoft do such thing,
+  // but in dtor we have vftable init code.
+  const CXXRecordDecl *classDecl = Dtor->getParent();
+  bool isMSABI = 
+    CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
+
+  if (isMSABI) {
+    InitializeVTablePointers(classDecl);
+
+    // Vtordisp fields initialization if needed.
+    if (classDecl->getNumVBases()) {
+      MSInitilizeVtordisps(classDecl);
+    }
+  }
+
   Stmt *Body = Dtor->getBody();
 
   // If the body is a function-try-block, enter the try before
@@ -970,7 +966,7 @@ void CodeGenFunction::EmitDestructorBody(FunctionArgList &Args) {
     // Enter the cleanup scopes for virtual bases.
     EnterDtorCleanups(Dtor, Dtor_Complete);
 
-    if (!isTryBody && CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+    if (!isTryBody && !isMSABI) {
       EmitCXXDestructorCall(Dtor, Dtor_Base, /*ForVirtualBase=*/false,
                             LoadCXXThis());
       break;
@@ -1669,6 +1665,114 @@ void CodeGenFunction::InitializeVTablePointers(const CXXRecordDecl *RD) {
                            VTable, RD, VBases);
 }
 
+// r4start
+void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
+  assert(ClassDecl->getNumVBases() && 
+                                 "Vtordisps present only if class has vbases!");
+
+  const ASTRecordLayout &L = CGM.getContext().getASTRecordLayout(ClassDecl);
+  llvm::Type *Int32PtrTy = llvm::Type::getInt32PtrTy(CGM.getLLVMContext());
+
+  const ASTRecordLayout::VBaseOffsetsMapTy &vbasesOffsets = 
+                                                         L.getVBaseOffsetsMap();
+
+  CharUnits vbTableOffset = L.getVBPtrOffset();
+
+  VBTableContext& vbContext = CGM.getVBTableContext();
+
+  llvm::GlobalVariable *vbTable = 
+                        CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
+
+  for (CXXRecordDecl::base_class_const_iterator I = ClassDecl->vbases_begin(),
+       E = ClassDecl->vbases_end(); I != E; ++I) {
+
+    auto vbaseOffset = vbasesOffsets.find(I->getType()->getAsCXXRecordDecl());
+    assert(vbaseOffset != vbasesOffsets.end() && 
+                                           "VBase is not present in vb-table!");
+
+    if (!vbaseOffset->second.hasVtorDisp())
+      continue;
+
+    const VBTableContext::VBTableEntry vbEntry = 
+      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, vbaseOffset->first);
+
+    llvm::Value *thisPtr = LoadCXXThis();
+    thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
+
+    llvm::Value *vbTablePtr = 
+      Builder.CreateConstInBoundsGEP1_32(thisPtr, vbTableOffset.getQuantity(),
+                                          "vbtable.ptr");
+    vbTablePtr = Builder.CreateBitCast(vbTablePtr, Int32PtrTy,
+      "vbtable.i32.ptr");
+
+    llvm::Value *vbOffsetFromTable = 
+      Builder.CreateConstGEP1_32(vbTablePtr, vbEntry.index, 
+                                  "offset.from.table");
+
+    llvm::Value *vbOffset = 
+      Builder.CreateLoad(vbOffsetFromTable, "vb.offset");
+
+    llvm::Value *number = llvm::ConstantInt::get(CGM.Int32Ty, 
+      vbaseOffset->second.VBaseOffset.getQuantity());
+
+    llvm::Value *vtordispVal = 
+      Builder.CreateSub(vbOffset, number, "vtordisp.val");
+
+    // r4start
+    // In MS ABI
+    // mov dword ptr [ecx+eax-4],edx 
+    llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
+                             vbaseOffset->second.VBaseOffset.getQuantity() - 4);
+
+    vtordispPtr = Builder.CreateBitCast(vtordispPtr, Int32PtrTy);
+    Builder.CreateStore(vtordispVal, vtordispPtr);
+  }
+}
+
+// r4start
+void 
+CodeGenFunction::MSInsertVBtableInitializationBlock(const CXXRecordDecl *Class,
+                                                   const CXXConstructorDecl *CD,
+                                                   CXXCtorType Type,
+                llvm::SmallPtrSet<CXXCtorInitializer *, 8> &VisitedInitializers,
+                                                           llvm::Value *Flag) {
+  llvm::Constant *Zero = llvm::ConstantInt::get(CGM.Int32Ty, 0);
+  
+  llvm::Value *Condition = Builder.CreateICmpEQ(Zero, Flag, "ctor.flag.cmp");
+
+  llvm::BasicBlock *VBTableInit = 
+    llvm::BasicBlock::Create(CGM.getLLVMContext(), "vbtable.init", CurFn);
+  llvm::BasicBlock *VBTableSkipInit = 
+    llvm::BasicBlock::Create(CGM.getLLVMContext(), "skip.vbtable.init");
+
+  Builder.CreateCondBr(Condition, VBTableInit, VBTableSkipInit);
+
+  Builder.SetInsertPoint(VBTableInit);
+
+  MSInitializeVBTablePointers(Class);
+
+  // In MS ABI we must emit virtual base initializers before vf-table init.
+  for (CXXConstructorDecl::init_const_iterator M = CD->init_begin(),
+        E = CD->init_end(); M != E; ++M) {
+    CXXCtorInitializer *Member = *M;
+      
+    if (Member->isBaseInitializer()) {
+      CXXRecordDecl *BaseClass = 
+        Member->getBaseClass()->getAsCXXRecordDecl();
+      if (Class->isVirtuallyDerivedFrom(BaseClass)) {
+        VisitedInitializers.insert(Member);
+        EmitBaseInitializer(*this, Class, Member, Type);
+      }
+    }
+  }
+
+  Builder.CreateBr(VBTableSkipInit);
+
+  CurFn->getBasicBlockList().push_back(VBTableSkipInit);
+  Builder.SetInsertPoint(VBTableSkipInit);
+}
+
+// r4start
 void CodeGenFunction::MSInitializeVBTablePointer(llvm::Constant *VBTable,
                                                  CharUnits Offset) {
   llvm::Value *ThisPtr = LoadCXXThis();

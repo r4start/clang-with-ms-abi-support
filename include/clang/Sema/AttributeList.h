@@ -239,6 +239,7 @@ public:
   bool isDeclspecAttribute() const { return SyntaxUsed == AS_Declspec ||
                                             SyntaxUsed == AS_MSTypespec; }
   bool isMicrosoftAttribute() const { return RD != NULL; }
+  bool isMicrosoftAttribute() const { return RD != NULL; }
   bool isCXX0XAttribute() const { return SyntaxUsed == AS_CXX11; }
   bool isMSTypespecAttribute() const { return SyntaxUsed == AS_MSTypespec; }
 

@@ -26,11 +26,7 @@ int main() {
   return 0;
 }
 
-// FIXME: @"\01??_7third@@6B@@@"
-// FIXME: @"\01??_R4third@@6B@@@"
-// FIXME: @"\01?asdf@second@@WPPPPPPPA@AEXXZ"
-
-// CHECK: @"\01??_7third@@6Bfirst@@@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6Bfirst@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@WPPPPPPPA@UAEXXZ" to i8*), i8* bitcast (void (%class.third*)* @"\01?g@third@@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7third@@6B@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6B@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@WPPPPPPPA@UAEXXZ" to i8*), i8* bitcast (void (%class.third*)* @"\01?g@third@@UAEXXZ" to i8*)]
 
 // CHECK:      define linkonce_odr void @"\01?asdf@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
 // CHECK-NEXT: entry:

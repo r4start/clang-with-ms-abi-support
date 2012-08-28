@@ -4847,6 +4847,7 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     // FIXME: Try to deal with other __declspec attributes!
 #endif
     return;
+  }
 
   if (NonInheritable)
     ProcessNonInheritableDeclAttr(S, scope, D, Attr);
@@ -5184,6 +5185,182 @@ void Sema::EmitDeprecationWarning(NamedDecl *D, StringRef Message,
   if (isDeclDeprecated(cast<Decl>(getCurLexicalContext())))
     return;
   DoEmitDeprecationWarning(*this, D, Message, Loc, UnknownObjCClass);
+}
+
+// DAEMON!
+RecordDecl* Sema::FindMsAttributeInVcAttrs(IdentifierInfo *II)
+{
+    if (!MicrosoftVcAttributesNamespace)
+        return NULL;
+    for (DeclContext::lookup_result res = MicrosoftVcAttributesNamespace->lookup(II);
+        res.first != res.second; ++res.first)
+    {
+        NamedDecl* decl = (*res.first);
+        if (decl->isInIdentifierNamespace(Decl::IDNS_Tag))
+        {
+            return cast<RecordDecl>(decl);
+        }
+    }
+    return NULL;
+}
+
+static RecordDecl* getAsRecordDecl(ParsedType PT)
+{
+    if (!PT) return NULL;
+    const Type* T = PT.get().getTypePtr();
+    if (const RecordType *RT = T->getAs<RecordType>())
+        return dyn_cast<RecordDecl>(RT->getDecl());
+    return NULL;
+}
+
+bool Sema::isPredefinedMsAttribute(RecordDecl* RD)
+{
+    assert(RD && "Wrong RD argument!");
+    struct AttrDesc {
+        const char* Name;
+        RecordDecl* RD;
+    };
+    static AttrDesc Attrs[] = { 
+        { "attributeAttribute", NULL },
+        { "source_annotation_attributeAttribute", NULL},
+        { "default_valueAttribute", NULL},
+    };
+    static const char* nsNames[] = { 
+            "helper_attributes",
+            "__vc_attributes",
+            NULL
+    };
+    for (int i = 0; i != sizeof(Attrs)/sizeof(Attrs[0]); ++i) {
+        if (Attrs[i].RD == RD) return true;
+        if (RD->getNameAsString() == Attrs[i].Name) {
+            DeclContext* DC = RD->getDeclContext();
+            for (int j = 0; nsNames[j]; ++j)
+            {
+                if (!DC || !DC->isNamespace() || 
+                    (dyn_cast<NamespaceDecl>(DC)->getNameAsString() != nsNames[j]))
+                    return false;
+                DC = DC->getParent();
+            }
+            if (!DC || !DC->isTranslationUnit())
+                return false;
+            Attrs[i].RD = RD;
+            if (!MicrosoftVcAttributesNamespace)
+                MicrosoftVcAttributesNamespace = dyn_cast<NamespaceDecl>(RD->getDeclContext());
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Sema::isMsAttr(RecordDecl* RD)
+{
+    if (isPredefinedMsAttribute(RD))
+        return true;
+    if (!RD->hasAttrs())
+        return false;
+    return RD->hasAttr<MsAttributeAttributeAttr>() || 
+           RD->hasAttr<MsSourceAnnotationAttributeAttributeAttr>();
+}
+
+void Sema::WarnAmbiguousAttr(Sema& S, IdentifierInfo &II, SourceLocation NameLoc, RecordDecl** RD, size_t RDCount)
+{
+    S.Diag(NameLoc, diag::err_ms_attribute_ambigous_symbol) << II.getName();
+    bool first = true;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (RD[i] && isMsAttr(RD[i]))
+        {
+            if (first) {
+                S.Diag(RD[i]->getLocation(), diag::err_ms_attribute_ambigous_symbol_first_symbol) << RD[i];
+                first = false;
+            }
+            else 
+                S.Diag(RD[i]->getLocation(), diag::err_ms_attribute_ambigous_symbol_other_symbols) << RD[i];
+        }
+                    
+    }
+}
+
+static const StringRef MsAttributeSuffix("Attribute");
+
+IdentifierInfo* Sema::CorrectMsAttributeName(IdentifierInfo* II, RecordDecl* RD)
+{
+    StringRef rdName = RD->getName();
+    if (rdName.size() < MsAttributeSuffix.size())
+        return II;
+    if (rdName.endswith(MsAttributeSuffix))
+    {
+        StringRef rdNameNoSuffix = rdName.substr(0, rdName.size() - MsAttributeSuffix.size());
+        if (II->getName() == rdName)
+            return PP.getIdentifierInfo(rdNameNoSuffix);
+    }
+    return II;
+}
+
+RecordDecl* Sema::FindMsAttribute(
+                    IdentifierInfo* &II, SourceLocation NameLoc,
+                    Scope *S, CXXScopeSpec *SS)
+{
+    IdentifierInfo *ExtendedII = PP.getIdentifierInfo(II->getName().str() + MsAttributeSuffix.str());
+
+    RecordDecl* RD[4];
+    RD[0] = getAsRecordDecl(getTypeName(*II, NameLoc, S, SS, true));
+    RD[1] = getAsRecordDecl(getTypeName(*ExtendedII, NameLoc, S, SS, true));
+    if (!SS || SS->isEmpty())
+    {
+        RD[2] = FindMsAttributeInVcAttrs(II);
+        RD[3] = FindMsAttributeInVcAttrs(ExtendedII);
+    }
+    
+    RecordDecl* Found = NULL;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (RD[i] && Found != RD[i] && isMsAttr(RD[i])) {
+            if (Found) {
+                WarnAmbiguousAttr(*this, *II, NameLoc, RD, 4);
+                return NULL;
+            }            
+            Found = RD[i];
+        }
+    }
+    if (Found)
+        II = CorrectMsAttributeName(II, Found);
+    return Found;
+}
+
+static ExprResult ConvertStringLiteral(Sema& S, const StringLiteral& Literal, QualType CharType)
+{
+  QualType UCT = CharType.getUnqualifiedType();   
+  if ((Literal.getCharByteWidth() == 1) && (S.Context.getTypeSize(UCT) == 16)) 
+  {
+      StringRef String = Literal.getBytes();
+      unsigned int NumBytes = String.size();
+
+      // Otherwise, convert the UTF8 literals into a byte string.
+      SmallVector<UTF16, 128> ToBuf(NumBytes);
+      const UTF8 *FromPtr = (UTF8 *)String.data();
+      UTF16 *ToPtr = &ToBuf[0];
+
+      ConversionResult Res = ConvertUTF8toUTF16(&FromPtr, FromPtr + NumBytes,
+                                  &ToPtr, ToPtr + NumBytes,
+                                  strictConversion);
+      if (Res != conversionOK) {
+          // TODO! Make error report
+          return ExprResult();
+      }
+      size_t StrSize = (char*)ToPtr - (char*)&ToBuf[0];
+
+      QualType StrTy = S.Context.getConstantArrayType(CharType,
+                                                    llvm::APInt(32, Literal.getLength()),
+                                                    ArrayType::Normal, 0);
+      return S.Owned(StringLiteral::Create(S.Context, 
+          StringRef((char*)&ToBuf[0], StrSize),
+          (UCT->isWideCharType() ? StringLiteral::Wide : StringLiteral::UTF16), 
+          false, StrTy,
+          Literal.getLocStart()));
+  }
+  // TODO! Add another posible conversions
+  return ExprResult();
 }
 
 // DAEMON!

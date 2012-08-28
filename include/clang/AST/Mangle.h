@@ -92,6 +92,9 @@ public:
   virtual void mangleCXXVBTable(const CXXRecordDecl *,
                                 const CXXRecordDecl *,
                                 raw_ostream &) = 0;
+
+  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *,
+                                            raw_ostream &) = 0;
 };
 
 /// MangleContext - Context for tracking state which persists across multiple

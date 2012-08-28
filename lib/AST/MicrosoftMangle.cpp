@@ -56,7 +56,7 @@ public:
 
   void mangle(const NamedDecl *D, StringRef Prefix = "\01?");
   void mangleName(const NamedDecl *ND);
-  void mangleFunctionEncoding(const FunctionDecl *FD);
+  void mangleFunctionEncoding(const FunctionDecl *FD, bool IsThunk = false);
   void mangleVariableEncoding(const VarDecl *VD);
   void mangleNumber(int64_t Number);
   void mangleNumber(const llvm::APSInt &Value);
@@ -94,6 +94,10 @@ private:
                       const SmallVectorImpl<TemplateArgumentLoc> &TemplateArgs);
   void mangleObjCMethodName(const ObjCMethodDecl *MD);
   void mangleLocalName(const FunctionDecl *FD);
+
+  // r4start
+  void mangleBaseClassNameForVFTable(const CXXRecordDecl *RD,
+                                     const CXXRecordDecl *Base);
 
   void mangleTypeRepeated(QualType T, SourceRange Range);
 
@@ -186,6 +190,9 @@ public:
   virtual void mangleCXXVBTable(const CXXRecordDecl *RD,
                                 const CXXRecordDecl *BaseDecl,
                                 raw_ostream &);
+
+  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
+                                            raw_ostream &Out);
 };
 
 }
@@ -351,16 +358,113 @@ static bool IsClassHasOneVFTable(const ASTContext &Ctx,
 
   if (vftableCount) {
     Counter += vftableCount;
-    return false;
   }
 
-  return true;
+  return Counter == 1;
 }
 
 static bool IsClassHasOneVFTable(const ASTContext &Ctx, 
                                  const CXXRecordDecl *Class) {
   int vftableCount = 0;
   return IsClassHasOneVFTable(Ctx, Class, vftableCount);
+}
+
+static const CXXRecordDecl *ClassForVFTableName(const ASTContext &Ctx,
+                                                const CXXRecordDecl *Base,
+                                                CXXBasePath &Path) {
+  bool isPrimary = true;
+  for (auto I = Path.rbegin(), E = Path.rend(); I != E - 1; ++I) {
+    const ASTRecordLayout &L = Ctx.getASTRecordLayout(I->Class);
+    isPrimary = isPrimary && 
+                 L.getPrimaryBase() == I->Base->getType()->getAsCXXRecordDecl();
+  }
+
+  if (isPrimary) {
+    return Path.begin()->Base->getType()->getAsCXXRecordDecl();
+  }
+
+  return 0;
+}
+
+static bool IsClassHasVFunctionDecl(const CXXRecordDecl *Class) {
+  for (auto I = Class->method_begin(), E = Class->method_end();
+       I != E; ++I) {
+    if (I->isVirtual() && I->getKind() != Decl::CXXDestructor) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void 
+MicrosoftCXXNameMangler::mangleBaseClassNameForVFTable(const CXXRecordDecl *RD,
+                                                    const CXXRecordDecl *Base) {
+  assert(Base && "Base must not be zero!");
+
+  const DeclContext *dc = RD->getDeclContext();
+  if (RD == Base) {
+    if (dc->getDeclKind() != Decl::Namespace) {
+      Out << "@";
+      return;
+    }
+
+    int counter = 1;
+    while (dc) {
+      if (dc->getDeclKind() == Decl::Namespace) {
+        if (counter < 10) {
+          Out << counter;
+          counter++;
+        } else {
+          mangleUnqualifiedName(cast<NamedDecl>(dc));
+        }
+      }
+      dc = dc->getParent();
+    }
+
+    Out << "@";
+    return;
+  }
+
+  llvm::DenseMap<const DeclContext *, int> namespaces;
+
+  // Zero type in name is class name.
+  int counter = 1;
+  
+  while (dc) {
+    if (dc->getDeclKind() == Decl::Namespace) {
+      namespaces.insert(std::make_pair(dc, counter));
+      ++counter;
+    }
+    dc = dc->getParent();
+  }
+
+  // RD doesn`t have namespaces, so no back references are presented in name.
+  if (namespaces.empty()) {
+    mangleName(Base);
+    return;
+  }
+
+  mangleUnqualifiedName(Base);
+  
+  dc = Base->getDeclContext(); 
+  while (dc) {
+    if (dc->getDeclKind() == Decl::Namespace) {
+      auto nm = namespaces.find(dc);
+
+      if (nm != namespaces.end() && nm->second < 10) {
+        Out << nm->second;
+      } else {
+        // If namespace doesn`t present in RD namespaces 
+        // then we just mangle it`s name.
+        mangleUnqualifiedName(cast<NamedDecl>(dc));
+      }
+    }
+
+    dc = dc->getParent();
+  }
+
+  Out << "@";
 }
 
 void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
@@ -384,14 +488,57 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
                     const_cast<CXXRecordDecl *>(BaseClass->getCanonicalDecl()),
                       Paths);
 
-    if (!IsPrimaryBase(Context.getASTContext(), Paths.front()) &&
-        !IsClassHasOneVFTable(getASTContext(), RD)) {
-      mangleName(BaseClass);
+    bool isPrimary = IsPrimaryBase(Context.getASTContext(), Paths.front());
+    bool isClassHasOneVFTable = IsClassHasOneVFTable(getASTContext(), RD);
+    bool isClassDeclaresNewVFunc = ClassDeclaresNewVirtualFunction(RD);
+    
+    // When base class name with namespaces was magled,
+    // usage of back refernces is necessary.
+    if (!isPrimary) {
+      const CXXBaseSpecifier *base = Paths.front().begin()->Base;
+      
+      // if class not first in base list or it is abstract then _7class@6Bbase.
+      // If class has new v-function, then it has _7class@6B0, 
+      // so vf-table mangles like _7class@6Bbase.
+      if (base != RD->bases_begin() || BaseClass->isAbstract() || 
+          isClassDeclaresNewVFunc || Layout.getPrimaryBase()) {
+        if (auto CX = ClassForVFTableName(Context.getASTContext(),
+                                                    BaseClass, Paths.front())) {
+          mangleBaseClassNameForVFTable(RD, CX);
+        } else {
+          mangleBaseClassNameForVFTable(RD, BaseClass);
+        }
+      } else if ((base == RD->bases_begin() && 
+                  base->isVirtual()) && !IsClassHasVFunctionDecl(RD)) {
+        const CXXRecordDecl *baseClassDecl = 
+                                          base->getType()->getAsCXXRecordDecl();
+        if (baseClassDecl->bases_begin() == baseClassDecl->bases_end()) {
+          // This is interesting case.
+          // Vf-table for this class mangles like for primary base class.
+          // This case for ms-ctor-prologue.cpp.
+          Out << "@";
+          return;
+        }
+        // ms-thunk.cpp case.
+        // IsClassHasVFunctionDecl allow pass ms-thunk2.cpp test.
+        // Also need to investigate when use base-class name and when base.
+        mangleBaseClassNameForVFTable(RD, baseClassDecl);
+      }
+    } else if (!isClassDeclaresNewVFunc && !isClassHasOneVFTable) {
+      // This case very strange, but we have ms-thunk4.cpp.
+      // Why cl mangle primary base vf-table like normal base?
+      if (auto CX = ClassForVFTableName(Context.getASTContext(),
+                                        BaseClass, Paths.front())) {
+          mangleBaseClassNameForVFTable(RD, CX);
+      } else {
+        mangleBaseClassNameForVFTable(RD, BaseClass);
+      }
     }
-
   } else if (Layout.hasOwnVFPtr() && 
                                     IsVBasesHasVFTables(getASTContext(), RD)) {
-    Out << "0@";
+    // This is just back reference to class_name.
+    Out << "0";
+    mangleBaseClassNameForVFTable(RD, RD);
   }
 
   Out << "@";
@@ -407,7 +554,7 @@ void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
   
   // This is always reference?
   Out << "?A";
-  mangleType(RD->getASTContext().getRecordType(RD));
+  mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
   // End magic number
   Out << "@8";
 }
@@ -470,7 +617,8 @@ void MicrosoftCXXNameMangler::mangleCXXRTTIVBTable(
   Out << "@";
 }
 
-void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD) {
+void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD,
+                                                     bool IsThunk) {
   // <type-encoding> ::= <function-class> <function-type>
 
   // Don't mangle in the type if this isn't a decl we should typically mangle.
@@ -490,9 +638,10 @@ void MicrosoftCXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD) {
       InStructor = true;
   }
 
-  // First, the function class.
-  mangleFunctionClass(FD);
-
+  if (!IsThunk) {
+    // First, the function class.
+    mangleFunctionClass(FD);
+  }
   mangleType(FT, FD, InStructor, InInstMethod);
 }
 
@@ -1904,6 +2053,7 @@ void MicrosoftMangleContext::mangleThunk(const CXXMethodDecl *MD,
                      Layout.getVBaseOffsetsMap().end(),
                      CheckVtordisp());
 
+  bool isThunkVtordisp = false;
   if (I == Layout.getVBaseOffsetsMap().end()) {
     // Unknown prefix for number.
     Out << "W";
@@ -1915,15 +2065,29 @@ void MicrosoftMangleContext::mangleThunk(const CXXMethodDecl *MD,
       Out << "$R4";
     else
       Out << "$4";
-    Out << "-VTORDISP-";
     
-    if (Thunk.VFPtrOffset != uint32_t(-1))
+    if (Thunk.VFPtrOffset != uint32_t(-1)) {
       mangler.mangleNumber(Thunk.VFPtrOffset);
+    }
+    
+    if (Thunk.IsVtordispEx) {
+      mangler.mangleNumber((uint32_t)(-(Thunk.This.NonVirtual + 
+                                                Thunk.This.VCallOffsetOffset)));
+    }
     // When we have vtordisp thunk, number always is -4.
     mangler.mangleNumber(uint32_t(-4));
-  }
 
-  mangler.mangleFunctionEncoding(MD);
+    // I do not know why is this need, insted of mangle function type.
+    if (!Thunk.IsVtordispEx) {
+      Out << "A@";
+    } else {
+      Out << "M@";
+    }
+
+    isThunkVtordisp = true;
+  }
+  
+  mangler.mangleFunctionEncoding(MD, isThunkVtordisp);
 }
 void MicrosoftMangleContext::mangleCXXDtorThunk(const CXXDestructorDecl *DD,
                                                 CXXDtorType Type,
@@ -1966,7 +2130,7 @@ MicrosoftMangleContext::mangleCXXRTTITypeDescriptor(const CXXRecordDecl *RD,
 void MicrosoftMangleContext::mangleCXXRTTIName(QualType T,
                                                raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangleType(T);
+  mangler.mangleType(T, SourceRange());
 }
 
 MSMangleContextExtensions* MicrosoftMangleContext::getMsExtensions() {
@@ -2061,6 +2225,16 @@ void MicrosoftMangleContext::mangleReferenceTemporary(const clang::VarDecl *VD,
   unsigned DiagID = getDiags().getCustomDiagID(DiagnosticsEngine::Error,
     "cannot mangle this reference temporary yet");
   getDiags().Report(VD->getLocation(), DiagID);
+}
+
+void 
+MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
+                                                     raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+
+  // Prefix for spare.
+  Out << ".?A";
+  mangler.mangleType(getASTContext().getRecordType(RD), SourceRange());
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
