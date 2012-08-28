@@ -27,7 +27,7 @@ void test() { s ss; }
 
 // CHECK: @"\01??_8s@test1@@7B@" = unnamed_addr constant [2 x i32] [i32 0, i32 8]
 
-// CHECK: define linkonce_odr %"struct.test1::s"* @"\01??0s@test1@@QAE@XZ"(%"struct.test1::s"* %this, i32 zeroext %ctor.flag)
+// CHECK: define linkonce_odr x86_thiscallcc %"struct.test1::s"* @"\01??0s@test1@@QAE@XZ"(%"struct.test1::s"* %this, i32 zeroext %ctor.flag)
 
 // CHECK:        %vtordisp.this = bitcast %"struct.test1::s"* %this1 to i8*
 // CHECK-NEXT:   %vbtable.ptr = getelementptr inbounds i8* %vtordisp.this, i32 0
@@ -59,7 +59,7 @@ void test2() { s ss; }
 
 }
 
-// CHECK: define linkonce_odr %"struct.test2::s"* @"\01??0s@test2@@QAE@XZ"(%"struct.test2::s"* %this, i32 zeroext %ctor.flag)
+// CHECK: define linkonce_odr x86_thiscallcc %"struct.test2::s"* @"\01??0s@test2@@QAE@XZ"(%"struct.test2::s"* %this, i32 zeroext %ctor.flag)
 
 // CHECK:        %vtordisp.this = bitcast %"struct.test2::s"* %this1 to i8*
 // CHECK-NEXT:   %vbtable.ptr = getelementptr inbounds i8* %vtordisp.this, i32 0

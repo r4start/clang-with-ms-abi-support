@@ -3261,9 +3261,10 @@ SourceLocation Parser::ParseMicrosoftAttributeArgs(Sema::NamedArgsMap& NamedArgs
     return SourceLocation();
 }
 
+/// DAEMON
 /// Parse the arguments to a parameterized Microsoft attribute
 SourceLocation Parser::MaybeParseMicrosoftAttributeArgs(ExprVector &ArgExprs, RecordDecl* RD) {
-  
+#if 0
   // Change attr DeclContext to CurContext to make id resolver work like MS
   // We must resolve id's in attr RecordDecl, and after that in current context, 
   // it's parent and so on...
@@ -3290,12 +3291,16 @@ SourceLocation Parser::MaybeParseMicrosoftAttributeArgs(ExprVector &ArgExprs, Re
   Actions.ActOnFinishDelayedMemberDeclarations(getCurScope(), RD);
   RD->setDeclContext(AttrDeclContext);
   return argsEnd;
+#else
+  return SourceLocation();
+#endif
 }
 
 //DAEMON!!!
 void Parser::ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
                                               SourceLocation *endLoc)
 {
+#if 0
   assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
 
   //Diag(Tok.getLocation(), diag::warn_cxx98_compat_attribute);
@@ -3377,6 +3382,7 @@ void Parser::ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
     *endLoc = Tok.getLocation();
   if (ExpectAndConsume(tok::r_square, diag::err_expected_rsquare))
     SkipUntil(tok::r_square, false);
+#endif
 }
 
 

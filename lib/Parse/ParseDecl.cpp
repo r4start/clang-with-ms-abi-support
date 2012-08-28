@@ -407,11 +407,9 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
   if (T.expectAndConsume(diag::err_expected_lparen_after, "__declspec",
                          tok::r_paren))
     return;
-
   // DAEMON!!!
 #if 0
-  while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {
-      
+  while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {      
     IdentifierInfo *AttrName;
     SourceLocation AttrNameLoc;
     
@@ -434,7 +432,6 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
         }
         AttrName = PP.getIdentifierInfo(Str->getString());
         AttrNameLoc = Str->getLocStart();
-
     }
     else
     {
@@ -459,7 +456,19 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
       T.skipToEnd();
       return;
     }
+#if 0
+    if (Tok.is(tok::l_paren)) {
+      ConsumeParen();
+      // FIXME: This doesn't parse __declspec(property(get=get_func_name))
+      // correctly.
+      ExprResult ArgExpr(ParseAssignmentExpression());
+      if (!ArgExpr.isInvalid()) {
+        Expr *ExprList = ArgExpr.take();
+        attrs.addNew(AttrName, AttrNameLoc, 0, AttrNameLoc, 0,
+                     SourceLocation(), &ExprList, 1,
+                     AttributeList::AS_Declspec);
 
+#endif
     IdentifierInfo *AttrName;
     SourceLocation AttrNameLoc;
     if (IsString) {

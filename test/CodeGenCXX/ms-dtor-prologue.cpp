@@ -37,7 +37,7 @@ namespace test1 {
   }
 }
 
-// CHECK:      define linkonce_odr void @"\01??1sd@test1@@QAE@XZ"(%"struct.test1::sd"* %this) unnamed_addr nounwind align 2 {
+// CHECK:      define linkonce_odr x86_thiscallcc void @"\01??1sd@test1@@QAE@XZ"(%"struct.test1::sd"* %this) unnamed_addr nounwind align 2 {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %"struct.test1::sd"*, align 4
 // CHECK-NEXT:   store %"struct.test1::sd"* %this, %"struct.test1::sd"** %this.addr, align 4

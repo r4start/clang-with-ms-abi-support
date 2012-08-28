@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 /// r4start
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/VBTableBuilder.h"
 
 using namespace clang;

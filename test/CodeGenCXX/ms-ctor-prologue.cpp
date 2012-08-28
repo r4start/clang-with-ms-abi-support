@@ -38,7 +38,7 @@ void test() { B b; }
 
 // CHECK: @"\01??_7A@test1@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4A@test1@@6B@" to i8*), i8* bitcast (void (%"struct.test1::A"*)* @"\01?foo@A@test1@@UAEXXZ" to i8*)]
 
-// CHECK:      define linkonce_odr %"struct.test1::A"* @"\01??0A@test1@@QAE@XZ"(%"struct.test1::A"* %this) unnamed_addr nounwind inlinehint align 2 {
+// CHECK:      define linkonce_odr x86_thiscallcc %"struct.test1::A"* @"\01??0A@test1@@QAE@XZ"(%"struct.test1::A"* %this) unnamed_addr nounwind inlinehint align 2 {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %"struct.test1::A"*, align 4
 // CHECK-NEXT:   store %"struct.test1::A"* %this, %"struct.test1::A"** %this.addr, align 4
@@ -50,7 +50,7 @@ void test() { B b; }
 // CHECK-NEXT:   ret %"struct.test1::A"* %this1
 // CHECK-NEXT: }
 
-// CHECK: define linkonce_odr %"struct.test2::B"* @"\01??0B@test2@@QAE@XZ"(%"struct.test2::B"* %this, i32 zeroext %ctor.flag) unnamed_addr nounwind inlinehint align 2 {
+// CHECK: define linkonce_odr x86_thiscallcc %"struct.test2::B"* @"\01??0B@test2@@QAE@XZ"(%"struct.test2::B"* %this, i32 zeroext %ctor.flag) unnamed_addr nounwind inlinehint align 2 {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %retval = alloca %"struct.test2::B"*, align 4
 // CHECK-NEXT:   %this.addr = alloca %"struct.test2::B"*, align 4
@@ -69,7 +69,7 @@ void test() { B b; }
 // CHECK-NEXT:   %1 = bitcast %"struct.test2::B"* %this1 to i8*
 // CHECK-NEXT:   %2 = getelementptr inbounds i8* %1, i64 4
 // CHECK-NEXT:   %3 = bitcast i8* %2 to %"struct.test2::A"*
-// CHECK-NEXT:   %call = call %"struct.test2::A"* @"\01??0A@test2@@QAE@XZ"(%"struct.test2::A"* %3) nounwind
+// CHECK-NEXT:   %call = call x86_thiscallcc %"struct.test2::A"* @"\01??0A@test2@@QAE@XZ"(%"struct.test2::A"* %3) nounwind
 // CHECK-NEXT:   br label %skip.vbtable.init 
 // CHECK: skip.vbtable.init:                                ; preds = %vbtable.init, %entry
 // CHECK-NEXT:   %4 = bitcast %"struct.test2::B"* %this1 to i8*
