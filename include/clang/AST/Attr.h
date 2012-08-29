@@ -119,7 +119,8 @@ public:
     return A->getKind() <= attr::LAST_INHERITABLE_PARAM;
   }
 };
-
+// DAEMON
+#if 0
 class MsSAAttr : public InheritableParamAttr {
 protected:
   MsSAAttr(attr::Kind AK, SourceRange R)
@@ -134,7 +135,7 @@ public:
   }
   static bool classof(const MsSAAttr *) { return true; }
 };
-
+#endif
 #include "clang/AST/Attrs.inc"
 
 public:

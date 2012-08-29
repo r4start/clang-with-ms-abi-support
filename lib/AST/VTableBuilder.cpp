@@ -1418,7 +1418,7 @@ VTableBuilder::MSComputeThisAdjustmentForThunk(const CXXMethodDecl *MD,
   const ASTRecordLayout::VBaseOffsetsMapTy 
     &VBases = Layout.getVBaseOffsetsMap();
 
-  auto vi = VBases.find(Base);
+  ASTRecordLayout::VBaseOffsetsMapTy::const_iterator vi = VBases.find(Base);
   if ((Base == RD || LayoutClass == RD) &&
       vi != VBases.end() && vi->second.hasVtorDisp() ||
       Base == RDLayout.getPrimaryBase()) {
@@ -1768,7 +1768,8 @@ static void ReplaceOverridden(const CXXMethodDecl *MD,
     
     if (OverMD->getParent() == Base ||
         Base->isDerivedFrom(OverMD->getParent())) {
-      auto I = std::find(Methods.begin(), Methods.end(), OverMD);
+      llvm::SmallVector<const CXXMethodDecl *, 8>::iterator I = 
+        std::find(Methods.begin(), Methods.end(), OverMD);
 
       assert(I != Methods.end() && 
              "Can not find overloaded method in vftable!");
@@ -1780,7 +1781,8 @@ static void ReplaceOverridden(const CXXMethodDecl *MD,
 
         Methods.erase(std::find(Methods.begin(), Methods.end(), OverMD));
 
-        auto iter = std::find(Methods.begin(), Methods.end(), Parent);
+        llvm::SmallVector<const CXXMethodDecl *, 8>::iterator iter = 
+          std::find(Methods.begin(), Methods.end(), Parent);
         if (iter != Methods.end()) {
           Methods.erase(iter);
         }
@@ -1799,10 +1801,13 @@ static void ReplaceOverridden(const CXXMethodDecl *MD,
 
 static void ReplaceOverriddenDestructor(const CXXMethodDecl *MD,
                          llvm::SmallVector<const CXXMethodDecl *, 8> &VFTable) {
-  auto I = std::find_if(VFTable.begin(), VFTable.end(),
-          [](const CXXMethodDecl *MD) -> bool {
-            return isa<CXXDestructorDecl>(MD);
-        });
+  struct IsDtorDecl {
+    bool operator() (const CXXMethodDecl *MD) {
+      return isa<CXXDestructorDecl>(MD);
+    }
+  };
+  const CXXMethodDecl **I = 
+    std::find_if(VFTable.begin(), VFTable.end(), IsDtorDecl());
 
   if (I == VFTable.end()) {
     return;
@@ -1841,7 +1846,7 @@ bool VTableBuilder::IsThunkRequire(const CXXMethodDecl *Overridden,
     &VBases = Layout.getVBaseOffsetsMap();
   
   const CXXRecordDecl *base = Overridden->getParent();
-  auto vi = VBases.find(base);
+  ASTRecordLayout::VBaseOffsetsMapTy::const_iterator vi = VBases.find(base);
   if (vi != VBases.end() && vi->second.hasVtorDisp()) {
     return true;
   }
@@ -1975,7 +1980,7 @@ void VTableBuilder::GenerateVFTable(OverriddersMapTy &OverriddersMap,
   /*CXXBasePathElement *PathPoint = 
     std::find_if(Path.begin(), Path.end(), FindVBaseInfo(Context, LayoutClass));*/
 
-  for (auto I = VFTable.begin(), E = VFTable.end();
+  for (VFTableTy::iterator I = VFTable.begin(), E = VFTable.end();
        I != E; ++I, ++idx) {
     if (OverriddersMap.count(*I)) {
       OverriddersMapTy::iterator Elem = OverriddersMap.find(*I);
@@ -1995,7 +2000,8 @@ void VTableBuilder::GenerateVFTable(OverriddersMapTy &OverriddersMap,
         Info.IsVtordispEx = IsVtordispEx(Elem->second, Elem->first);
 
         const CXXRecordDecl *base = Elem->second->getParent();
-        auto vi = VBases.find(base);
+        ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
+          vi = VBases.find(base);
 
         if (vi->second.hasVtorDisp() && vi != VBases.end()) {
           Info.This.VCallOffsetOffset = -4;
