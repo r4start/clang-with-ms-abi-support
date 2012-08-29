@@ -1071,14 +1071,6 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   if (getLangOpts().MicrosoftExt)
       attrs.takeAllFrom(DS.getAttributes());
 #endif
-
-  // DAEMON!
-  // By standart syntax "[attr] struct A { int a };" will apply attr
-  // on definition of struct (after semicolon), but Microsoft
-  // applies such attributes to on declaration (after "struct A")
-  if (getLangOpts().MicrosoftExt)
-      attrs.takeAllFrom(DS.getAttributes());
-
   // If attributes exist after tag, parse them.
   if (Tok.is(tok::kw___attribute))
     ParseGNUAttributes(attrs);
@@ -3018,8 +3010,8 @@ void Parser::ParseCXX11Attributes(ParsedAttributesWithRange &attrs,
 /// Parse the arguments to a parameterized Microsoft attribute
 SourceLocation Parser::ParseMicrosoftAttributeArgs(Sema::NamedArgsMap& NamedArgs, 
                                                    ExprVector& UnnamedArgs, 
-                                                   RecordDecl* RD) 
-{
+                                                   RecordDecl* RD) {
+#if 0
     assert(Tok.is(tok::l_paren));  
     SourceLocation LParen = ConsumeParen(); // ignore the left paren loc for now
 
@@ -3078,6 +3070,7 @@ SourceLocation Parser::ParseMicrosoftAttributeArgs(Sema::NamedArgsMap& NamedArgs
     if (!ExpectAndConsume(tok::r_paren, diag::err_expected_rparen)) {
         return RParen;
     }
+#endif
     return SourceLocation();
 }
 
@@ -3217,7 +3210,6 @@ void Parser::ParseMicrosoftAttributeSpecifier(ParsedAttributes &attrs,
 void Parser::ParseMicrosoftAttributes(ParsedAttributes &attrs,
                                       SourceLocation *endLoc) {
   assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
-
   //assert(Tok.is(tok::l_square) && "Not a Microsoft attribute list");
 
   while (Tok.is(tok::l_square)) {

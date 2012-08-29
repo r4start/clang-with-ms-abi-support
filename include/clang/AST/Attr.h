@@ -141,7 +141,8 @@ public:
   }
   static bool classof(const InheritableParamAttr *) { return true; }
 };
-
+// DAEMON
+#if 0
 class MsSAAttr : public InheritableParamAttr {
 protected:
   MsSAAttr(attr::Kind AK, SourceRange R)
@@ -156,7 +157,7 @@ public:
   }
   static bool classof(const MsSAAttr *) { return true; }
 };
-
+#endif
 #include "clang/AST/Attrs.inc"
 
 /// AttrVec - A vector of Attr, which is how they are stored on the AST.

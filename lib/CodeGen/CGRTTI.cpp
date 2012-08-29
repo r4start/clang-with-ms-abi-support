@@ -1194,8 +1194,7 @@ RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD)
 }
 
 // r4start
-llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty)
-{
+llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   SmallString<256> Name;
   llvm::raw_svector_ostream Out(Name);
   const CXXRecordDecl* RD = Ty->getAsCXXRecordDecl();
@@ -1311,7 +1310,9 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   // Complete Object Locator name
   llvm::StringRef COLName = OutName.str();
   
-  CurLinkage = getTypeInfoLinkage(CGM, Ty);
+  //CurLinkage = getTypeInfoLinkage(CGM, Ty);
+  // This linkage same to Microsoft.
+  CurLinkage = llvm::GlobalValue::ExternalLinkage;
 
   llvm::Type* Int32Ty = 
     llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());

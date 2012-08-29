@@ -180,7 +180,8 @@ typedef llvm::SmallSet<const CXXRecordDecl *, 8> ClassesContainerTy;
 
 static void TraverseBases(ASTContext &Ctx, const CXXRecordDecl *Class,
                           ClassesContainerTy &DefferredClasses) {
-  for (auto I = Class->bases_begin(), E = Class->bases_end(); I != E; ++I) {
+  for (CXXRecordDecl::base_class_const_iterator I = Class->bases_begin(),
+       E = Class->bases_end(); I != E; ++I) {
     const CXXRecordDecl *BaseDecl = I->getType()->getAsCXXRecordDecl();
     const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(BaseDecl);
     if (Layout.getVBPtrOffset() != CharUnits::fromQuantity(-1))
@@ -201,7 +202,7 @@ void VBTableContext::ComputeVBTables(const CXXRecordDecl *RD) {
   ClassesContainerTy ClassWithVBTables;
   TraverseBases(RD->getASTContext(), RD, ClassWithVBTables);
 
-  for (auto I = ClassWithVBTables.begin(), 
+  for (ClassesContainerTy::iterator I = ClassWithVBTables.begin(), 
        E = ClassWithVBTables.end(); I != E; ++I) {
     const CXXRecordDecl *Class = *I;
 

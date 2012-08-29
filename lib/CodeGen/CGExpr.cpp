@@ -2444,7 +2444,7 @@ LValue CodeGenFunction::EmitCastLValue(const CastExpr *E) {
   case CK_ARCReclaimReturnedObject:
   case CK_ARCExtendBlockObject: 
   case CK_CopyAndAutoreleaseBlockObject: {
-#if 1
+#if 0
     //DAEMON!!!
     if (getContext().getLangOpts().MicrosoftMode)
     {

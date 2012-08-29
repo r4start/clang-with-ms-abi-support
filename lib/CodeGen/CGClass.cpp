@@ -1686,7 +1686,8 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
   for (CXXRecordDecl::base_class_const_iterator I = ClassDecl->vbases_begin(),
        E = ClassDecl->vbases_end(); I != E; ++I) {
 
-    auto vbaseOffset = vbasesOffsets.find(I->getType()->getAsCXXRecordDecl());
+    ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
+      vbaseOffset = vbasesOffsets.find(I->getType()->getAsCXXRecordDecl());
     assert(vbaseOffset != vbasesOffsets.end() && 
                                            "VBase is not present in vb-table!");
 
@@ -1800,8 +1801,9 @@ void CodeGenFunction::MSInitializeVBTablePointers(const CXXRecordDecl *Class) {
     return;
   
   VBTableContext& Context = CGM.getVBTableContext();
-  auto VBTables = Context.getVBTables(Class);
-  for (auto I = VBTables.begin(), E = VBTables.end(); I != E; ++I) {
+  const VBTableContext::VBTableTy VBTables = Context.getVBTables(Class);
+  for (VBTableContext::VBTableTy::const_iterator I = VBTables.begin(),
+       E = VBTables.end(); I != E; ++I) {
     llvm::GlobalVariable *VBTable = 
       CGM.getVTables().GetAddrOfVBTable(Class, I->first);
 

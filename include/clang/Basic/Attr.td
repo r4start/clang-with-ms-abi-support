@@ -671,78 +671,79 @@ def VecTypeHint : Attr {
   let Ignored = 1;
 }
 
-def MsAttributeAttribute : InheritableAttr {
-  let Spellings = [Declspec<"attribute">];
-  let Args = [IntArgument<"ValidOn">,
-			  BoolArgument<"AllowMultiple">];
-}
+// DAEMON
+//def MsAttributeAttribute : InheritableAttr {
+//  let Spellings = [Declspec<"attribute">];
+//  let Args = [IntArgument<"ValidOn">,
+//			  BoolArgument<"AllowMultiple">];
+//}
 
-def MsSourceAnnotationAttributeAttribute : InheritableAttr {
-  let Spellings = [Declspec<"source_annotation_attribute">];
-  let Args = [IntArgument<"ValidOn">,
-			  BoolArgument<"AllowMultiple">];
-}
+//def MsSourceAnnotationAttributeAttribute : InheritableAttr {
+//  let Spellings = [Declspec<"source_annotation_attribute">];
+//  let Args = [IntArgument<"ValidOn">,
+//			  BoolArgument<"AllowMultiple">];
+//}
 
-def MsDefaultValueAttribute : InheritableAttr {
-  let Spellings = [Declspec<"default_value">];
-  let Args = [ExprArgument<"Value">];
-}
+//def MsDefaultValueAttribute : InheritableAttr {
+//  let Spellings = [Declspec<"default_value">];
+//  let Args = [ExprArgument<"Value">];
+//}
 
 /// An inheritable attribute is inherited by later redeclarations.
-class MsSAAttr : InheritableAttr;
+//class MsSAAttr : InheritableAttr;
 
-def MsSAPre : MsSAAttr {
-  let Spellings = [];
-  let Args = [VariadicExprArgument<"Args">];
-}
+//def MsSAPre : MsSAAttr {
+//  let Spellings = [];
+// let Args = [VariadicExprArgument<"Args">];
+//}
 
-def MsSAPost : MsSAAttr {
-  let Spellings = [];
-  let Args = [VariadicExprArgument<"Args">,
-              BoolArgument<"ReturnValue">];
-}
+//def MsSAPost : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [VariadicExprArgument<"Args">,
+//             BoolArgument<"ReturnValue">];
+//}
 
-def MsSAFormatString : MsSAAttr {
-  let Spellings = [];
-  let Args = [StringArgument<"Style">,
-			  StringArgument<"UnformattedAlternative">];
-}
+//def MsSAFormatString : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [StringArgument<"Style">,
+//			  StringArgument<"UnformattedAlternative">];
+//}
 
-def MsSAInvalidCheck : MsSAAttr {
-  let Spellings = [];
-  let Args = [IntArgument<"Value">];
-}
+//def MsSAInvalidCheck : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [IntArgument<"Value">];
+//}
 
-def MsSASuccess : MsSAAttr {
-  let Spellings = [];
-  let Args = [StringArgument<"Condition">];
-}
+//def MsSASuccess : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [StringArgument<"Condition">];
+//}
 
-def MsSAPreBound : MsSAAttr {
-  let Spellings = [];
-  let Args = [IntArgument<"Deref">];
-}
+//def MsSAPreBound : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [IntArgument<"Deref">];
+//}
 
-def MsSAPostBound : MsSAAttr {
-  let Spellings = [];
-  let Args = [IntArgument<"Deref">,
-              BoolArgument<"ReturnValue">];
-}
+//def MsSAPostBound : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [IntArgument<"Deref">,
+//              BoolArgument<"ReturnValue">];
+//}
 
-def MsSAPreRange : MsSAAttr {
-  let Spellings = [];
-  let Args = [IntArgument<"Deref">,
-		      StringArgument<"MinVal">,
-			  StringArgument<"MaxVal">];
-}
+//def MsSAPreRange : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [IntArgument<"Deref">,
+//		      StringArgument<"MinVal">,
+//			  StringArgument<"MaxVal">];
+//}
 
-def MsSAPostRange : MsSAAttr {
-  let Spellings = [];
-  let Args = [IntArgument<"Deref">,
-		      StringArgument<"MinVal">,
-			  StringArgument<"MaxVal">,
-              BoolArgument<"ReturnValue">];
-}
+//def MsSAPostRange : MsSAAttr {
+//  let Spellings = [];
+//  let Args = [IntArgument<"Deref">,
+//		      StringArgument<"MinVal">,
+//			  StringArgument<"MaxVal">,
+//              BoolArgument<"ReturnValue">];
+//}
 
 def Visibility : InheritableAttr {
   let Clone = 0;

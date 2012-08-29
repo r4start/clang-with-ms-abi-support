@@ -405,7 +405,6 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
   while (Tok.getIdentifierInfo() || Tok.is(tok::string_literal)) {      
     IdentifierInfo *AttrName;
     SourceLocation AttrNameLoc;
-    
     // DAEMON!!!
     if (Tok.is(tok::string_literal))
     {

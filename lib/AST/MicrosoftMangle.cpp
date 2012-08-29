@@ -373,7 +373,8 @@ static const CXXRecordDecl *ClassForVFTableName(const ASTContext &Ctx,
                                                 const CXXRecordDecl *Base,
                                                 CXXBasePath &Path) {
   bool isPrimary = true;
-  for (auto I = Path.rbegin(), E = Path.rend(); I != E - 1; ++I) {
+  for (CXXBasePath::const_reverse_iterator I = Path.rbegin(), E = Path.rend();
+       I != E - 1; ++I) {
     const ASTRecordLayout &L = Ctx.getASTRecordLayout(I->Class);
     isPrimary = isPrimary && 
                  L.getPrimaryBase() == I->Base->getType()->getAsCXXRecordDecl();
@@ -387,8 +388,8 @@ static const CXXRecordDecl *ClassForVFTableName(const ASTContext &Ctx,
 }
 
 static bool IsClassHasVFunctionDecl(const CXXRecordDecl *Class) {
-  for (auto I = Class->method_begin(), E = Class->method_end();
-       I != E; ++I) {
+  for (CXXRecordDecl::method_iterator I = Class->method_begin(),
+       E = Class->method_end(); I != E; ++I) {
     if (I->isVirtual() && I->getKind() != Decl::CXXDestructor) {
       return true;
     }
@@ -450,7 +451,8 @@ MicrosoftCXXNameMangler::mangleBaseClassNameForVFTable(const CXXRecordDecl *RD,
   dc = Base->getDeclContext(); 
   while (dc) {
     if (dc->getDeclKind() == Decl::Namespace) {
-      auto nm = namespaces.find(dc);
+      llvm::DenseMap<const DeclContext *, int>::const_iterator 
+        nm = namespaces.find(dc);
 
       if (nm != namespaces.end() && nm->second < 10) {
         Out << nm->second;
@@ -502,8 +504,9 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
       // so vf-table mangles like _7class@6Bbase.
       if (base != RD->bases_begin() || BaseClass->isAbstract() || 
           isClassDeclaresNewVFunc || Layout.getPrimaryBase()) {
-        if (auto CX = ClassForVFTableName(Context.getASTContext(),
-                                                    BaseClass, Paths.front())) {
+        if (const CXXRecordDecl *CX = ClassForVFTableName(
+                                                   Context.getASTContext(),
+                                                   BaseClass, Paths.front())) {
           mangleBaseClassNameForVFTable(RD, CX);
         } else {
           mangleBaseClassNameForVFTable(RD, BaseClass);
@@ -527,7 +530,8 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
     } else if (!isClassDeclaresNewVFunc && !isClassHasOneVFTable) {
       // This case very strange, but we have ms-thunk4.cpp.
       // Why cl mangle primary base vf-table like normal base?
-      if (auto CX = ClassForVFTableName(Context.getASTContext(),
+      if (const CXXRecordDecl *CX = ClassForVFTableName(
+                                        Context.getASTContext(),
                                         BaseClass, Paths.front())) {
           mangleBaseClassNameForVFTable(RD, CX);
       } else {

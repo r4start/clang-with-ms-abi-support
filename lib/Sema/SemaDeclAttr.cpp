@@ -4208,6 +4208,8 @@ enum MsAttributeValidOn
     MsAttr_Struct = 0x8,
 };
 
+// DAEMON
+#if 0
 static int getValidOn(const AttributeList &Attr)
 {
     RecordDecl* RD = Attr.getMsAttributeRecordDecl();
@@ -4267,7 +4269,7 @@ static bool checkValidOn(Sema& S, const AttributeList &Attr, Decl* D)
     }
     return false;
 }
-
+#endif
 static bool getNamedArg(Sema &S, const char* ArgName, const AttributeList &Attr, Expr*& E, bool Optional = false)
 {
     for (size_t i = 0; i != Attr.getNumArgs(); ++i)
@@ -4332,6 +4334,8 @@ static StringRef getAttrScope(const AttributeList &Attr) {
     return I->getName();
 }
 
+// DAEMON
+#if 0
 static void handleMsDefaultValueAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     // check the attribute arguments.
     if (!checkAttributeNumArgs(S, Attr, 1))
@@ -4471,7 +4475,7 @@ static void handleMsSAPostRange(Sema &S, Decl *D, const AttributeList &Attr) {
     D->addAttr(::new (S.Context) MsSAPostRangeAttr(Attr.getRange(), S.Context,
                                              Deref.getZExtValue(), MinVal, MaxVal, ReturnValue));
 }
-
+#endif
 //===----------------------------------------------------------------------===//
 // Top Level Sema Entry Points
 //===----------------------------------------------------------------------===//
@@ -4751,6 +4755,7 @@ static void ProcessInheritableDeclAttr(Sema &S, Scope *scope, Decl *D,
 }
 
 // DAEMON
+#if 0
 static void ProcessMicrosoftAttribute(Sema &S, Scope *scope, Decl *D,
                                  const AttributeList &Attr,
                                  bool NonInheritable, bool Inheritable) {
@@ -4814,7 +4819,7 @@ static void ProcessMicrosoftAttribute(Sema &S, Scope *scope, Decl *D,
       break;
   }  
 }
-
+#endif
 /// ProcessDeclAttribute - Apply the specific attribute to the specified decl if
 /// the attribute applies to decls.  If the attribute is a type attribute, just
 /// silently ignore it if a GNU attribute. FIXME: Applying a C++0x attribute to
