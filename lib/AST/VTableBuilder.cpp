@@ -1798,13 +1798,16 @@ static void ReplaceOverridden(const CXXMethodDecl *MD,
   }
 }
 
-static void ReplaceOverriddenDestructor(const CXXMethodDecl *MD,
-                         llvm::SmallVector<const CXXMethodDecl *, 8> &VFTable) {
-  struct IsDtorDecl {
+namespace {
+struct IsDtorDecl {
     bool operator() (const CXXMethodDecl *MD) {
       return isa<CXXDestructorDecl>(MD);
     }
   };
+}
+
+static void ReplaceOverriddenDestructor(const CXXMethodDecl *MD,
+                         llvm::SmallVector<const CXXMethodDecl *, 8> &VFTable) {
   const CXXMethodDecl **I = 
     std::find_if(VFTable.begin(), VFTable.end(), IsDtorDecl());
 
