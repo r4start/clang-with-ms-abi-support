@@ -57,8 +57,8 @@ void CodeGenFunction::MSEHState::RestoreTryState(uint32_t State,
 // r4start
 void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
   MSEHState::UnwindTableTy localTable;
-  for (auto I = UnwindTable.begin(), E = UnwindTable.end();
-       I != E; ++I) {
+  for (MSEHState::UnwindTableTy::iterator I = UnwindTable.begin(),
+       E = UnwindTable.end(); I != E; ++I) {
     if (I->IsUsed) {
       localTable.push_back(*I);
       continue;
@@ -66,8 +66,8 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
 
     I->Store->eraseFromParent();
     MsUnwindInfo &last = localTable.back();
-    for (auto R = I->RestoreOps.begin(), E = I->RestoreOps.end();
-         R != E; ++R) {
+    for (MsUnwindInfo::RestoreList::iterator R = I->RestoreOps.begin(),
+         E = I->RestoreOps.end(); R != E; ++R) {
       
       if (R->Kind == RestoreOpInfo::DtorRestore) {
         // If it is destructor restore operation, then
