@@ -255,7 +255,7 @@ public:
   /// };
   llvm::Constant *BuildMSTypeInfo(QualType Ty,
                                   QualType BaseTy,
-                                  bool Force = false);
+                                  bool IsForEH = false);
 };
 }
 
@@ -705,16 +705,14 @@ maybeUpdateRTTILinkage(CodeGenModule &CGM, llvm::GlobalVariable *GV,
 }
 
 // r4start
-static llvm::StructType* GetBaseClassDescriptorType(CodeGenModule& CGM)
-{
+static llvm::StructType* GetBaseClassDescriptorType(CodeGenModule& CGM) {
   llvm::SmallVector<llvm::Type*, 4> BaseClassDescrFieldTypes;
 
-  BaseClassDescrFieldTypes.push_back(llvm::Type::getInt8PtrTy(CGM.getLLVMContext()));
+  BaseClassDescrFieldTypes.push_back(CGM.Int8PtrTy);
 
   // Push numContainedBases, PMD fields and attributes.
-  for (int i = 0; i < 5; ++i)
-  {
-    BaseClassDescrFieldTypes.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
+  for (int i = 0; i < 5; ++i) {
+    BaseClassDescrFieldTypes.push_back(CGM.Int32Ty);
   }
 
   return llvm::StructType::get(CGM.getLLVMContext(), BaseClassDescrFieldTypes);
@@ -747,19 +745,6 @@ static uint32_t GetBasesCount(const CXXRecordDecl *RD) {
   }
 
   return BasesCount;
-}
-
-// r4start
-static llvm::StructType* GetTypeDescriptorType(CodeGenModule& CGM,
-                                               llvm::Type* TypeInfoTy,
-                                               uint64_t NameLen) {
-  llvm::SmallVector<llvm::Type*, 3> DescrTy;
-
-  DescrTy.push_back(TypeInfoTy);
-  DescrTy.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
-  DescrTy.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), NameLen));
-
-  return llvm::StructType::get(CGM.getLLVMContext(), DescrTy);
 }
 
 // r4start
@@ -1229,8 +1214,8 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
 
   llvm::Constant* TypeInfo = Fields.pop_back_val();
 
-  llvm::StructType* DescrTy = 
-    GetTypeDescriptorType(CGM, TypeInfo->getType(), NameField.size() + 1);
+  llvm::StructType* DescrTy = CGM.GetTypeDescriptorType(TypeInfo->getType(), 
+                                                        NameField.size() + 1);
 
   llvm::SmallVector<llvm::Constant*, 3> TypeDescrVals;
 
@@ -1284,7 +1269,7 @@ static CharUnits GetClassOffset(const ASTContext &Ctx,
 // r4start
 llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
                                              QualType BaseTy,
-                                             bool Force) {
+                                             bool IsForEH) {
   // We want to operate on the canonical type.
   Ty = CGM.getContext().getCanonicalType(Ty);
 
@@ -1293,6 +1278,17 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   
   MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
   MSMangleContextExtensions* CtxExt = Ctx.getMsExtensions();
+
+  // For exception handling we need only type descritpor.
+  if (IsForEH) {
+    CurLinkage = llvm::GlobalValue::ExternalLinkage;
+
+    llvm::Constant* TypeDescriptor = BuildRTTITypeDescriptor(Ty);
+
+    CurLinkage = oldLinkage;
+
+    return llvm::ConstantExpr::getBitCast(TypeDescriptor, Int8PtrTy);
+  }
 
   CXXRecordDecl *Base = 0;
   CXXRecordDecl *LayoutClass = Ty->getAsCXXRecordDecl();
@@ -1339,10 +1335,6 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   llvm::Constant *CHD = 
     BuildRTTIClassHierarchyDescriptor(Ty->getAsCXXRecordDecl());
   Fields.push_back(llvm::ConstantExpr::getBitCast(CHD, Int8PtrTy));
-
-  // Build virtual bases table.
-  /*if (LayoutClass->getNumVBases())
-    BuildVBTable(LayoutClass);*/
 
   llvm::Constant* Init = llvm::ConstantStruct::getAnon(Fields);
   
@@ -1787,6 +1779,32 @@ void RTTIBuilder::BuildPointerToMemberTypeInfo(const MemberPointerType *Ty) {
   Fields.push_back(RTTIBuilder(CGM).BuildTypeInfo(QualType(ClassType, 0)));
 }
 
+llvm::Type *CodeGenModule::GetDescriptorPtrType(llvm::Type *TypeInfo) {
+  if (llvm::Type *descrTy = getModule().getTypeByName("type.descriptor")) {
+    return descrTy->getPointerTo();
+  }
+
+  llvm::SmallVector<llvm::Type*, 3> descrTypes;
+
+  descrTypes.push_back(TypeInfo);
+  descrTypes.push_back(Int32Ty);
+  descrTypes.push_back(llvm::ArrayType::get(Int8Ty, 0));
+
+  return llvm::StructType::create(getLLVMContext(), descrTypes,
+                                  "type.descriptor")->getPointerTo();
+}
+
+llvm::StructType *CodeGenModule::GetTypeDescriptorType(llvm::Type *TypeInfo,
+                                                       uint64_t NameLength) {
+  llvm::SmallVector<llvm::Type*, 3> descrTypes;
+
+  descrTypes.push_back(TypeInfo);
+  descrTypes.push_back(Int32Ty);
+  descrTypes.push_back(llvm::ArrayType::get(Int8Ty, NameLength));
+
+  return llvm::StructType::get(getLLVMContext(), descrTypes);
+}
+
 llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
                                                        bool ForEH) {
   // Return a bogus pointer if RTTI is disabled, unless it's for EH.
@@ -1806,7 +1824,7 @@ llvm::Constant *
 CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
                                          QualType BaseTy,
                                          bool ForEH) {
-  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
+  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy, ForEH);
 }
 
 void CodeGenModule::EmitFundamentalRTTIDescriptor(QualType Type) {

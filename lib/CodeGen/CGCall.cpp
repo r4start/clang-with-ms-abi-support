@@ -2122,6 +2122,73 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   llvm::CallSite CS;
   if (!InvokeDest) {
     CS = Builder.CreateCall(Callee, Args);
+
+    // r4start
+    // This is need for Microsoft C++ EH.
+    if (IsMSABI && EHState.IsInited()) {
+      auto last = EHState.LastEntry.find(EHState.TryLevel);
+      
+      MsUnwindInfo *lastEntry = 0;
+      if (last != EHState.LastEntry.end()) {
+        lastEntry = &last->second;
+      }
+
+      Decl::Kind kind;
+      const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
+      
+      if (MD) {
+        kind = MD->getKind();
+        if (kind == Decl::CXXConstructor) {
+          llvm::BasicBlock *Cont = 
+            llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
+          Builder.CreateBr(Cont);
+          Builder.SetInsertPoint(Cont);
+
+          const CXXRecordDecl *parent = MD->getParent();
+          llvm::Value *dtor = 
+            CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
+          
+          size_t state = EHState.UnwindTable.size() - 1;
+          
+          SaveUnwindFuncletForLaterEmit(EHState.PrevLevelLastIdValues.back(),
+                                        Args[0], dtor);
+
+          EHState.SetMSTryState(state);
+          EHState.PrevLevelLastIdValues.push_back(state);
+
+          if (lastEntry) {
+            lastEntry->IsUsed = true;
+            EHState.LastEntry.erase(EHState.TryLevel);
+            lastEntry = 0;
+          }
+          EHState.LastEntry.insert(
+            std::pair<int, MsUnwindInfo&>(EHState.TryLevel,
+                                          EHState.UnwindTable.back()));
+        } else if (kind == Decl::CXXDestructor) {
+          int forState = EHState.PrevLevelLastIdValues.back();
+          EHState.PrevLevelLastIdValues.pop_back();
+          int state = EHState.PrevLevelLastIdValues.back();
+          MSEHState::UnwindTableTy::iterator restoringState = 
+            std::find_if(EHState.UnwindTable.begin(), EHState.UnwindTable.end(),
+                         MsUnwindInfo::StoreOpFinder(forState));
+          assert(restoringState != EHState.UnwindTable.end() &&
+                 "Can not find store state for restoring operation");
+          EHState.RestoreTryState(state, *restoringState, 
+                                  RestoreOpInfo::DtorRestore);
+          lastEntry = 0;
+        }
+      }
+
+      // If it was not ctor call then we must save 
+      // this store instruction in ll code.
+      // If it was ctor call then it was already done.
+      last = EHState.LastEntry.find(EHState.TryLevel);
+      if (last != EHState.LastEntry.end() && lastEntry && 
+          last->second.Store == lastEntry->Store){
+        last->second.IsUsed = true;
+      }
+
+    }
   } else {
     llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);

@@ -636,6 +636,9 @@ public:
 
   llvm::BasicBlock *getInvokeDestImpl();
 
+  /// r4start
+  llvm::BasicBlock *getInvokeDestImplForMS();
+
   template <class T>
   typename DominatingValue<T>::saved_type saveValueInCond(T value) {
     return DominatingValue<T>::save(*this, value);
@@ -1114,6 +1117,133 @@ public:
 private:
   CGDebugInfo *DebugInfo;
   bool DisableDebugInfo;
+
+  /// r4start
+  bool IsMSABI;
+
+  /// r4start
+  /// This structer holds information about unwind table entry
+  /// and associated with this entry store operation.
+  struct RestoreOpInfo {
+    enum RestoreOpKind {
+      Undef,
+      DtorRestore,
+      CatchRestore,
+      TryEndRestore
+    };
+
+    RestoreOpKind Kind;
+    llvm::StoreInst *RestoreOp;
+    int Index;
+  };
+
+  struct MsUnwindInfo {
+    int ToState;
+    int StoreValue;
+    llvm::Value *ThisPtr;
+    llvm::Value *ReleaseFunc;
+    bool IsUsed;
+    bool IsRestoreOperation;
+    llvm::StoreInst *Store;
+    int StoreInstTryLevel;
+    int TopLevelTry;
+    int StoreIndex;
+
+    typedef std::list<RestoreOpInfo> RestoreList;
+    RestoreList RestoreOps;
+
+    class StoreOpFinder {
+      int State;
+    public:
+      StoreOpFinder(int state) : State(state) {}
+      bool operator()(const CodeGenFunction::MsUnwindInfo &info) {
+        if (State == info.StoreValue) {
+          return true;
+        }
+      return false;
+      }
+    };
+
+    MsUnwindInfo(int State) 
+     : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
+       IsUsed(false), IsRestoreOperation(false), Store(0), 
+       StoreInstTryLevel(-1) {}
+
+    MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
+                 int StoreVal = -2, bool Used = false, bool RestoreOp = false,
+                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
+                 int TopLevelTryNumber = -1, int Index = -1)
+     : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
+       IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
+       StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber), 
+       StoreIndex(Index) {}
+  };
+
+  /// r4start
+  class MSEHState {
+    /// MS C++ EH specific.
+    /// State of current try level.
+    llvm::Value *MSTryState;
+
+    CodeGenFunction &CGF;
+
+  public:
+    /// Indicates that current try is nested.
+    /// When TryLevel == 1 we must set try state to -1.
+    int TryLevel;
+
+    /// This field tracks count of top level tries.
+    /// It is used for optimize unwind table.
+    int TopLevelTryNumber;
+
+    int StoreIndex;
+
+    /// This counter increments each time when we mangle some eh symbol.
+    /// Also it passes to mangler.
+    int EHManglingCounter;
+
+    /// Unwind table map.
+    /// Holds funclets addresses.
+    typedef std::list<MsUnwindInfo> UnwindTableTy;
+    UnwindTableTy UnwindTable;
+
+    typedef std::map<int, MsUnwindInfo&> LastUnwindEntryOnCurLevel;
+    LastUnwindEntryOnCurLevel LastEntry;
+
+    /// Here we want to store id value state.
+    /// This is need to restore id value state after exiting nested try.
+    llvm::SmallVector<int, 4> PrevLevelLastIdValues;
+
+    /// Try block table.
+    llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
+
+    /// Catch handlers for current try.
+    llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
+
+    llvm::Constant *ESTypeList;
+
+    llvm::BasicBlock *LandingPad;
+
+    MSEHState(CodeGenFunction &cgf) 
+     : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
+     ESTypeList(0), StoreIndex(0), LandingPad(0), 
+     TopLevelTryNumber(0) {}
+
+    void SetMSTryState(uint32_t State);
+
+    void RestoreTryState(uint32_t State, 
+                         MsUnwindInfo &RestoringState,
+                     RestoreOpInfo::RestoreOpKind Kind = RestoreOpInfo::Undef);
+
+    void InitMSTryState();
+
+    void ShrinkUnwindTable();
+
+    bool IsInited() const { return MSTryState != 0; }
+  };
+
+  /// r4start
+  MSEHState EHState;
 
   /// DidCallStackSave - Whether llvm.stacksave has been called. Used to avoid
   /// calling llvm.stacksave for multiple VLAs in the same scope.
@@ -2043,6 +2173,9 @@ public:
   void EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
   void ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
 
+  /// r4start
+  void ExitMSCXXTryStmt(const CXXTryStmt &S);
+
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
 
@@ -2515,6 +2648,9 @@ public:
 
   void EmitCXXThrowExpr(const CXXThrowExpr *E);
 
+  // r4start
+  void EmitMSCXXThrowExpr(const CXXThrowExpr *E);
+
   void EmitLambdaExpr(const LambdaExpr *E, AggValueSlot Dest);
 
   RValue EmitAtomicExpr(AtomicExpr *E, llvm::Value *Dest = 0);
@@ -2665,6 +2801,32 @@ private:
   }
 
   void EmitDeclMetadata();
+
+  /// r4start
+  void EmitESTypeList(const FunctionProtoType *FuncProto);
+
+  /// r4start
+  void SaveUnwindFuncletForLaterEmit(int ToState, llvm::Value *This,
+                                     llvm::Value *ReleaseFunc);
+
+  /// r4start
+  llvm::GlobalValue *EmitUnwindTable();
+
+  /// r4start
+  void GenerateTryBlockTableEntry();
+
+  /// r4start
+  void GenerateCatchHandler(QualType &CaughtType, llvm::Type *HandlerTy,
+                              llvm::BlockAddress *HandlerAddress);
+
+  /// r4start
+  llvm::GlobalValue *EmitTryBlockTable();
+
+  /// r4start
+  llvm::GlobalValue *EmitMSFuncInfo();
+
+  /// r4start
+  void EmitEHInformation();
 
   CodeGenModule::ByrefHelpers *
   buildByrefHelpers(llvm::StructType &byrefType,

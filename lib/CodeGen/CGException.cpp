@@ -413,6 +413,14 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
 }
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
+  bool isMSABI = 
+    CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
+
+  if (isMSABI) {
+    EmitMSCXXThrowExpr(E);
+    return;
+  }
+
   if (!E->getSubExpr()) {
     if (getInvokeDest()) {
       Builder.CreateInvoke(getReThrowFn(*this),
@@ -450,7 +458,7 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   // r4start
   llvm::Constant *TypeInfo;
 
-  if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+  if (!isMSABI) {
     TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
   } else {
     TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(ThrowType, ThrowType, 
@@ -470,19 +478,27 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   }
   if (!Dtor) Dtor = llvm::Constant::getNullValue(Int8PtrTy);
 
-  if (getInvokeDest()) {
-    llvm::InvokeInst *ThrowCall =
-      Builder.CreateInvoke3(getThrowFn(*this),
-                            getUnreachableBlock(), getInvokeDest(),
-                            ExceptionPtr, TypeInfo, Dtor);
-    ThrowCall->setDoesNotReturn();
-  } else {
-    llvm::CallInst *ThrowCall =
-      Builder.CreateCall3(getThrowFn(*this), ExceptionPtr, TypeInfo, Dtor);
-    ThrowCall->setDoesNotReturn();
-    Builder.CreateUnreachable();
-  }
+  if (isMSABI) {
+    // TODO: change parameters!
+    llvm::Value *A[] = { Dtor, TypeInfo };
 
+   /* llvm::InvokeInst *ThrowCall = 
+      Builder.CreateInvoke(getMSThrowFn(*this), getUnreachableBlock(),
+                           getInvokeDest(), A);*/
+  } else {
+    if (getInvokeDest()) {
+      llvm::InvokeInst *ThrowCall =
+        Builder.CreateInvoke3(getThrowFn(*this),
+                              getUnreachableBlock(), getInvokeDest(),
+                              ExceptionPtr, TypeInfo, Dtor);
+      ThrowCall->setDoesNotReturn();
+    } else {
+      llvm::CallInst *ThrowCall =
+        Builder.CreateCall3(getThrowFn(*this), ExceptionPtr, TypeInfo, Dtor);
+      ThrowCall->setDoesNotReturn();
+      Builder.CreateUnreachable();
+    }
+  }
   // throw is an expression, and the expression emitters expect us
   // to leave ourselves at a valid insertion point.
   EmitBlock(createBasicBlock("throw.cont"));
@@ -498,6 +514,12 @@ void CodeGenFunction::EmitStartEHSpec(const Decl *D) {
   const FunctionProtoType *Proto = FD->getType()->getAs<FunctionProtoType>();
   if (Proto == 0)
     return;
+
+  // r4start
+  if (IsMSABI) {
+    EmitESTypeList(Proto);
+    return;
+  }
 
   ExceptionSpecificationType EST = Proto->getExceptionSpecType();
   if (isNoexceptExceptionSpec(EST)) {
@@ -560,6 +582,9 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
   if (!CGM.getLangOpts().CXXExceptions)
     return;
   
+  if (IsMSABI)
+    return;
+
   const FunctionDecl* FD = dyn_cast_or_null<FunctionDecl>(D);
   if (FD == 0)
     return;
@@ -582,15 +607,44 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
-  ExitCXXTryStmt(S);
+
+  if (IsMSABI) {
+    ExitMSCXXTryStmt(S);
+  } else {
+    ExitCXXTryStmt(S); 
+  }
 }
 
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
+  
+  // Generate id in start of try block.
+  if (IsMSABI) {
+    if (!EHState.IsInited()) {
+      EHState.PrevLevelLastIdValues.push_back(-1);
+      
+      EHState.UnwindTable.push_back(-1);
+      EHState.InitMSTryState();
+      EHState.UnwindTable.back().IsUsed = true;
+    }
+
+    if (!EHState.TryLevel) {
+      ++EHState.TopLevelTryNumber;
+    }
+
+    ++EHState.TryLevel;
+
+    size_t state = EHState.UnwindTable.size() - 1;
+    EHState.UnwindTable.push_back(EHState.UnwindTable.back().StoreValue);
+    EHState.SetMSTryState(state);
+    EHState.UnwindTable.back().IsUsed = true;
+    EHState.PrevLevelLastIdValues.push_back(state);
+  } 
 
   for (unsigned I = 0; I != NumHandlers; ++I) {
     const CXXCatchStmt *C = S.getHandler(I);
+
 
     llvm::BasicBlock *Handler = createBasicBlock("catch");
     if (C->getExceptionDecl()) {
@@ -608,7 +662,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
         TypeInfo = CGM.getObjCRuntime().GetEHType(CaughtType);
       else {
         // r4start
-        if (CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+        if (!IsMSABI) {
           TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
         } else {
           TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, 
@@ -684,11 +738,17 @@ static bool isNonEHScope(const EHScope &S) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
-  assert(EHStack.requiresLandingPad());
-  assert(!EHStack.empty());
-
   if (!CGM.getLangOpts().Exceptions)
     return 0;
+
+  // r4start
+  if (IsMSABI) {
+    return 0;
+    //return getInvokeDestImplForMS();
+  }
+
+  assert(EHStack.requiresLandingPad());
+  assert(!EHStack.empty());
 
   // Check the innermost scope for a cached landing pad.  If this is
   // a non-EH cleanup, we'll check enclosing scopes in EmitLandingPad.

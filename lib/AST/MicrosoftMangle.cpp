@@ -193,6 +193,26 @@ public:
 
   virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
                                             raw_ostream &Out);
+
+  // Microsoft EH specific.
+
+  virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
+
+  virtual void mangleThrowInfo(const CXXRecordDecl *RD, raw_ostream &Out);
+
+  virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &);
+
+  virtual void mangleEHCatchFunction(const FunctionDecl *, uint8_t,
+                                     raw_ostream &);
+
+  virtual void mangleEHUnwindTable(const FunctionDecl *, raw_ostream &);
+
+  virtual void mangleEHUnwindFunclet(const FunctionDecl *, uint8_t ,
+                                     raw_ostream &);
+
+  virtual void mangleEHTryBlockTable(const FunctionDecl *, raw_ostream &);
+
+  virtual void mangleEHTryEnd(const FunctionDecl *, uint8_t , raw_ostream &);
 };
 
 }
@@ -2239,6 +2259,67 @@ MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
   // Prefix for spare.
   Out << ".?A";
   mangler.mangleType(getASTContext().getRecordType(RD), SourceRange());
+}
+
+static void MangleEHSpecificNames(MicrosoftMangleContext &ctx, const FunctionDecl *F,
+                             raw_ostream &Out, StringRef Prefix) {
+  if (F->isMain()) {
+    Out << Prefix << "_main";
+    return;
+  }
+
+  MicrosoftCXXNameMangler mangler(ctx, Out);
+  mangler.mangle(F, Prefix);
+}
+
+void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
+                                              raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__ehfuncinfo$");
+}
+
+void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
+                                             raw_ostream &Out) {
+  Out << '\01';
+  Out << "__TI1?A";
+  
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
+}
+
+void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
+                                                     raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__ehhandler$");
+}
+
+void MicrosoftMangleContext::mangleEHCatchFunction(const FunctionDecl *F, 
+                                                   uint8_t Number,
+                                                   raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__catch$");
+  Out << "$" << (int64_t)Number;
+}
+
+void MicrosoftMangleContext::mangleEHUnwindTable(const FunctionDecl *F,
+                                                 raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__unwindtable$");
+}
+
+void MicrosoftMangleContext::mangleEHUnwindFunclet(const FunctionDecl *F,
+                                                   uint8_t Number,
+                                                   raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__unwindfunclet$");
+  Out << "$" << (int64_t)Number;
+}
+
+void MicrosoftMangleContext::mangleEHTryBlockTable(const FunctionDecl *F,
+                                                   raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__tryblocktable$");
+}
+
+void MicrosoftMangleContext::mangleEHTryEnd(const FunctionDecl *F, 
+                                            uint8_t Number, 
+                                            raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__tryend$");
+  Out << "$" << (int64_t)Number;
 }
 
 MangleContext *clang::createMicrosoftMangleContext(ASTContext &Context,
