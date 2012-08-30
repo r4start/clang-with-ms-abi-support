@@ -1003,7 +1003,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   
   Builder.SetInsertPoint(tryEnd);
   
-  auto last = EHState.LastEntry.find(EHState.TryLevel);
+  MSEHState::LastUnwindEntryOnCurLevel::iterator 
+    last = EHState.LastEntry.find(EHState.TryLevel);
   if (last != EHState.LastEntry.end()) {
     EHState.LastEntry.erase(last);
   }
