@@ -2126,7 +2126,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     // r4start
     // This is need for Microsoft C++ EH.
     if (IsMSABI && EHState.IsInited()) {
-      auto last = EHState.LastEntry.find(EHState.TryLevel);
+      MSEHState::LastUnwindEntryOnCurLevel::iterator 
+        last = EHState.LastEntry.find(EHState.TryLevel);
       
       MsUnwindInfo *lastEntry = 0;
       if (last != EHState.LastEntry.end()) {
