@@ -1285,8 +1285,6 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
 
     llvm::Constant* TypeDescriptor = BuildRTTITypeDescriptor(Ty);
 
-    CurLinkage = oldLinkage;
-
     return llvm::ConstantExpr::getBitCast(TypeDescriptor, Int8PtrTy);
   }
 
