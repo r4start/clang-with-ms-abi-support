@@ -1164,6 +1164,13 @@ private:
       }
     };
 
+    struct UnwindInfoLess {
+      bool operator() (const CodeGenFunction::MsUnwindInfo &LHS,
+                       const CodeGenFunction::MsUnwindInfo &RHS) {
+        return LHS.StoreIndex < RHS.StoreIndex;
+      }
+    };
+
     MsUnwindInfo(int State) 
      : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
        IsUsed(false), IsRestoreOperation(false), Store(0), 

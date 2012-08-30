@@ -248,8 +248,8 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
     return gv;
   }
 
-  auto throwInfoTy = getThrowInfoType(CGF.CGM, catchDecl);
-  auto throwInfoInit = generateThrowInfoInit(CGF, throwInfoTy);
+  llvm::StructType *throwInfoTy = getThrowInfoType(CGF.CGM, catchDecl);
+  llvm::Constant *throwInfoInit = generateThrowInfoInit(CGF, throwInfoTy);
 
   return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
                                   llvm::GlobalValue::InternalLinkage,
@@ -600,30 +600,27 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   assert(funcDecl && "Unwind table is generating only for functions!");
 
   MSEHState::UnwindTableTy unpackedUnwindTable;
-  for (auto I = EHState.UnwindTable.begin(), E = EHState.UnwindTable.end();
-       I != E; ++I) {
+  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
+       E = EHState.UnwindTable.end(); I != E; ++I) {
     if (I != EHState.UnwindTable.begin()) {
       unpackedUnwindTable.push_back(*I);
     }
 
-    for (auto restore : I->RestoreOps) {
-      if (restore.Kind == RestoreOpInfo::CatchRestore) {
+    for (MsUnwindInfo::RestoreList::iterator restore = I->RestoreOps.begin(),
+         e = I->RestoreOps.end(); restore != e; ++restore) {
+      if (restore->Kind == RestoreOpInfo::CatchRestore) {
         continue;
       }
 
       MsUnwindInfo info(I->ToState);
-      info.Store = restore.RestoreOp;
-      info.StoreIndex = restore.Index;
+      info.Store = restore->RestoreOp;
+      info.StoreIndex = restore->Index;
       info.IsRestoreOperation = true;
       unpackedUnwindTable.push_back(info);
     }
   }
 
-  auto lessCompare = [] (const MsUnwindInfo &LHS, 
-                         const MsUnwindInfo &RHS) -> bool {
-    return LHS.StoreIndex < RHS.StoreIndex;
-  };
-  unpackedUnwindTable.sort(lessCompare);
+  unpackedUnwindTable.sort(MsUnwindInfo::UnwindInfoLess());
 
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
