@@ -1157,10 +1157,7 @@ private:
     public:
       StoreOpFinder(int state) : State(state) {}
       bool operator()(const CodeGenFunction::MsUnwindInfo &info) {
-        if (State == info.StoreValue) {
-          return true;
-        }
-      return false;
+        return State == info.StoreValue;
       }
     };
 
@@ -1168,6 +1165,15 @@ private:
       bool operator() (const CodeGenFunction::MsUnwindInfo &LHS,
                        const CodeGenFunction::MsUnwindInfo &RHS) {
         return LHS.StoreIndex < RHS.StoreIndex;
+      }
+    };
+
+    class IsUnwindInfosEqual {
+      llvm::StoreInst *StoreOp;
+    public:
+      IsUnwindInfosEqual(llvm::StoreInst *Inst) : StoreOp(Inst) {}
+      bool operator() (const CodeGenFunction::MsUnwindInfo &Info) {
+        return Info.Store == StoreOp;
       }
     };
 

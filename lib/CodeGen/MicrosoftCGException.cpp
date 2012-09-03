@@ -80,7 +80,7 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
       last.RestoreOps.push_back(*R);
     }
   }
-  
+
   UnwindTable.clear();
   UnwindTable.assign(localTable.begin(), localTable.end());
 }
@@ -600,7 +600,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   assert(funcDecl && "Unwind table is generating only for functions!");
 
   MSEHState::UnwindTableTy unpackedUnwindTable;
-  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
+  // Skip first fake element.
+  for (MSEHState::UnwindTableTy::iterator I = ++EHState.UnwindTable.begin(),
        E = EHState.UnwindTable.end(); I != E; ++I) {
     if (I != EHState.UnwindTable.begin()) {
       unpackedUnwindTable.push_back(*I);
@@ -621,6 +622,35 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   }
 
   unpackedUnwindTable.sort(MsUnwindInfo::UnwindInfoLess());
+  
+  // After all shrink and unpack operations, ToState and StoreValue
+  // fields are wrong. So we need to fix them.
+  int posCounter = 1;
+  std::vector<std::pair<int, int>> toStates;
+  for (MSEHState::UnwindTableTy::iterator I = ++unpackedUnwindTable.begin(),
+       E = unpackedUnwindTable.end(); I != E; ++I, ++posCounter) {
+    if (I->IsRestoreOperation) {
+      if (!toStates.empty()) {
+        // Leaving nested try.
+        toStates.pop_back();
+      }
+      continue;
+    }
+
+    // Set right state value.
+    if (I->StoreValue != posCounter) {
+      I->StoreValue = posCounter;
+      I->Store->setOperand(0, llvm::ConstantInt::get(Int32Ty, posCounter));
+    }
+
+    if (toStates.empty()) {
+      toStates.push_back(std::make_pair(I->StoreInstTryLevel, posCounter));
+    } else if (toStates.back().first < I->StoreInstTryLevel) {
+      // Entering in nested try. 
+      I->ToState = toStates.back().second;
+      toStates.push_back(std::make_pair(I->StoreInstTryLevel, posCounter - 1));
+    }
+  }
 
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
