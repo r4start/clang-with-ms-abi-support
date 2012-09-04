@@ -70,10 +70,19 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
          E = I->RestoreOps.end(); R != E; ++R) {
       
       if (R->Kind == RestoreOpInfo::DtorRestore) {
-        // If it is destructor restore operation, then
-        // we don`t want see it in result byte code.
-        R->RestoreOp->eraseFromParent();
-        continue;
+        // For each store we have only one dtor restore.
+        // When we erase store op we must his restore
+        // assign to 'last' and erase from 'last' last dtor restore.
+        MsUnwindInfo::RestoreList::iterator dtorRestore = 
+          std::find_if(last.RestoreOps.begin(), last.RestoreOps.end(),
+          [] (const RestoreOpInfo &info) -> bool {
+            return info.Kind == RestoreOpInfo::DtorRestore;
+          });
+
+        if (dtorRestore != last.RestoreOps.end()) {
+          dtorRestore->RestoreOp->eraseFromParent();
+          last.RestoreOps.erase(dtorRestore);
+        }
       }
 
       R->RestoreOp->setOperand(0, last.Store->getOperand(0));
@@ -601,7 +610,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   MSEHState::UnwindTableTy unpackedUnwindTable;
   // Skip first fake element.
-  for (MSEHState::UnwindTableTy::iterator I = ++EHState.UnwindTable.begin(),
+  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
        E = EHState.UnwindTable.end(); I != E; ++I) {
     if (I != EHState.UnwindTable.begin()) {
       unpackedUnwindTable.push_back(*I);
@@ -617,11 +626,17 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       info.Store = restore->RestoreOp;
       info.StoreIndex = restore->Index;
       info.IsRestoreOperation = true;
+      info.StoreValue = I->StoreValue;
       unpackedUnwindTable.push_back(info);
     }
   }
 
   unpackedUnwindTable.sort(MsUnwindInfo::UnwindInfoLess());
+
+  // We doesn`t interesting in store ops
+  // after try.
+  // TODO: Fix this for several tries with level == 1.
+  //unpackedUnwindTable.pop_back();
   
   // After all shrink and unpack operations, ToState and StoreValue
   // fields are wrong. So we need to fix them.
@@ -633,6 +648,45 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       if (!toStates.empty()) {
         // Leaving nested try.
         toStates.pop_back();
+      }
+
+      // We must skip this, because it is already have right values.
+      if (I->ToState == -1) {
+        continue;
+      }
+
+      // Now we must determine parent of this restore op.
+      // This need because we must update store value and 'to state'.
+      for (MSEHState::UnwindTableTy::iterator Parent = EHState.UnwindTable.begin(),
+           E = EHState.UnwindTable.end(); Parent != E; ++Parent) {
+        MsUnwindInfo::RestoreList::iterator restore = 
+          std::find_if(Parent->RestoreOps.begin(), Parent->RestoreOps.end(),
+          [&I] (const RestoreOpInfo &info) -> bool {
+            return info.RestoreOp == I->Store;
+          });
+
+        if (restore == Parent->RestoreOps.end()) {
+          continue;
+        }
+
+        MSEHState::UnwindTableTy::iterator unpackedParent = 
+          std::find_if(unpackedUnwindTable.begin(), unpackedUnwindTable.end(),
+            [&Parent] (const MsUnwindInfo &info) -> bool {
+              return Parent->Store == info.Store;
+            });
+        assert(unpackedParent != unpackedUnwindTable.end() && 
+               "Can not find parent in unpacked table!");
+        if (restore->Kind == RestoreOpInfo::DtorRestore) {
+          I->StoreValue = unpackedParent->ToState;
+          I->Store->setOperand(0, 
+                      llvm::ConstantInt::get(Int32Ty,unpackedParent->ToState));
+          I->ToState = unpackedParent->ToState;
+        } else {
+          I->StoreValue = unpackedParent->StoreValue;
+          I->Store->setOperand(0, unpackedParent->Store->getOperand(0));
+          I->ToState = unpackedParent->ToState;
+        }
+        break;
       }
       continue;
     }
