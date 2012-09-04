@@ -529,6 +529,61 @@ public:
   void clearFixups() { BranchFixups.clear(); }
 };
 
+/// r4start
+/// This structer holds information about unwind table entry
+/// and associated with this entry store operation.
+struct RestoreOpInfo {
+  enum RestoreOpKind {
+    Undef,
+    DtorRestore,
+    CatchRestore,
+    TryEndRestore
+  };
+
+  RestoreOpKind Kind;
+  llvm::StoreInst *RestoreOp;
+  int Index;
+};
+
+struct MsUnwindInfo {
+  int ToState;
+  int StoreValue;
+  llvm::Value *ThisPtr;
+  llvm::Value *ReleaseFunc;
+  bool IsUsed;
+  bool IsRestoreOperation;
+  llvm::StoreInst *Store;
+  int StoreInstTryLevel;
+  int TopLevelTry;
+  int StoreIndex;
+
+  typedef std::list<RestoreOpInfo> RestoreList;
+  RestoreList RestoreOps;
+
+  class StoreOpFinder {
+    int State;
+  public:
+    StoreOpFinder(int state) : State(state) {}
+    bool operator()(const MsUnwindInfo &info) {
+      return State == info.StoreValue;
+    }
+  };
+
+  MsUnwindInfo(int State) 
+    : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
+      IsUsed(false), IsRestoreOperation(false), Store(0), 
+      StoreInstTryLevel(-1) {}
+
+  MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
+                int StoreVal = -2, bool Used = false, bool RestoreOp = false,
+                llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
+                int TopLevelTryNumber = -1, int Index = -1)
+    : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
+      IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
+      StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber), 
+      StoreIndex(Index) {}
+};
+
 /// CodeGenFunction - This class organizes the per-function state that is used
 /// while generating LLVM code.
 class CodeGenFunction : public CodeGenTypeCache {
@@ -1120,102 +1175,6 @@ private:
 
   /// r4start
   bool IsMSABI;
-
-  /// r4start
-  /// This structer holds information about unwind table entry
-  /// and associated with this entry store operation.
-  struct RestoreOpInfo {
-    enum RestoreOpKind {
-      Undef,
-      DtorRestore,
-      CatchRestore,
-      TryEndRestore
-    };
-
-    RestoreOpKind Kind;
-    llvm::StoreInst *RestoreOp;
-    int Index;
-  };
-
-  struct MsUnwindInfo {
-    int ToState;
-    int StoreValue;
-    llvm::Value *ThisPtr;
-    llvm::Value *ReleaseFunc;
-    bool IsUsed;
-    bool IsRestoreOperation;
-    llvm::StoreInst *Store;
-    int StoreInstTryLevel;
-    int TopLevelTry;
-    int StoreIndex;
-
-    typedef std::list<RestoreOpInfo> RestoreList;
-    RestoreList RestoreOps;
-
-    class StoreOpFinder {
-      int State;
-    public:
-      StoreOpFinder(int state) : State(state) {}
-      bool operator()(const CodeGenFunction::MsUnwindInfo &info) {
-        return State == info.StoreValue;
-      }
-    };
-
-    struct UnwindInfoLess {
-      bool operator() (const CodeGenFunction::MsUnwindInfo &LHS,
-                       const CodeGenFunction::MsUnwindInfo &RHS) {
-        return LHS.StoreIndex < RHS.StoreIndex;
-      }
-    };
-
-    class IsUnwindInfosEqual {
-      llvm::StoreInst *StoreOp;
-    public:
-      IsUnwindInfosEqual(llvm::StoreInst *Inst) : StoreOp(Inst) {}
-      bool operator() (const CodeGenFunction::MsUnwindInfo &Info) {
-        return Info.Store == StoreOp;
-      }
-    };
-
-    struct IsDtorRestore {
-      bool operator() (const RestoreOpInfo &info) {
-        return info.Kind == RestoreOpInfo::DtorRestore;
-      }
-    };
-
-    class IsRestoreEqualsUnwindInfo {
-      llvm::StoreInst *StoreOp;
-    public:
-      IsRestoreEqualsUnwindInfo(llvm::StoreInst *Inst) : StoreOp(Inst) {}
-      bool operator() (const RestoreOpInfo &Info) {
-        return Info.RestoreOp == StoreOp;
-      }
-    };
-
-    class FindPrevStoreInTable {
-      int TopLevelTryNumber;
-    public:
-      FindPrevStoreInTable(int TryNumber) : TopLevelTryNumber(TryNumber) {}
-      bool operator() (const MsUnwindInfo &info) {
-        return !info.IsRestoreOperation &&
-               info.TopLevelTry == TopLevelTryNumber;
-      }
-    };
-
-    MsUnwindInfo(int State) 
-     : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
-       IsUsed(false), IsRestoreOperation(false), Store(0), 
-       StoreInstTryLevel(-1) {}
-
-    MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
-                 int StoreVal = -2, bool Used = false, bool RestoreOp = false,
-                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
-                 int TopLevelTryNumber = -1, int Index = -1)
-     : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
-       IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
-       StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber), 
-       StoreIndex(Index) {}
-  };
 
   /// r4start
   class MSEHState {
