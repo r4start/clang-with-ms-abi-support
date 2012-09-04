@@ -1177,6 +1177,31 @@ private:
       }
     };
 
+    struct IsDtorRestore {
+      bool operator() (const RestoreOpInfo &info) {
+        return info.Kind == RestoreOpInfo::DtorRestore;
+      }
+    };
+
+    class IsRestoreEqualsUnwindInfo {
+      llvm::StoreInst *StoreOp;
+    public:
+      IsRestoreEqualsUnwindInfo(llvm::StoreInst *Inst) : StoreOp(Inst) {}
+      bool operator() (const RestoreOpInfo &Info) {
+        return Info.RestoreOp == StoreOp;
+      }
+    };
+
+    class FindPrevStoreInTable {
+      int TopLevelTryNumber;
+    public:
+      FindPrevStoreInTable(int TryNumber) : TopLevelTryNumber(TryNumber) {}
+      bool operator() (const MsUnwindInfo &info) {
+        return !info.IsRestoreOperation &&
+               info.TopLevelTry == TopLevelTryNumber;
+      }
+    };
+
     MsUnwindInfo(int State) 
      : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
        IsUsed(false), IsRestoreOperation(false), Store(0), 
