@@ -629,10 +629,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
       EHState.UnwindTable.back().IsUsed = true;
     }
 
-    if (!EHState.TryLevel) {
-      ++EHState.TopLevelTryNumber;
-    }
-
+    ++EHState.TopLevelTryNumber;
     ++EHState.TryLevel;
 
     size_t state = EHState.UnwindTable.size() - 1;
