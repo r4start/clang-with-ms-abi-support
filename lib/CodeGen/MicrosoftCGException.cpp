@@ -49,7 +49,9 @@ void CodeGenFunction::MSEHState::RestoreTryState(uint32_t State,
                                            RestoreOpInfo::RestoreOpKind Kind) {
   llvm::Constant *state = llvm::ConstantInt::get(CGF.Int32Ty, State);
   RestoreOpInfo info = { 
-    Kind, CGF.Builder.CreateStore(state, MSTryState), StoreIndex++
+    Kind, 
+    CGF.Builder.CreateStore(state, MSTryState),
+    StoreIndex++
   };
   RestoringState.RestoreOps.push_back(info);
 }
@@ -91,8 +93,6 @@ void CodeGenFunction::MSEHState::ShrinkUnwindTable() {
   	        std::find_if(reAssign->RestoreOps.begin(), 
                          reAssign->RestoreOps.end(),
   	                     IsDtorRestore());
-          removingRestore.RestoreOp->setOperand(0, 
-                                  reAssign->Store->getOperand(0));
           reAssign->RestoreOps.push_back(removingRestore);
           removingRestore = *dtorRestore;
           reAssign->RestoreOps.erase(dtorRestore);
@@ -614,7 +614,7 @@ void CodeGenFunction::SaveUnwindFuncletForLaterEmit(int ToState,
   assert(fd && "Unwind funclet must be emit for function!");
 
   MsUnwindInfo funcletInfo(ToState, This, ReleaseFunc);
-
+  funcletInfo.TopLevelTry = EHState.TopLevelTryNumber;
   EHState.UnwindTable.push_back(funcletInfo);
 }
 
@@ -639,7 +639,8 @@ public:
 class FindPrevStoreInTable {
   int TopLevelTryNumber;
 public:
-  FindPrevStoreInTable(int TryNumber) : TopLevelTryNumber(TryNumber) {}
+  FindPrevStoreInTable(int TryNumber) 
+   : TopLevelTryNumber(TryNumber) {}
   bool operator() (const MsUnwindInfo &info) {
     return !info.IsRestoreOperation &&
             info.TopLevelTry == TopLevelTryNumber;
@@ -672,10 +673,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
     for (MsUnwindInfo::RestoreList::iterator restore = I->RestoreOps.begin(),
          e = I->RestoreOps.end(); restore != e; ++restore) {
-      // We don`t need store catches restore and restores after tries.
-      if (restore->Kind == RestoreOpInfo::CatchRestore ||
-          (restore->Kind == RestoreOpInfo::TryEndRestore && 
-           I->ToState == -1)) {
+      // We don`t need to store dtor restores and catches.
+      if (restore->Kind != RestoreOpInfo::TryEndRestore) {
         continue;
       }
 
@@ -684,6 +683,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       info.StoreIndex = restore->Index;
       info.IsRestoreOperation = true;
       info.StoreValue = I->StoreValue;
+      info.StoreInstTryLevel = I->StoreInstTryLevel;
+      info.TopLevelTry = I->TopLevelTry;
       unpackedUnwindTable.push_back(info);
     }
   }
@@ -696,35 +697,12 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   for (MSEHState::UnwindTableTy::iterator I = ++unpackedUnwindTable.begin(),
        E = unpackedUnwindTable.end(); I != E; ++I, ++posCounter) {
     if (I->IsRestoreOperation) {
-      // Now we must determine parent of this restore op.
-      // This need because we must update store value and 'to state'.
-      for (MSEHState::UnwindTableTy::iterator Parent = EHState.UnwindTable.begin(),
-           E = EHState.UnwindTable.end(); Parent != E; ++Parent) {
-        MsUnwindInfo::RestoreList::iterator restore = 
-          std::find_if(Parent->RestoreOps.begin(), Parent->RestoreOps.end(),
-                       IsRestoreEqualsUnwindInfo(I->Store));
-
-        if (restore == Parent->RestoreOps.end()) {
-          continue;
-        }
-
-        MSEHState::UnwindTableTy::iterator unpackedParent = 
-          std::find_if(unpackedUnwindTable.begin(), unpackedUnwindTable.end(),
-                       IsInfoEqualTo(I->Store));
-        assert(unpackedParent != unpackedUnwindTable.end() && 
-               "Can not find parent in unpacked table!");
-        if (restore->Kind == RestoreOpInfo::DtorRestore) {
-          I->StoreValue = unpackedParent->ToState;
-          I->Store->setOperand(0, 
-                      llvm::ConstantInt::get(Int32Ty,unpackedParent->ToState));
-          I->ToState = (--unpackedParent)->ToState;
-        } else {
-          I->StoreValue = unpackedParent->StoreValue;
-          I->Store->setOperand(0, unpackedParent->Store->getOperand(0));
-          I->ToState = unpackedParent->StoreValue;
-        }
-        break;
+      if (I->StoreValue == -1) {
+        // This restore at the end of top try block,
+        // so we don`t need to fix it.
+        continue;
       }
+      I->ToState = I->StoreValue;
       continue;
     }
 
@@ -741,13 +719,41 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
                    FindPrevStoreInTable(I->TopLevelTry));
     
     if (lastStoreOp == unpackedUnwindTable.rend()) {
-      I->ToState = -1;
+      // This store op is first in try block, so we need
+      // know last store state in level above.
+      lastStoreOp = std::find_if(MSEHState::UnwindTableTy::reverse_iterator(I),
+                                 unpackedUnwindTable.rend(),
+                               FindPrevStoreInTable(I->StoreInstTryLevel - 1));
+      if (lastStoreOp == unpackedUnwindTable.rend()) {
+        // This is first store in top level try block.
+        I->ToState = -1;
+      } else {
+        I->ToState = std::distance(lastStoreOp, unpackedUnwindTable.rend()) - 1;
+      }
     } else {
       // We subtract 1 because we don`t count first element.
       I->ToState = std::distance(lastStoreOp, unpackedUnwindTable.rend()) - 1;
     }
   }
   
+  // Now we must fix all dtor restores.
+  for (MSEHState::UnwindTableTy::iterator I = ++EHState.UnwindTable.begin(),
+       E = EHState.UnwindTable.end(); I != E; ++I) {
+    for (MsUnwindInfo::RestoreList::iterator restore = I->RestoreOps.begin(),
+         e = I->RestoreOps.end(); restore != e; ++restore) {
+      if (restore->Kind != RestoreOpInfo::DtorRestore) {
+        continue;
+      }
+
+      auto storeOp = 
+        std::find_if(unpackedUnwindTable.begin(), 
+                     unpackedUnwindTable.end(),
+                     IsInfoEqualTo(I->Store));
+      restore->RestoreOp->setOperand(0, 
+            llvm::ConstantInt::get(Int32Ty, storeOp->ToState));
+    }
+  }
+    
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
 
@@ -1139,10 +1145,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   
   EHState.RestoreTryState(lastState, *restoringState, 
                           RestoreOpInfo::TryEndRestore);
-  //EHState.UnwindTable.push_back(lastState);
-  //EHState.SetMSTryState(lastState);
-  //EHState.UnwindTable.back().IsUsed = true;
-  //EHState.UnwindTable.back().IsRestoreOperation = true;
 
   if (!EHState.TryLevel) {
     // Now we can shrink unwind table
