@@ -745,7 +745,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
         continue;
       }
 
-      auto storeOp = 
+      MSEHState::UnwindTableTy::iterator storeOp = 
         std::find_if(unpackedUnwindTable.begin(), 
                      unpackedUnwindTable.end(),
                      IsInfoEqualTo(I->Store));
