@@ -1052,6 +1052,17 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
 }
 
 // r4start
+static bool HasCatchHandlerTryBlock(const Stmt *Handler) {
+  for (Stmt::const_child_iterator I = Handler->child_begin(),
+       E = Handler->child_end(); I != E; ++I) {
+    if (isa<CXXTryStmt>(*I)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
@@ -1098,19 +1109,40 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     const CXXCatchStmt *C = S.getHandler(I);
 
+    llvm::BasicBlock *restoreBlock = 0;
+    // We create restore block before catch body
+    // because if catch body has try statement
+    // then we need add restore op in this catch
+    // to unwind table.
+    // And we need this store before
+    // nested try store in unwind table.
+    if (HasCatchHandlerTryBlock(C->getHandlerBlock())) {
+      restoreBlock = 
+        llvm::BasicBlock::Create(CGM.getLLVMContext(), "catch.restore", CurFn);
+
+      Builder.SetInsertPoint(restoreBlock);
+      // TODO: right handling of return instruction
+      Builder.CreateUnreachable();
+    }
+
     llvm::BasicBlock *entryBB = 
-      llvm::BasicBlock::Create(CGM.getLLVMContext(), mangledCatchName, CurFn);
+      llvm::BasicBlock::Create(CGM.getLLVMContext(),
+                               mangledCatchName,
+                               CurFn, restoreBlock);
 
     Builder.SetInsertPoint(entryBB);
 
     EmitStmt(C->getHandlerBlock());
 
-    EHState.RestoreTryState(lastState, *restoringState, 
-                            RestoreOpInfo::CatchRestore);
+    if (!restoreBlock) {
+      EHState.RestoreTryState(lastState, *restoringState, 
+                              RestoreOpInfo::CatchRestore);
 
-    // TODO: right handling of return instruction
-    Builder.CreateUnreachable();
-
+      // TODO: right handling of return instruction
+      Builder.CreateUnreachable();
+    } else {
+      Builder.CreateBr(restoreBlock);
+    }
     // generate handler for this catch
     QualType CaughtType = C->getCaughtType();
     GenerateCatchHandler(CaughtType, handlerTy,
