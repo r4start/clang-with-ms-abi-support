@@ -1104,11 +1104,12 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   EHState.PrevLevelLastIdValues.pop_back();
   int lastState = EHState.PrevLevelLastIdValues.back();
 
-  MSEHState::UnwindTableTy::iterator restoringState = 
-    std::find_if(EHState.UnwindTable.begin(), EHState.UnwindTable.end(),
-                 MsUnwindInfo::StoreOpFinder(lastState));
+  MSEHState::UnwindTableTy::reverse_iterator restoringState = 
+    std::find_if(EHState.UnwindTable.rbegin(), EHState.UnwindTable.rend(),
+                 FindPrevStoreInTable(EHState.TryLevel - 1));
+  lastState = restoringState->StoreValue;
 
-  assert(restoringState != EHState.UnwindTable.end() &&
+  assert(restoringState != EHState.UnwindTable.rend() &&
          "Can not find store state for restoring operation");
 
   for (unsigned I = 0; I != NumHandlers; ++I) {
@@ -1206,11 +1207,9 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   EHState.TryLevel--;
   // Here we must restore last state before try block.
-  auto restore =
-    std::find_if(EHState.UnwindTable.rbegin(), EHState.UnwindTable.rend(), 
-    [this] (const MsUnwindInfo & info) -> bool {
-      return EHState.TryLevel == info.TopLevelTry;
-    });
+  MSEHState::UnwindTableTy::reverse_iterator restore =
+    std::find_if(EHState.UnwindTable.rbegin(), EHState.UnwindTable.rend(),
+                 FindPrevStoreInTable(EHState.TryLevel));
 
   EHState.RestoreTryState(lastState, *restore,
                           RestoreOpInfo::TryEndRestore);
