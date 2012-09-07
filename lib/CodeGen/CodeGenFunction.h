@@ -551,7 +551,7 @@ struct MsUnwindInfo {
   llvm::Value *ThisPtr;
   llvm::Value *ReleaseFunc;
   bool IsUsed;
-  bool IsRestoreOperation;
+  RestoreOpInfo::RestoreOpKind RestoreKind;
   llvm::StoreInst *Store;
   int StoreInstTryLevel;
   int TopLevelTry;
@@ -571,15 +571,16 @@ struct MsUnwindInfo {
 
   MsUnwindInfo(int State) 
     : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
-      IsUsed(false), IsRestoreOperation(false), Store(0), 
+      IsUsed(false), RestoreKind(RestoreOpInfo::Undef), Store(0), 
       StoreInstTryLevel(-1) {}
 
   MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
-                int StoreVal = -2, bool Used = false, bool RestoreOp = false,
+                int StoreVal = -2, bool Used = false, 
+                RestoreOpInfo::RestoreOpKind RestoreOp = RestoreOpInfo::Undef,
                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
                 int TopLevelTryNumber = -1, int Index = -1)
     : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
-      IsUsed(Used), IsRestoreOperation(RestoreOp), Store(StoreInstruction),
+      IsUsed(Used), RestoreKind(RestoreOp), Store(StoreInstruction),
       StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber), 
       StoreIndex(Index) {}
 };
@@ -1227,6 +1228,11 @@ private:
      TopLevelTryNumber(0) {}
 
     void SetMSTryState(uint32_t State);
+
+    /// This function opposite to SetMSTrystate
+    /// does not change unwind table.
+    /// It just generates store instruction and return it.
+    llvm::StoreInst *CreateStateStore(uint32_t State);
 
     void RestoreTryState(uint32_t State, 
                          MsUnwindInfo &RestoringState,
