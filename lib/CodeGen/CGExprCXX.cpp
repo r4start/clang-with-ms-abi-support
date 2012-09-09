@@ -1698,6 +1698,26 @@ static llvm::Constant *getDynamicCastFn(CodeGenFunction &CGF) {
   return CGF.CGM.CreateRuntimeFunction(FTy, "__dynamic_cast");
 }
 
+// r4start
+static llvm::Constant *getMSDynamicCastFn(CodeGenFunction &CGF) {
+  // PVOID __RTDynamicCast(PVOID inptr,
+  //                       LONG VfDelta,
+  //                       PVOID SrcType,
+  //                       PVOID DstType,
+  //                       BOOL isReference) throw(...)
+  // Additional info 
+  // http://msdn.microsoft.com/en-us/library/ff770587%28v=vs.100%29.aspx
+  llvm::Type *Args[5] = { 
+    CGF.Int8PtrTy, CGF.Int32Ty,
+    CGF.Int8PtrTy, CGF.Int8PtrTy,
+    CGF.Int32Ty
+  };
+  llvm::FunctionType *FTy = 
+    llvm::FunctionType::get(CGF.Int8PtrTy, Args, false);
+
+  return CGF.CGM.CreateRuntimeFunction(FTy, "__RTDynamicCast");
+}
+
 static llvm::Constant *getBadCastFn(CodeGenFunction &CGF) {
   // void __cxa_bad_cast();
   llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
@@ -1754,11 +1774,35 @@ EmitDynamicCastCall(CodeGenFunction &CGF, llvm::Value *Value,
   assert(SrcRecordTy->isRecordType() && "source type must be a record type!");
   assert(DestRecordTy->isRecordType() && "dest type must be a record type!");
 
-  llvm::Value *SrcRTTI =
-    CGF.CGM.GetAddrOfRTTIDescriptor(SrcRecordTy.getUnqualifiedType());
-  llvm::Value *DestRTTI =
-    CGF.CGM.GetAddrOfRTTIDescriptor(DestRecordTy.getUnqualifiedType());
+  // r4start
+  llvm::Value *SrcRTTI;
+  llvm::Value *DestRTTI;
+  if (CGF.CGM.getContext().getTargetInfo().getCXXABI() != CXXABI_Microsoft) {
+    SrcRTTI = 
+      CGF.CGM.GetAddrOfRTTIDescriptor(SrcRecordTy.getUnqualifiedType());
+    DestRTTI = 
+      CGF.CGM.GetAddrOfRTTIDescriptor(DestRecordTy.getUnqualifiedType());
+  } else {
+    SrcRTTI = CGF.CGM.GetTypeDescriptor(SrcRecordTy.getUnqualifiedType());
+    DestRTTI = CGF.CGM.GetTypeDescriptor(DestRecordTy.getUnqualifiedType());
 
+    Value = CGF.EmitCastToVoidPtr(Value);
+    SrcRTTI = CGF.EmitCastToVoidPtr(SrcRTTI);
+    DestRTTI = CGF.EmitCastToVoidPtr(DestRTTI);
+
+    // r4start
+    // TODO: remove this stub.
+    llvm::Constant *VfDelta = llvm::ConstantInt::get(CGF.Int32Ty, 0);
+
+    // If DestTy is reference type then we pass to dyn_cast reference.
+    llvm::Constant *IsReference = 
+      llvm::ConstantInt::get(CGF.Int32Ty, isa<ReferenceType>(DestTy));
+
+    Value = CGF.Builder.CreateCall5(getMSDynamicCastFn(CGF), Value, VfDelta,
+                                    SrcRTTI, DestRTTI, IsReference);
+    Value = CGF.Builder.CreateBitCast(Value, DestLTy);
+    return Value;
+  }
   // FIXME: Actually compute a hint here.
   llvm::Value *OffsetHint = llvm::ConstantInt::get(PtrDiffLTy, -1ULL);
 
