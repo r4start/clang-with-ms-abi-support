@@ -669,43 +669,12 @@ public:
 }
 
 // r4start
-llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
-  const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
-  assert(funcDecl && "Unwind table is generating only for functions!");
-
-  MSEHState::UnwindTableTy unpackedUnwindTable;
-  // Skip first fake element.
-  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
-       E = EHState.UnwindTable.end(); I != E; ++I) {
-    if (I != EHState.UnwindTable.begin()) {
-      unpackedUnwindTable.push_back(*I);
-    }
-
-    for (MsUnwindInfo::RestoreList::iterator restore = I->RestoreOps.begin(),
-         e = I->RestoreOps.end(); restore != e; ++restore) {
-      // We don`t need to store dtor restores and catches.
-      if (restore->Kind != RestoreOpInfo::TryEndRestore) {
-        continue;
-      }
-
-      MsUnwindInfo info(I->ToState);
-      info.Store = restore->RestoreOp;
-      info.StoreIndex = restore->Index;
-      info.RestoreKind = restore->Kind;
-      info.StoreValue = I->StoreValue;
-      info.StoreInstTryLevel = I->StoreInstTryLevel;
-      info.TopLevelTry = I->TopLevelTry;
-      unpackedUnwindTable.push_back(info);
-    }
-  }
-
-  unpackedUnwindTable.sort(UnwindInfoLess());
-
+void CodeGenFunction::FixStates(MSEHState::UnwindTableTy &UnpackedTable) {
   // After all shrink and unpack operations, ToState and StoreValue
   // fields are wrong. So we need to fix them.
   int posCounter = 1;
-  for (MSEHState::UnwindTableTy::iterator I = ++unpackedUnwindTable.begin(),
-       E = unpackedUnwindTable.end(); I != E; ++I, ++posCounter) {
+  for (MSEHState::UnwindTableTy::iterator I = ++UnpackedTable.begin(),
+       E = UnpackedTable.end(); I != E; ++I, ++posCounter) {
     if (I->RestoreKind != RestoreOpInfo::Undef) {
       if (I->RestoreKind == RestoreOpInfo::CatchRestore) {
         I->ToState = I->StoreValue;
@@ -726,24 +695,24 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     // Fix ToState field value;
     MSEHState::UnwindTableTy::reverse_iterator lastStoreOp = 
       std::find_if(MSEHState::UnwindTableTy::reverse_iterator(I), 
-                   unpackedUnwindTable.rend(),
+                   UnpackedTable.rend(),
                    FindPrevStoreInTable(I->TopLevelTry));
     
-    if (lastStoreOp == unpackedUnwindTable.rend()) {
+    if (lastStoreOp == UnpackedTable.rend()) {
       // This store op is first in try block, so we need
       // know last store state in level above.
       lastStoreOp = std::find_if(MSEHState::UnwindTableTy::reverse_iterator(I),
-                                 unpackedUnwindTable.rend(),
+                                 UnpackedTable.rend(),
                                FindPrevStoreInTable(I->StoreInstTryLevel - 1));
-      if (lastStoreOp == unpackedUnwindTable.rend()) {
+      if (lastStoreOp == UnpackedTable.rend()) {
         // This is first store in top level try block.
         I->ToState = -1;
       } else {
-        I->ToState = std::distance(lastStoreOp, unpackedUnwindTable.rend()) - 1;
+        I->ToState = std::distance(lastStoreOp, UnpackedTable.rend()) - 1;
       }
     } else {
       // We subtract 1 because we don`t count first element.
-      I->ToState = std::distance(lastStoreOp, unpackedUnwindTable.rend()) - 1;
+      I->ToState = std::distance(lastStoreOp, UnpackedTable.rend()) - 1;
     }
   }
   
@@ -751,8 +720,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   for (MSEHState::UnwindTableTy::iterator I = ++EHState.UnwindTable.begin(),
        E = EHState.UnwindTable.end(); I != E; ++I) {
     MSEHState::UnwindTableTy::iterator storeOp = 
-        std::find_if(unpackedUnwindTable.begin(), 
-                     unpackedUnwindTable.end(),
+        std::find_if(UnpackedTable.begin(), 
+                     UnpackedTable.end(),
                      IsInfoEqualTo(I->Store));
     for (MsUnwindInfo::RestoreList::iterator restore = I->RestoreOps.begin(),
          e = I->RestoreOps.end(); restore != e; ++restore) {
@@ -769,7 +738,48 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       }
     }
   }
-    
+}
+
+// r4start
+void 
+CodeGenFunction::UnpackUnwindTable(MSEHState::UnwindTableTy &UnpackedTable) {
+  // Skip first fake element.
+  for (MSEHState::UnwindTableTy::iterator I = EHState.UnwindTable.begin(),
+       E = EHState.UnwindTable.end(); I != E; ++I) {
+    if (I != EHState.UnwindTable.begin()) {
+      UnpackedTable.push_back(*I);
+    }
+
+    for (MsUnwindInfo::RestoreList::iterator restore = I->RestoreOps.begin(),
+         e = I->RestoreOps.end(); restore != e; ++restore) {
+      // We don`t need to store dtor restores and catches.
+      if (restore->Kind != RestoreOpInfo::TryEndRestore) {
+        continue;
+      }
+
+      MsUnwindInfo info(I->ToState);
+      info.Store = restore->RestoreOp;
+      info.StoreIndex = restore->Index;
+      info.RestoreKind = restore->Kind;
+      info.StoreValue = I->StoreValue;
+      info.StoreInstTryLevel = I->StoreInstTryLevel;
+      info.TopLevelTry = I->TopLevelTry;
+      UnpackedTable.push_back(info);
+    }
+  }
+
+  UnpackedTable.sort(UnwindInfoLess());
+  FixStates(UnpackedTable);
+}
+
+// r4start
+llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
+  const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
+  assert(funcDecl && "Unwind table is generating only for functions!");
+
+  MSEHState::UnwindTableTy unpackedUnwindTable;
+  UnpackUnwindTable(unpackedUnwindTable);
+
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
 
