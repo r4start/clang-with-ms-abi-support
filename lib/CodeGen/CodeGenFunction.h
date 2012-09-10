@@ -2813,6 +2813,12 @@ private:
                                      llvm::Value *ReleaseFunc);
 
   /// r4start
+  void FixStates(MSEHState::UnwindTableTy &UnpackedTable);
+
+  /// r4start
+  void UnpackUnwindTable(MSEHState::UnwindTableTy &UnpackedTable);
+
+  /// r4start
   llvm::GlobalValue *EmitUnwindTable();
 
   /// r4start
