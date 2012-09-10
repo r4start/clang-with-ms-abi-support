@@ -762,7 +762,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       }
 
       if (I->RestoreKind == RestoreOpInfo::CatchRestore &&
-          restore->Kind == RestoreOpInfo::TryEndRestore) {
+          (restore->Kind == RestoreOpInfo::TryEndRestore ||
+           restore->Kind == RestoreOpInfo::CatchRestore)) {
       restore->RestoreOp->setOperand(0, 
               llvm::ConstantInt::get(Int32Ty, storeOp->StoreValue));
       }
@@ -1153,7 +1154,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
       catchInfo.TopLevelTry = EHState.TopLevelTryNumber;
       catchInfo.IsUsed = true;
       EHState.UnwindTable.push_back(catchInfo);
-      EHState.PrevLevelLastIdValues.push_back(state);
     }
 
     llvm::BasicBlock *entryBB = 
@@ -1165,15 +1165,14 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
-    if (!restoreBlock) {
-      EHState.RestoreTryState(lastState, *restoringState, 
-                              RestoreOpInfo::CatchRestore);
+    EHState.RestoreTryState(lastState, *restoringState, 
+                            RestoreOpInfo::CatchRestore);
 
+    if (!restoreBlock) {
       // TODO: right handling of return instruction
       Builder.CreateUnreachable();
     } else {
       Builder.CreateBr(restoreBlock);
-      //EHState.PrevLevelLastIdValues.pop_back();
     }
     // generate handler for this catch
     QualType CaughtType = C->getCaughtType();
@@ -1207,11 +1206,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   EHState.TryLevel--;
   // Here we must restore last state before try block.
-  MSEHState::UnwindTableTy::reverse_iterator restore =
-    std::find_if(EHState.UnwindTable.rbegin(), EHState.UnwindTable.rend(),
-                 FindPrevStoreInTable(EHState.TryLevel));
-
-  EHState.RestoreTryState(lastState, *restore,
+  EHState.RestoreTryState(lastState, *restoringState,
                           RestoreOpInfo::TryEndRestore);
 
   if (!EHState.TryLevel) {
