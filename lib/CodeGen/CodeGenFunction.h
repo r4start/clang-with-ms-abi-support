@@ -530,7 +530,7 @@ public:
 };
 
 /// r4start
-/// This structer holds information about unwind table entry
+/// This structure holds information about unwind table entry
 /// and associated with this entry store operation.
 struct RestoreOpInfo {
   enum RestoreOpKind {
@@ -2807,6 +2807,9 @@ private:
 
   /// r4start
   void EmitESTypeList(const FunctionProtoType *FuncProto);
+
+  /// r4start
+  void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This);
 
   /// r4start
   void SaveUnwindFuncletForLaterEmit(int ToState, llvm::Value *This,
