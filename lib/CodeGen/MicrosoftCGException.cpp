@@ -1088,6 +1088,18 @@ static bool HasCatchHandlerTryBlock(const Stmt *Handler) {
   return false;
 }
 
+static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,
+                                       int Value, int StoreTryLevel,
+                                       int TopTryNumber) {
+// MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
+//              int StoreVal = -2, bool Used = false, 
+//              RestoreOpInfo::RestoreOpKind RestoreOp = RestoreOpInfo::Undef,
+//              llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
+//              int TopLevelTryNumber = -1, int Index = -1)
+  return MsUnwindInfo(-1, 0, 0, Value, true, RestoreOpInfo::CatchRestore,
+                      Store, StoreTryLevel, TopTryNumber, Index);
+}
+
 // r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
@@ -1155,15 +1167,9 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
       // TODO: right handling of return instruction
       Builder.CreateUnreachable();
 
-      MsUnwindInfo catchInfo(state);
-      catchInfo.RestoreKind = RestoreOpInfo::CatchRestore;
-      catchInfo.Store = catchRestoreOp;
-      catchInfo.StoreIndex = EHState.StoreIndex++;
-      catchInfo.StoreValue = state;
-      catchInfo.StoreInstTryLevel = EHState.TryLevel;
-      catchInfo.TopLevelTry = EHState.TopLevelTryNumber;
-      catchInfo.IsUsed = true;
-      EHState.UnwindTable.push_back(catchInfo);
+      EHState.UnwindTable.push_back(
+              CreateCatchRestore(catchRestoreOp, EHState.StoreIndex++, state,
+                                 EHState.TryLevel, EHState.TopLevelTryNumber));
     }
 
     llvm::BasicBlock *entryBB = 
@@ -1175,10 +1181,9 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
-    EHState.RestoreTryState(lastState, *restoringState, 
-                            RestoreOpInfo::CatchRestore);
-
     if (!restoreBlock) {
+      EHState.RestoreTryState(lastState, *restoringState, 
+                              RestoreOpInfo::CatchRestore);
       // TODO: right handling of return instruction
       Builder.CreateUnreachable();
     } else {
@@ -1225,6 +1230,72 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   GenerateTryBlockTableEntry();
+}
+
+// r4start
+void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
+  MSEHState::LastUnwindEntryOnCurLevel::iterator 
+      last = EHState.LastEntry.find(EHState.TryLevel);
+      
+  MsUnwindInfo *lastEntry = 0;
+  if (last != EHState.LastEntry.end()) {
+    lastEntry = &last->second;
+  }
+
+  Decl::Kind kind;
+  const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
+      
+  if (MD) {
+    kind = MD->getKind();
+    if (kind == Decl::CXXConstructor) {
+      llvm::BasicBlock *Cont = 
+        llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
+      Builder.CreateBr(Cont);
+      Builder.SetInsertPoint(Cont);
+
+      const CXXRecordDecl *parent = MD->getParent();
+      llvm::Value *dtor = 
+        CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
+          
+      size_t state = EHState.UnwindTable.size() - 1;
+          
+      SaveUnwindFuncletForLaterEmit(EHState.PrevLevelLastIdValues.back(),
+                                    This, dtor);
+
+      EHState.SetMSTryState(state);
+      EHState.PrevLevelLastIdValues.push_back(state);
+
+      if (lastEntry) {
+        lastEntry->IsUsed = true;
+        EHState.LastEntry.erase(EHState.TryLevel);
+        lastEntry = 0;
+      }
+      EHState.LastEntry.insert(
+        std::pair<int, MsUnwindInfo&>(EHState.TryLevel,
+                                      EHState.UnwindTable.back()));
+    } else if (kind == Decl::CXXDestructor) {
+      int forState = EHState.PrevLevelLastIdValues.back();
+      EHState.PrevLevelLastIdValues.pop_back();
+      int state = EHState.PrevLevelLastIdValues.back();
+      MSEHState::UnwindTableTy::iterator restoringState = 
+        std::find_if(EHState.UnwindTable.begin(), EHState.UnwindTable.end(),
+                      MsUnwindInfo::StoreOpFinder(forState));
+      assert(restoringState != EHState.UnwindTable.end() &&
+              "Can not find store state for restoring operation");
+      EHState.RestoreTryState(state, *restoringState, 
+                              RestoreOpInfo::DtorRestore);
+      lastEntry = 0;
+    }
+  }
+
+  // If it was not ctor call then we must save 
+  // this store instruction in ll code.
+  // If it was ctor call then it was already done.
+  last = EHState.LastEntry.find(EHState.TryLevel);
+  if (last != EHState.LastEntry.end() && lastEntry && 
+      last->second.Store == lastEntry->Store){
+    last->second.IsUsed = true;
+  }
 }
 
 // r4start
