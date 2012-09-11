@@ -110,6 +110,26 @@ try {
   return 0;
 }
 
+extern int s();
+
+int test3() {
+try {
+    A a, b;
+    s();
+    try {
+      s();
+      B h;
+    } catch (G &) {}
+  } catch (A &) {}
+
+  try {
+    C d, f;
+    A a, b;
+  } catch (B &) { s();}
+
+  return 0;
+}
+
 // CHECK: @"\01__unwindtable$test@@YAHXZ" = internal constant [13 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 0, i8* blockaddress(@"\01?test@@YAHXZ", %"\01__unwindfunclet$test@@YAHXZ$24") }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 -1, i8* null }]
 
 // CHECK: @"\01__unwindtable$test2@@YAHXZ" = internal constant [8 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 0, i8* blockaddress(@"\01?test2@@YAHXZ", %"\01__unwindfunclet$test2@@YAHXZ$4") }, %unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 3, i8* blockaddress(@"\01?test2@@YAHXZ", %"\01__unwindfunclet$test2@@YAHXZ$5") }, %unwind.map.entry { i32 4, i8* blockaddress(@"\01?test2@@YAHXZ", %"\01__unwindfunclet$test2@@YAHXZ$6") }, %unwind.map.entry { i32 5, i8* blockaddress(@"\01?test2@@YAHXZ", %"\01__unwindfunclet$test2@@YAHXZ$7") }, %unwind.map.entry { i32 -1, i8* null }]
@@ -320,3 +340,4 @@ try {
 // CHECK-NEXT:   call void @"\01??1A@@QAE@XZ"(%struct.A* %a7)
 // CHECK-NEXT:   call void @"\01__ehhandler$test2@@YAHXZ"() noreturn
 // CHECK-NEXT:   unreachable
+
