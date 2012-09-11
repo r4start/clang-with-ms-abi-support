@@ -37,7 +37,7 @@ void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
   UnwindTable.back().Store = CreateStateStore(State);
   UnwindTable.back().StoreValue = State;
   UnwindTable.back().StoreInstTryLevel = TryLevel;
-  UnwindTable.back().TopLevelTry = TopLevelTryNumber;
+  UnwindTable.back().TopLevelTry = TryNumber;
   UnwindTable.back().StoreIndex = StoreIndex++;
 }
 
@@ -621,7 +621,7 @@ void CodeGenFunction::SaveUnwindFuncletForLaterEmit(int ToState,
   assert(fd && "Unwind funclet must be emit for function!");
 
   MsUnwindInfo funcletInfo(ToState, This, ReleaseFunc);
-  funcletInfo.TopLevelTry = EHState.TopLevelTryNumber;
+  funcletInfo.TopLevelTry = EHState.TryNumber;
   EHState.UnwindTable.push_back(funcletInfo);
 }
 
@@ -1134,7 +1134,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   assert(restoringState != EHState.UnwindTable.rend() &&
          "Can not find store state for restoring operation");
-
+  
   for (unsigned I = 0; I != NumHandlers; ++I) {
 
     llvm::SmallString<256>  catchHandlerName;
@@ -1169,7 +1169,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
       EHState.UnwindTable.push_back(
               CreateCatchRestore(catchRestoreOp, EHState.StoreIndex++, state,
-                                 EHState.TryLevel, EHState.TopLevelTryNumber));
+                                 EHState.TryLevel, EHState.TryNumber));
     }
 
     llvm::BasicBlock *entryBB = 
@@ -1178,7 +1178,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
                                CurFn, restoreBlock);
 
     Builder.SetInsertPoint(entryBB);
-
+    
     EmitStmt(C->getHandlerBlock());
 
     if (!restoreBlock) {
@@ -1242,6 +1242,16 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
     lastEntry = &last->second;
   }
 
+  // Function call.
+  if (!This) {
+    if (last != EHState.LastEntry.end() && lastEntry &&
+        last->second.Store == lastEntry->Store &&
+        true/*!isCallFromCatch*/) {
+      last->second.IsUsed = true;
+    }
+    return;
+  }
+  
   Decl::Kind kind;
   const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
       
@@ -1296,31 +1306,4 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
       last->second.Store == lastEntry->Store){
     last->second.IsUsed = true;
   }
-}
-
-// r4start
-llvm::BasicBlock *CodeGenFunction::getInvokeDestImplForMS() {
-  if (EHState.LandingPad) {
-    return EHState.LandingPad;
-  }
-
-  // Create and configure the landing pad.
-  EHState.LandingPad = createBasicBlock("lpad", CurFn);
-
-  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
-  Builder.SetInsertPoint(EHState.LandingPad);
-
-  llvm::Constant *Fn =
-    CGM.CreateRuntimeFunction(llvm::FunctionType::get(CGM.Int32Ty, true),
-                              "__cxx_fake_ms_personality");
-
-  llvm::LandingPadInst *LPadInst = 
-    Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL), 
-                          llvm::ConstantExpr::getBitCast(Fn, CGM.Int8PtrTy), 0);
-  LPadInst->setCleanup(true);
-  
-  Builder.CreateUnreachable();
-
-  // Restore the old IR generation state.
-  Builder.SetInsertPoint(oldBB);
 }

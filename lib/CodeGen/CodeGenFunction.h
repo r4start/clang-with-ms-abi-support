@@ -692,9 +692,6 @@ public:
 
   llvm::BasicBlock *getInvokeDestImpl();
 
-  /// r4start
-  llvm::BasicBlock *getInvokeDestImplForMS();
-
   template <class T>
   typename DominatingValue<T>::saved_type saveValueInCond(T value) {
     return DominatingValue<T>::save(*this, value);
@@ -1190,9 +1187,9 @@ private:
     /// When TryLevel == 1 we must set try state to -1.
     int TryLevel;
 
-    /// This field tracks count of top level tries.
+    /// This field tracks count of tries.
     /// It is used for optimize unwind table.
-    int TopLevelTryNumber;
+    int TryNumber;
 
     int StoreIndex;
 
@@ -1217,15 +1214,12 @@ private:
 
     /// Catch handlers for current try.
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
-
+    
     llvm::Constant *ESTypeList;
-
-    llvm::BasicBlock *LandingPad;
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), StoreIndex(0), LandingPad(0), 
-     TopLevelTryNumber(0) {}
+     ESTypeList(0), StoreIndex(0), TryNumber(0) {}
 
     void SetMSTryState(uint32_t State);
 
@@ -2809,7 +2803,7 @@ private:
   void EmitESTypeList(const FunctionProtoType *FuncProto);
 
   /// r4start
-  void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This);
+  void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This = 0);
 
   /// r4start
   void SaveUnwindFuncletForLaterEmit(int ToState, llvm::Value *This,

@@ -2126,7 +2126,11 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     // r4start
     // This is need for Microsoft C++ EH.
     if (IsMSABI && EHState.IsInited()) {
-      UpdateEHInfo(TargetDecl, Args[0]);
+      if (isa<CXXMethodDecl>(TargetDecl)) {
+        UpdateEHInfo(TargetDecl, Args[0]);
+      } else {
+        UpdateEHInfo(TargetDecl);
+      }
     }
   } else {
     llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
