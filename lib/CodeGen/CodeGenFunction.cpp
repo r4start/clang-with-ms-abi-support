@@ -66,11 +66,6 @@ CodeGenFunction::~CodeGenFunction() {
   // something.
   if (FirstBlockInfo)
     destroyBlockInfos(FirstBlockInfo);
-  
-  // r4start
-  if (IsMSABI && EHState.IsInited()) {
-    EmitEHInformation();
-  }
 }
 
 
@@ -230,6 +225,12 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
 
   if (CGM.getCodeGenOpts().EmitDeclMetadata)
     EmitDeclMetadata();
+
+  // r4start
+  if (IsMSABI && EHState.IsInited()) {
+    EmitEHInformation();
+  }
+
 }
 
 /// ShouldInstrumentFunction - Return true if the current function should be
