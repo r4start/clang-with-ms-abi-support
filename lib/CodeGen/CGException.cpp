@@ -634,11 +634,12 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
 
     size_t state = EHState.UnwindTable.size() - 1;
     EHState.UnwindTable.push_back(EHState.UnwindTable.back().StoreValue);
+    EHState.FirstStateStore.push_back(EHState.StoreIndex);
     EHState.SetMSTryState(state);
     EHState.UnwindTable.back().IsUsed = true;
     EHState.PrevLevelLastIdValues.push_back(state);
   } 
-
+  
   for (unsigned I = 0; I != NumHandlers; ++I) {
     const CXXCatchStmt *C = S.getHandler(I);
 

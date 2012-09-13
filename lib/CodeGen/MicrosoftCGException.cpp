@@ -37,7 +37,7 @@ void CodeGenFunction::MSEHState::SetMSTryState(uint32_t State) {
   UnwindTable.back().Store = CreateStateStore(State);
   UnwindTable.back().StoreValue = State;
   UnwindTable.back().StoreInstTryLevel = TryLevel;
-  UnwindTable.back().TopLevelTry = TryNumber;
+  UnwindTable.back().TryNumber = TryNumber;
   UnwindTable.back().StoreIndex = StoreIndex++;
 }
 
@@ -621,7 +621,7 @@ void CodeGenFunction::SaveUnwindFuncletForLaterEmit(int ToState,
   assert(fd && "Unwind funclet must be emit for function!");
 
   MsUnwindInfo funcletInfo(ToState, This, ReleaseFunc);
-  funcletInfo.TopLevelTry = EHState.TryNumber;
+  funcletInfo.TryNumber = EHState.TryNumber;
   EHState.UnwindTable.push_back(funcletInfo);
 }
 
@@ -653,7 +653,7 @@ public:
     // previous store op can be CatchRestore.
     return (info.RestoreKind == RestoreOpInfo::Undef ||
             info.RestoreKind == RestoreOpInfo::CatchRestore) &&
-           info.TopLevelTry == TopLevelTryNumber;
+           info.TryNumber == TopLevelTryNumber;
   }
 };
 
@@ -696,7 +696,7 @@ void CodeGenFunction::FixStates(MSEHState::UnwindTableTy &UnpackedTable) {
     MSEHState::UnwindTableTy::reverse_iterator lastStoreOp = 
       std::find_if(MSEHState::UnwindTableTy::reverse_iterator(I), 
                    UnpackedTable.rend(),
-                   FindPrevStoreInTable(I->TopLevelTry));
+                   FindPrevStoreInTable(I->TryNumber));
     
     if (lastStoreOp == UnpackedTable.rend()) {
       // This store op is first in try block, so we need
@@ -763,7 +763,7 @@ CodeGenFunction::UnpackUnwindTable(MSEHState::UnwindTableTy &UnpackedTable) {
       info.RestoreKind = restore->Kind;
       info.StoreValue = I->StoreValue;
       info.StoreInstTryLevel = I->StoreInstTryLevel;
-      info.TopLevelTry = I->TopLevelTry;
+      info.TryNumber = I->TryNumber;
       UnpackedTable.push_back(info);
     }
   }
@@ -871,16 +871,68 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
                                   mangledUnwindTableName);
 }
 
+namespace {
+
+class FindFirstStateAtThisTryLevel {
+  int TryNumber;
+  int TryLevel;
+public:
+  FindFirstStateAtThisTryLevel(int Level, int Number) 
+   : TryLevel(Level), TryNumber(Number) {}
+
+  bool operator() (const MsUnwindInfo &info) {
+    return info.TryNumber == TryNumber &&
+           info.StoreInstTryLevel == TryLevel;
+  }
+};
+
+class FindStoreWithIndex {
+  int Idx;
+public:
+  FindStoreWithIndex(int Index) 
+   : Idx(Index) {}
+
+  bool operator() (const MsUnwindInfo &info) {
+    return info.StoreIndex == Idx;
+  }
+};
+
+}
+
 // r4start
 void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
 
   llvm::SmallVector<llvm::Constant *, 5> fields;
 
-  llvm::Constant *defVal = llvm::ConstantInt::get(Int32Ty, 0);
-  for (unsigned I = 0; I != 3; ++I) {
-    fields.push_back(defVal);
+  MSEHState::UnwindTableTy::iterator firstState = 
+    std::find_if(EHState.UnwindTable.begin(), EHState.UnwindTable.end(),
+                 FindStoreWithIndex(EHState.FirstStateStore.back()));
+  
+  assert(firstState != EHState.UnwindTable.end() && 
+         "Can not find first state for try");
+  
+  llvm::Constant *tryLow = 
+    cast<llvm::Constant>(firstState->Store->getOperand(0));
+  fields.push_back(tryLow);
+
+  //MSEHState::UnwindTableTy::iterator temp = firstState;
+  MSEHState::UnwindTableTy::reverse_iterator lastEntry = 
+    std::find_if(EHState.UnwindTable.rbegin(),
+                 MSEHState::UnwindTableTy::reverse_iterator(firstState), 
+                 FindFirstStateAtThisTryLevel(firstState->StoreInstTryLevel,
+                                              firstState->TryNumber));
+  // If in try only one state.
+  if (lastEntry == EHState.UnwindTable.rend()) {
+    lastEntry = MSEHState::UnwindTableTy::reverse_iterator(firstState);
   }
+
+  llvm::Constant *tryHigh = 
+    cast<llvm::Constant>(lastEntry->Store->getOperand(0));
+  fields.push_back(tryHigh);
+  
+  llvm::Constant *defVal = llvm::ConstantInt::get(Int32Ty, 0);
+  fields.push_back(defVal);
 
   fields.push_back(llvm::ConstantInt::get(Int32Ty, EHState.TryHandlers.size()));
 
@@ -893,10 +945,24 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   // because it can be nested try.
   EHState.TryHandlers.clear();
 
+  llvm::SmallString<256> tableName;
+  llvm::raw_svector_ostream stream(tableName);
+
+  const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
+  assert(funcDecl && "Unwind table is generating only for functions!");
+
+  CGM.getCXXABI().getMangleContext().
+    getMsExtensions()->mangleEHCatchHandlersArray(funcDecl, 
+                                                  EHState.EHManglingCounter++,
+                                                  stream);
+  stream.flush();
+
+  StringRef mangledName(tableName);
+
   llvm::GlobalVariable *globalHandlers = 
     new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), true,
                              llvm::GlobalValue::InternalLinkage, handlersArray,
-                             "handlers.array");
+                             mangledName);
 
   llvm::Constant *addrOfGlobalhandlers = 
     llvm::ConstantExpr::getBitCast(globalHandlers, 
@@ -905,7 +971,9 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
 
   llvm::StructType *entryTy = getTryBlockMapEntryTy(CGM);
   llvm::Constant *init = llvm::ConstantStruct::get(entryTy, fields);
+  
   EHState.TryBlockTableEntries.push_back(init);
+  EHState.FirstStateStore.pop_back();
 }
 
 // r4start
@@ -1134,7 +1202,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   assert(restoringState != EHState.UnwindTable.rend() &&
          "Can not find store state for restoring operation");
-  
+
   for (unsigned I = 0; I != NumHandlers; ++I) {
 
     llvm::SmallString<256>  catchHandlerName;
@@ -1212,12 +1280,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   Builder.CreateBr(tryEnd);
   
   Builder.SetInsertPoint(tryEnd);
-  
-  MSEHState::LastUnwindEntryOnCurLevel::iterator 
-    last = EHState.LastEntry.find(EHState.TryLevel);
-  if (last != EHState.LastEntry.end()) {
-    EHState.LastEntry.erase(last);
-  }
 
   EHState.TryLevel--;
   // Here we must restore last state before try block.
@@ -1230,6 +1292,12 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   GenerateTryBlockTableEntry();
+
+  MSEHState::LastUnwindEntryOnCurLevel::iterator 
+    last = EHState.LastEntry.find(EHState.TryLevel);
+  if (last != EHState.LastEntry.end()) {
+    EHState.LastEntry.erase(last);
+  }
 }
 
 // r4start

@@ -213,6 +213,10 @@ public:
   virtual void mangleEHTryBlockTable(const FunctionDecl *, raw_ostream &);
 
   virtual void mangleEHTryEnd(const FunctionDecl *, uint8_t , raw_ostream &);
+
+  virtual void mangleEHCatchHandlersArray(const FunctionDecl *,
+                                          uint8_t , 
+                                          raw_ostream &);
 };
 
 }
@@ -2319,6 +2323,13 @@ void MicrosoftMangleContext::mangleEHTryEnd(const FunctionDecl *F,
                                             uint8_t Number, 
                                             raw_ostream &Out) {
   MangleEHSpecificNames(*this, F, Out, "\01__tryend$");
+  Out << "$" << (int64_t)Number;
+}
+
+void MicrosoftMangleContext::mangleEHCatchHandlersArray(const FunctionDecl *F,
+                                                        uint8_t Number, 
+                                                        raw_ostream &Out) {
+  MangleEHSpecificNames(*this, F, Out, "\01__catchsym$");
   Out << "$" << (int64_t)Number;
 }
 

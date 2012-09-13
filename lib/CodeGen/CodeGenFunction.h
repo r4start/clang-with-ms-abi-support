@@ -554,7 +554,7 @@ struct MsUnwindInfo {
   RestoreOpInfo::RestoreOpKind RestoreKind;
   llvm::StoreInst *Store;
   int StoreInstTryLevel;
-  int TopLevelTry;
+  int TryNumber;
   int StoreIndex;
 
   typedef std::list<RestoreOpInfo> RestoreList;
@@ -581,7 +581,7 @@ struct MsUnwindInfo {
                 int TopLevelTryNumber = -1, int Index = -1)
     : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
       IsUsed(Used), RestoreKind(RestoreOp), Store(StoreInstruction),
-      StoreInstTryLevel(StoreTryLevel), TopLevelTry(TopLevelTryNumber), 
+      StoreInstTryLevel(StoreTryLevel), TryNumber(TopLevelTryNumber), 
       StoreIndex(Index) {}
 };
 
@@ -1201,6 +1201,10 @@ private:
     /// Holds funclets addresses.
     typedef std::list<MsUnwindInfo> UnwindTableTy;
     UnwindTableTy UnwindTable;
+
+    ///  This array holds index of first state store in try block.
+    typedef std::list<int> TriesStartIndexesArrayTy;
+    TriesStartIndexesArrayTy FirstStateStore;
 
     typedef std::map<int, MsUnwindInfo&> LastUnwindEntryOnCurLevel;
     LastUnwindEntryOnCurLevel LastEntry;
