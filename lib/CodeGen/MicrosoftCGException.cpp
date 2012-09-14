@@ -1015,11 +1015,14 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   llvm::Value *restoringState = 0;
   if (!EHState.LastEntries.empty()) {
-    restoringState = EHState.LastEntries.back()->Store->getOperand(0);
-    EHState.GlobalUnwindTable.push_back(EHState.LastEntries.back()->StoreValue);
+    MSEHState::UnwindTableTy::iterator last = EHState.LastEntries.back();
+    restoringState = last->Store->getOperand(0);
+    EHState.GlobalUnwindTable.push_back(last->StoreValue);
+    EHState.GlobalUnwindTable.back().StoreValue = last->StoreValue;
   } else {
     restoringState = llvm::ConstantInt::get(Int32Ty, -1);
     EHState.GlobalUnwindTable.push_back(-1);
+    EHState.GlobalUnwindTable.back().StoreValue = -1;
   }
 
   // In MS do it in straight way.
