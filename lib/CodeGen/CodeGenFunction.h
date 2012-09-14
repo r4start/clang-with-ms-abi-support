@@ -1197,21 +1197,26 @@ private:
     /// Also it passes to mangler.
     int EHManglingCounter;
 
-    /// Unwind table map.
-    /// Holds funclets addresses.
-    typedef std::list<MsUnwindInfo> UnwindTableTy;
-    UnwindTableTy UnwindTable;
+    typedef std::list< MsUnwindInfo > UnwindTableTy;
+    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
+    typedef std::list< UnwindEntryRefList > TryStates;
+
+    /// Unwind table necessary for correct unwinding.
+    /// It has 2 fields: action(what we must do in this state)
+    /// and in which state we must go after all work at this state.
+    
+    /// GlobalUnwindTable hold unwind table for current function.
+    UnwindTableTy GlobalUnwindTable;
+
+    /// LocalUnwindTable holds refs to
+    /// unwind entries in this try block.
+    TryStates LocalUnwindTable;
 
     ///  This array holds index of first state store in try block.
     typedef std::list<int> TriesStartIndexesArrayTy;
     TriesStartIndexesArrayTy FirstStateStore;
-
-    typedef std::map<int, MsUnwindInfo&> LastUnwindEntryOnCurLevel;
-    LastUnwindEntryOnCurLevel LastEntry;
-
-    /// Here we want to store id value state.
-    /// This is need to restore id value state after exiting nested try.
-    llvm::SmallVector<int, 4> PrevLevelLastIdValues;
+    
+    UnwindEntryRefList LastEntries;
 
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
@@ -1225,20 +1230,19 @@ private:
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
      ESTypeList(0), StoreIndex(0), TryNumber(0) {}
 
-    void SetMSTryState(uint32_t State);
+    void SetMSTryState();
 
     /// This function opposite to SetMSTrystate
     /// does not change unwind table.
     /// It just generates store instruction and return it.
     llvm::StoreInst *CreateStateStore(uint32_t State);
+    llvm::StoreInst *CreateStateStore(llvm::Value* State);
 
     void RestoreTryState(uint32_t State, 
                          MsUnwindInfo &RestoringState,
                      RestoreOpInfo::RestoreOpKind Kind = RestoreOpInfo::Undef);
 
     void InitMSTryState();
-
-    void ShrinkUnwindTable();
 
     bool IsInited() const { return MSTryState != 0; }
   };
@@ -2812,12 +2816,6 @@ private:
   /// r4start
   void SaveUnwindFuncletForLaterEmit(int ToState, llvm::Value *This,
                                      llvm::Value *ReleaseFunc);
-
-  /// r4start
-  void FixStates(MSEHState::UnwindTableTy &UnpackedTable);
-
-  /// r4start
-  void UnpackUnwindTable(MSEHState::UnwindTableTy &UnpackedTable);
 
   /// r4start
   llvm::GlobalValue *EmitUnwindTable();

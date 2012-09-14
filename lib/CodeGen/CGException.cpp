@@ -621,23 +621,19 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   
   // Generate id in start of try block.
   if (IsMSABI) {
+    EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
     if (!EHState.IsInited()) {
-      EHState.PrevLevelLastIdValues.push_back(-1);
-      
-      EHState.UnwindTable.push_back(-1);
       EHState.InitMSTryState();
-      EHState.UnwindTable.back().IsUsed = true;
+    }
+
+    if (EHState.TryLevel) {
+      EHState.LastEntries.push_back(--EHState.GlobalUnwindTable.end());
     }
 
     ++EHState.TryNumber;
     ++EHState.TryLevel;
 
-    size_t state = EHState.UnwindTable.size() - 1;
-    EHState.UnwindTable.push_back(EHState.UnwindTable.back().StoreValue);
-    EHState.FirstStateStore.push_back(EHState.StoreIndex);
-    EHState.SetMSTryState(state);
-    EHState.UnwindTable.back().IsUsed = true;
-    EHState.PrevLevelLastIdValues.push_back(state);
+    EHState.SetMSTryState();
   } 
   
   for (unsigned I = 0; I != NumHandlers; ++I) {
