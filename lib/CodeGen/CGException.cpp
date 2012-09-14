@@ -518,7 +518,7 @@ void CodeGenFunction::EmitStartEHSpec(const Decl *D) {
     return;
 
   // r4start
-  if (IsMSABI) {
+  if (IsMSExceptions) {
     EmitESTypeList(Proto);
     return;
   }
@@ -581,12 +581,10 @@ static void emitFilterDispatchBlock(CodeGenFunction &CGF,
 }
 
 void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
-  if (!CGM.getLangOpts().CXXExceptions)
+  // r4start
+  if (!CGM.getLangOpts().CXXExceptions || IsMSExceptions)
     return;
   
-  if (IsMSABI)
-    return;
-
   const FunctionDecl* FD = dyn_cast_or_null<FunctionDecl>(D);
   if (FD == 0)
     return;
@@ -610,7 +608,7 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
 
-  if (IsMSABI) {
+  if (IsMSExceptions) {
     ExitMSCXXTryStmt(S);
   } else {
     ExitCXXTryStmt(S); 
@@ -622,7 +620,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
   
   // Generate id in start of try block.
-  if (IsMSABI) {
+  if (IsMSExceptions) {
     EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
     if (!EHState.IsInited()) {
       EHState.InitMSTryState();
@@ -657,7 +655,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
         TypeInfo = CGM.getObjCRuntime().GetEHType(CaughtType);
       else {
         // r4start
-        if (!IsMSABI) {
+        if (!IsMSExceptions) {
           TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
         } else {
           TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, 
@@ -733,14 +731,10 @@ static bool isNonEHScope(const EHScope &S) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
-  if (!CGM.getLangOpts().Exceptions)
-    return 0;
-
   // r4start
-  if (IsMSABI) {
+  if (!CGM.getLangOpts().Exceptions ||
+      IsMSExceptions)
     return 0;
-    //return getInvokeDestImplForMS();
-  }
 
   assert(EHStack.requiresLandingPad());
   assert(!EHStack.empty());

@@ -344,3 +344,21 @@ int test4() {
 // CHECK-NEXT:   call void @"\01??1B@@QAE@XZ"(%struct.B* %gh)
 // CHECK-NEXT:   call void @"\01__ehhandler$test4@@YAHXZ"() noreturn
 // CHECK-NEXT:   unreachable
+
+int test5() {
+  C ad;
+  try {
+    C fl;
+    try {
+      A a, b;
+      s();
+    } catch (A &) {}
+    C gl;
+    try {
+      B h, gh;
+      s();
+    } catch (B &) {}
+  } catch (C&) {}
+  s();
+  return 0;
+}
