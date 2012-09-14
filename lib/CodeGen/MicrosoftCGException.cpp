@@ -41,7 +41,10 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
     GlobalUnwindTable.push_back(GlobalUnwindTable.back().StoreValue);
   }
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
-  LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
+  
+  if (TryLevel) {
+    LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
+  }
 
   FirstStateStore.push_back(StoreIndex);
 
@@ -52,19 +55,6 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   backRef.StoreInstTryLevel = TryLevel;
   backRef.TryNumber = TryNumber;
   backRef.StoreIndex = StoreIndex++;
-}
-
-// r4start
-void CodeGenFunction::MSEHState::RestoreTryState(uint32_t State,
-                                                 MsUnwindInfo &RestoringState,
-                                           RestoreOpInfo::RestoreOpKind Kind) {
-  llvm::Constant *state = llvm::ConstantInt::get(CGF.Int32Ty, State);
-  RestoreOpInfo info = { 
-    Kind, 
-    CGF.Builder.CreateStore(state, MSTryState),
-    StoreIndex++
-  };
-  RestoringState.RestoreOps.push_back(info);
 }
 
 // r4start
@@ -1095,8 +1085,12 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 // r4start
 void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
   // Function call or we not in try stmt.
-  if (!This || !EHState.TryLevel) {
+  if (!This) {
     return;
+  }
+
+  if (!EHState.IsInited()) {
+    EHState.InitMSTryState();
   }
   
   Decl::Kind kind;

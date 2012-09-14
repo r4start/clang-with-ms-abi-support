@@ -1172,7 +1172,7 @@ private:
   bool DisableDebugInfo;
 
   /// r4start
-  bool IsMSABI;
+  bool IsMSExceptions;
 
   /// r4start
   class MSEHState {
@@ -1237,10 +1237,6 @@ private:
     /// It just generates store instruction and return it.
     llvm::StoreInst *CreateStateStore(uint32_t State);
     llvm::StoreInst *CreateStateStore(llvm::Value* State);
-
-    void RestoreTryState(uint32_t State, 
-                         MsUnwindInfo &RestoringState,
-                     RestoreOpInfo::RestoreOpKind Kind = RestoreOpInfo::Undef);
 
     void InitMSTryState();
 

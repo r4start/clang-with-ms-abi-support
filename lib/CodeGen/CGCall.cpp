@@ -2122,8 +2122,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   llvm::CallSite CS;
   if (!InvokeDest) {
     // r4start
-    bool isMSExceptionHandling = IsMSABI && EHState.IsInited();
-    if (isMSExceptionHandling &&
+    if (IsMSExceptions &&
         isa<CXXDestructorDecl>(TargetDecl)) {
       UpdateEHInfo(TargetDecl, Args[0]);
     }
@@ -2132,7 +2131,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
     // r4start
     // This is need for Microsoft C++ EH.
-    if (isMSExceptionHandling &&
+    if (IsMSExceptions &&
         isa<CXXConstructorDecl>(TargetDecl)) {
       UpdateEHInfo(TargetDecl, Args[0]);
     }
