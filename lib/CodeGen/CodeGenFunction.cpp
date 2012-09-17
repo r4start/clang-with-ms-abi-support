@@ -229,7 +229,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
     EmitDeclMetadata();
 
   // r4start
-  if (IsMSExceptions && EHState.IsInited()) {
+  if (IsMSExceptions && !EHState.GlobalUnwindTable.empty()) {
     EmitEHInformation();
   }
 
@@ -387,6 +387,11 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   ReturnBlock = getJumpDestInCurrentScope("return");
 
   Builder.SetInsertPoint(EntryBB);
+
+  // r4start
+  if (IsMSExceptions && !EHState.IsInited()) {
+    EHState.InitMSTryState();
+  }
 
   // Emit subprogram debug descriptor.
   if (CGDebugInfo *DI = getDebugInfo()) {

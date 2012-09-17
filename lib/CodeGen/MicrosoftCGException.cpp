@@ -1087,8 +1087,7 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
     return;
   }
 
-  if (!EHState.IsInited()) {
-    EHState.InitMSTryState();
+  if (EHState.LocalUnwindTable.empty()) {
     EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
   }
   
