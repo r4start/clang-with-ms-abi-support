@@ -11,6 +11,9 @@
 
 // CHECK: @"\01__unwindtable$test5@@YAHXZ" = internal constant [13 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$6") }, %unwind.map.entry zeroinitializer, %unwind.map.entry { i32 1, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$7") }, %unwind.map.entry { i32 2, i8* null }, %unwind.map.entry { i32 3, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$8") }, %unwind.map.entry { i32 4, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$9") }, %unwind.map.entry { i32 2, i8* null }, %unwind.map.entry { i32 2, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$10") }, %unwind.map.entry { i32 7, i8* null }, %unwind.map.entry { i32 8, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$11") }, %unwind.map.entry { i32 9, i8* blockaddress(@"\01?test5@@YAHXZ", %"\01__unwindfunclet$test5@@YAHXZ$12") }, %unwind.map.entry { i32 7, i8* null }, %unwind.map.entry { i32 -1, i8* null }]
 
+// CHECK: @"\01__unwindtable$test6@@YAHXZ" = internal constant [15 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$8") }, %unwind.map.entry zeroinitializer, %unwind.map.entry { i32 1, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$9") }, %unwind.map.entry { i32 2, i8* null }, %unwind.map.entry { i32 3, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$10") }, %unwind.map.entry { i32 4, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$11") }, %unwind.map.entry { i32 2, i8* null }, %unwind.map.entry { i32 2, i8* null }, %unwind.map.entry { i32 6, i8* null }, %unwind.map.entry { i32 6, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$12") }, %unwind.map.entry { i32 9, i8* null }, %unwind.map.entry { i32 10, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$13") }, %unwind.map.entry { i32 11, i8* blockaddress(@"\01?test6@@YAHXZ", %"\01__unwindfunclet$test6@@YAHXZ$14") }, %unwind.map.entry { i32 9, i8* null }, %unwind.map.entry { i32 -1, i8* null }]
+
+
 struct A {
  A() { }
  ~A() {
@@ -478,4 +481,151 @@ int test5() {
 // CHECK: "\01__unwindfunclet$test5@@YAHXZ$12":             ; preds = %"\01__unwindfunclet$test5@@YAHXZ$11"
 // CHECK-NEXT:   call void @"\01??1B@@QAE@XZ"(%struct.B* %gh)
 // CHECK-NEXT:   call void @"\01__ehhandler$test5@@YAHXZ"() noreturn
+// CHECK-NEXT:   unreachable
+
+int test6() {
+  C ad;
+  try {
+    C fl;
+    try {
+      A a, b;
+      s();
+    } catch (A &) {
+      try {
+        s();
+      } catch (C&) {}
+    }
+    C gl;
+    try {
+      B h, gh;
+      s();
+    } catch (B &) {}
+  } catch (C&) {}
+  s();
+  return 0;
+}
+
+// CHECK: define i32 @"\01?test6@@YAHXZ"() {
+// CHECK-NEXT: entry:
+// CHECK-NEXT:   %try.id = alloca i32
+// CHECK:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   %call = call x86_thiscallcc %struct.C* @"\01??0C@@QAE@XZ"(%struct.C* %ad)
+// CHECK-NEXT:   br label %call.cont
+
+// CHECK: call.cont:                                        ; preds = %entry
+// CHECK-NEXT:   store i32 0, i32* %try.id
+// CHECK-NEXT:   store i32 1, i32* %try.id
+// CHECK-NEXT:   %call2 = call x86_thiscallcc %struct.C* @"\01??0C@@QAE@XZ"(%struct.C* %fl)
+// CHECK-NEXT:   br label %call.cont1
+
+// CHECK: call.cont1:                                       ; preds = %call.cont
+// CHECK-NEXT:   store i32 2, i32* %try.id
+// CHECK-NEXT:   store i32 3, i32* %try.id
+// CHECK-NEXT:   %call4 = call x86_thiscallcc %struct.A* @"\01??0A@@QAE@XZ"(%struct.A* %a)
+// CHECK-NEXT:   br label %call.cont3
+
+// CHECK: call.cont3:                                       ; preds = %call.cont1
+// CHECK-NEXT:   store i32 4, i32* %try.id
+// CHECK-NEXT:   %call6 = call x86_thiscallcc %struct.A* @"\01??0A@@QAE@XZ"(%struct.A* %b)
+// CHECK-NEXT:   br label %call.cont5
+
+// CHECK: call.cont5:                                       ; preds = %call.cont3
+// CHECK-NEXT:   store i32 5, i32* %try.id
+// CHECK-NEXT:   call void @"\01?s@@YAXXZ"()
+// CHECK-NEXT:   store i32 4, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1A@@QAE@XZ"(%struct.A* %b)
+// CHECK-NEXT:   store i32 3, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1A@@QAE@XZ"(%struct.A* %a)
+// CHECK-NEXT:   br label %"\01__tryend$test6@@YAHXZ$3"
+
+// CHECK: "\01__catch$test6@@YAHXZ$0":                      ; No predecessors!
+// CHECK-NEXT:   store i32 7, i32* %try.id
+// CHECK-NEXT:   call void @"\01?s@@YAXXZ"()
+// CHECK-NEXT:   br label %"\01__tryend$test6@@YAHXZ$2"
+
+// CHECK: "\01__catch$test6@@YAHXZ$1":                      ; No predecessors!
+// CHECK-NEXT:   store i32 6, i32* %try.id
+// CHECK-NEXT:   unreachable
+
+// CHECK: "\01__tryend$test6@@YAHXZ$2":                     ; preds = %"\01__catch$test6@@YAHXZ$0"
+// CHECK-NEXT:   store i32 6, i32* %try.id
+// CHECK-NEXT:   store i32 2, i32* %try.id
+// CHECK-NEXT:   unreachable
+
+// CHECK: "\01__tryend$test6@@YAHXZ$3":                     ; preds = %call.cont5
+// CHECK-NEXT:   store i32 2, i32* %try.id
+// CHECK-NEXT:   %call8 = call x86_thiscallcc %struct.C* @"\01??0C@@QAE@XZ"(%struct.C* %gl)
+// CHECK-NEXT:   br label %call.cont7
+
+// CHECK: call.cont7:                                       ; preds = %"\01__tryend$test6@@YAHXZ$3"
+// CHECK-NEXT:   store i32 9, i32* %try.id
+// CHECK-NEXT:   store i32 10, i32* %try.id
+// CHECK-NEXT:   %call10 = call x86_thiscallcc %struct.B* @"\01??0B@@QAE@XZ"(%struct.B* %h)
+// CHECK-NEXT:   br label %call.cont9
+
+// CHECK: call.cont9:                                       ; preds = %call.cont7
+// CHECK-NEXT:   store i32 11, i32* %try.id
+// CHECK-NEXT:   %call12 = call x86_thiscallcc %struct.B* @"\01??0B@@QAE@XZ"(%struct.B* %gh)
+// CHECK-NEXT:   br label %call.cont11
+
+// CHECK: call.cont11:                                      ; preds = %call.cont9
+// CHECK-NEXT:   store i32 12, i32* %try.id
+// CHECK-NEXT:   call void @"\01?s@@YAXXZ"()
+// CHECK-NEXT:   store i32 11, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1B@@QAE@XZ"(%struct.B* %gh)
+// CHECK-NEXT:   store i32 10, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1B@@QAE@XZ"(%struct.B* %h)
+// CHECK-NEXT:   br label %"\01__tryend$test6@@YAHXZ$5"
+
+// CHECK: "\01__catch$test6@@YAHXZ$4":                      ; No predecessors!
+// CHECK-NEXT:   store i32 9, i32* %try.id
+// CHECK-NEXT:   unreachable
+
+// CHECK: "\01__tryend$test6@@YAHXZ$5":                     ; preds = %call.cont11
+// CHECK-NEXT:   store i32 9, i32* %try.id
+// CHECK-NEXT:   store i32 2, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1C@@QAE@XZ"(%struct.C* %gl)
+// CHECK-NEXT:   store i32 1, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1C@@QAE@XZ"(%struct.C* %fl)
+// CHECK-NEXT:   br label %"\01__tryend$test6@@YAHXZ$7"
+
+// CHECK: "\01__catch$test6@@YAHXZ$6":                      ; No predecessors!
+// CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   unreachable
+
+// CHECK: "\01__tryend$test6@@YAHXZ$7":                     ; preds = %"\01__tryend$test6@@YAHXZ$5"
+// CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void @"\01?s@@YAXXZ"()
+// CHECK-NEXT:   store i32 1, i32* %cleanup.dest.slot
+// CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call x86_thiscallcc void @"\01??1C@@QAE@XZ"(%struct.C* %ad)
+// CHECK-NEXT:   ret i32 0
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$8":              ; No predecessors!
+// CHECK-NEXT:   call void @"\01??1C@@QAE@XZ"(%struct.C* %ad)
+// CHECK-NEXT:   br label %"\01__unwindfunclet$test6@@YAHXZ$9"
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$9":              ; preds = %"\01__unwindfunclet$test6@@YAHXZ$8"
+// CHECK-NEXT:   call void @"\01??1C@@QAE@XZ"(%struct.C* %fl)
+// CHECK-NEXT:   br label %"\01__unwindfunclet$test6@@YAHXZ$10"
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$10":             ; preds = %"\01__unwindfunclet$test6@@YAHXZ$9"
+// CHECK-NEXT:   call void @"\01??1A@@QAE@XZ"(%struct.A* %a)
+// CHECK-NEXT:   br label %"\01__unwindfunclet$test6@@YAHXZ$11"
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$11":             ; preds = %"\01__unwindfunclet$test6@@YAHXZ$10"
+// CHECK-NEXT:   call void @"\01??1A@@QAE@XZ"(%struct.A* %b)
+// CHECK-NEXT:   br label %"\01__unwindfunclet$test6@@YAHXZ$12"
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$12":             ; preds = %"\01__unwindfunclet$test6@@YAHXZ$11"
+// CHECK-NEXT:   call void @"\01??1C@@QAE@XZ"(%struct.C* %gl)
+// CHECK-NEXT:   br label %"\01__unwindfunclet$test6@@YAHXZ$13"
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$13":             ; preds = %"\01__unwindfunclet$test6@@YAHXZ$12"
+// CHECK-NEXT:   call void @"\01??1B@@QAE@XZ"(%struct.B* %h)
+// CHECK-NEXT:   br label %"\01__unwindfunclet$test6@@YAHXZ$14"
+
+// CHECK: "\01__unwindfunclet$test6@@YAHXZ$14":             ; preds = %"\01__unwindfunclet$test6@@YAHXZ$13"
+// CHECK-NEXT:   call void @"\01??1B@@QAE@XZ"(%struct.B* %gh)
+// CHECK-NEXT:   call void @"\01__ehhandler$test6@@YAHXZ"() noreturn
 // CHECK-NEXT:   unreachable
