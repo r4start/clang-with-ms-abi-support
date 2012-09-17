@@ -70,14 +70,6 @@ CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
   return new llvm::StoreInst(State, MSTryState);
 }
 
-namespace {
-struct IsDtorRestore {
-  bool operator() (const RestoreOpInfo &info) {
-    return info.Kind == RestoreOpInfo::DtorRestore;
-  }
-};
-}
-
 // r4start
 static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF, 
                                     llvm::Type *ThrowInfoPtrTy) {
@@ -469,7 +461,7 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM,
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
   // TryBlockMapEntry*.
-  ehfuncinfoFields.push_back(CGM.Int32Ty);//getTryBlockMapEntryTy(CGM)->getPointerTo());
+  ehfuncinfoFields.push_back(getTryBlockMapEntryTy(CGM)->getPointerTo());
 
   // nIPMapEntries.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
@@ -684,69 +676,45 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
                                   mangledUnwindTableName);
 }
 
-namespace {
-
-class FindFirstStateAtThisTryLevel {
-  int TryNumber;
-  int TryLevel;
-public:
-  FindFirstStateAtThisTryLevel(int Level, int Number) 
-   : TryLevel(Level), TryNumber(Number) {}
-
-  bool operator() (const MsUnwindInfo &info) {
-    return info.TryNumber == TryNumber &&
-           info.StoreInstTryLevel == TryLevel;
-  }
-};
-
-class FindStoreWithIndex {
-  int Idx;
-public:
-  FindStoreWithIndex(int Index) 
-   : Idx(Index) {}
-
-  bool operator() (const MsUnwindInfo &info) {
-    return info.StoreIndex == Idx;
-  }
-};
-
-}
-
 // r4start
 void CodeGenFunction::GenerateTryBlockTableEntry() {
-#if 0
   llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
 
   llvm::SmallVector<llvm::Constant *, 5> fields;
 
   MSEHState::UnwindTableTy::iterator firstState = 
-    std::find_if(EHState.UnwindTable.begin(), EHState.UnwindTable.end(),
-                 FindStoreWithIndex(EHState.FirstStateStore.back()));
-  
-  assert(firstState != EHState.UnwindTable.end() && 
-         "Can not find first state for try");
+    *EHState.LocalUnwindTable.back().begin();
   
   llvm::Constant *tryLow = 
     cast<llvm::Constant>(firstState->Store->getOperand(0));
   fields.push_back(tryLow);
 
-  //MSEHState::UnwindTableTy::iterator temp = firstState;
-  MSEHState::UnwindTableTy::reverse_iterator lastEntry = 
-    std::find_if(EHState.UnwindTable.rbegin(),
-                 MSEHState::UnwindTableTy::reverse_iterator(firstState), 
-                 FindFirstStateAtThisTryLevel(firstState->StoreInstTryLevel,
-                                              firstState->TryNumber));
-  // If in try only one state.
-  if (lastEntry == EHState.UnwindTable.rend()) {
-    lastEntry = MSEHState::UnwindTableTy::reverse_iterator(firstState);
+  MSEHState::UnwindTableTy::iterator lastEntry = firstState;
+  
+  while (lastEntry != EHState.GlobalUnwindTable.end()) {
+    if (lastEntry->RestoreKind != RestoreOpInfo::CatchRestore) {
+      ++lastEntry;
+      continue;
+    }
+    break;
   }
+  
+  assert (lastEntry != EHState.GlobalUnwindTable.end() &&
+          "Can not find last entry for this try block!");
 
+  --lastEntry;
+  
   llvm::Constant *tryHigh = 
     cast<llvm::Constant>(lastEntry->Store->getOperand(0));
   fields.push_back(tryHigh);
   
-  llvm::Constant *defVal = llvm::ConstantInt::get(Int32Ty, 0);
-  fields.push_back(defVal);
+  ++lastEntry;
+  assert (lastEntry != EHState.GlobalUnwindTable.end() &&
+          "Can not find catch entry for this try block!");
+  
+  llvm::Constant *catchHigh = 
+    llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
+  fields.push_back(catchHigh);
 
   fields.push_back(llvm::ConstantInt::get(Int32Ty, EHState.TryHandlers.size()));
 
@@ -788,7 +756,6 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   
   EHState.TryBlockTableEntries.push_back(init);
   EHState.FirstStateStore.pop_back();
-  #endif
 }
 
 // r4start
@@ -822,7 +789,7 @@ llvm::GlobalValue *CodeGenFunction::EmitTryBlockTable() {
 // r4start
 llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   llvm::GlobalValue *unwindTable = EmitUnwindTable();
-  //llvm::GlobalValue *tryBlocksTable = EmitTryBlockTable();
+  llvm::GlobalValue *tryBlocksTable = EmitTryBlockTable();
 
   const FunctionDecl *function = 
     cast_or_null<FunctionDecl>(CurGD.getDecl());
@@ -857,8 +824,8 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   initializerFields.push_back(llvm::ConstantInt::get(Int32Ty,
                                           EHState.TryBlockTableEntries.size()));
 
-  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
-    //llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
+  initializerFields.push_back(
+    llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
 
   // not used on x86
   initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
@@ -1021,6 +988,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     EHState.CreateStateStoreWithoutEmit(restoringState);
 
   EHState.GlobalUnwindTable.back().Store = store;
+  EHState.GlobalUnwindTable.back().StoreIndex = EHState.StoreIndex++;
+  EHState.GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
 
   EHState.LastEntries.push_back(--EHState.GlobalUnwindTable.end());
 
@@ -1080,17 +1049,12 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   // Restore state after exiting from try block.
   EHState.CreateStateStore(restoringState);
 
+  GenerateTryBlockTableEntry();
+
   if (!EHState.LastEntries.empty()) {
     EHState.LastEntries.pop_back();
   }
   EHState.LocalUnwindTable.pop_back();
-  #if 0
-  if (!EHState.TryLevel) {
-    // Now we can shrink unwind table
-    EHState.ShrinkUnwindTable();
-  }
-  #endif
-  //GenerateTryBlockTableEntry();
 }
 
 // r4start
