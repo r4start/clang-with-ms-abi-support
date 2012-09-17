@@ -65,6 +65,11 @@ llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(llvm::Value *State
   return CGF.Builder.CreateStore(State, MSTryState);
 }
 
+llvm::StoreInst *
+CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
+  return new llvm::StoreInst(State, MSTryState);
+}
+
 namespace {
 struct IsDtorRestore {
   bool operator() (const RestoreOpInfo &info) {
@@ -1002,16 +1007,22 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   llvm::Type *handlerTy = getHandlerType(CGM);
 
   llvm::Value *restoringState = 0;
+  size_t index = -1;
   if (!EHState.LastEntries.empty()) {
     MSEHState::UnwindTableTy::iterator last = EHState.LastEntries.back();
-    restoringState = last->Store->getOperand(0);
-    EHState.GlobalUnwindTable.push_back(last->StoreValue);
-    EHState.GlobalUnwindTable.back().StoreValue = last->StoreValue;
-  } else {
-    restoringState = llvm::ConstantInt::get(Int32Ty, -1);
-    EHState.GlobalUnwindTable.push_back(-1);
-    EHState.GlobalUnwindTable.back().StoreValue = -1;
+    index = std::distance(EHState.GlobalUnwindTable.begin(), last); 
   }
+
+  restoringState = llvm::ConstantInt::get(Int32Ty, index);
+  EHState.GlobalUnwindTable.push_back(index);
+  EHState.GlobalUnwindTable.back().StoreValue = index;
+
+  llvm::StoreInst *store = 
+    EHState.CreateStateStoreWithoutEmit(restoringState);
+
+  EHState.GlobalUnwindTable.back().Store = store;
+
+  EHState.LastEntries.push_back(--EHState.GlobalUnwindTable.end());
 
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
@@ -1035,7 +1046,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     
     EmitStmt(C->getHandlerBlock());
     
-    EHState.CreateStateStore(restoringState);
+    Builder.Insert(store);
     
     Builder.CreateUnreachable();
     
@@ -1043,6 +1054,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     GenerateCatchHandler(CaughtType, handlerTy,
                            llvm::BlockAddress::get(CurFn, entryBB));
   }
+  
+  EHState.LastEntries.pop_back();
 
   Builder.SetInsertPoint(oldBB);
 

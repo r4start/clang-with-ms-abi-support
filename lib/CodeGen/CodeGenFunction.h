@@ -1237,6 +1237,7 @@ private:
     /// It just generates store instruction and return it.
     llvm::StoreInst *CreateStateStore(uint32_t State);
     llvm::StoreInst *CreateStateStore(llvm::Value* State);
+    llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
 
     void InitMSTryState();
 
