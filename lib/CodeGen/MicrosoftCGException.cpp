@@ -42,9 +42,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   }
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
   
-  if (TryLevel) {
-    LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
-  }
+  LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
 
   FirstStateStore.push_back(StoreIndex);
 
@@ -1091,6 +1089,7 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
 
   if (!EHState.IsInited()) {
     EHState.InitMSTryState();
+    EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
   }
   
   Decl::Kind kind;
@@ -1113,8 +1112,15 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
     } else if (kind == Decl::CXXDestructor) {
       assert(!EHState.LocalUnwindTable.back().empty() && 
              "Local unwind table can not be empty!");
-      llvm::Value *restoringVal = 
-        (*(++EHState.LocalUnwindTable.back().rbegin()))->Store->getOperand(0);
+      llvm::Value *restoringVal = 0;
+      // TODO: get rid of call size().
+      if (EHState.LocalUnwindTable.back().size() > 1) {
+        restoringVal = 
+          (*(++EHState.LocalUnwindTable.back().rbegin()))->Store->
+                                                                 getOperand(0);
+      } else {
+        restoringVal = llvm::ConstantInt::get(Int32Ty, -1);
+      }
       EHState.CreateStateStore(restoringVal);
       EHState.LocalUnwindTable.back().pop_back();
     }
