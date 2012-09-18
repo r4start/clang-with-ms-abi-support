@@ -689,31 +689,33 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
     cast<llvm::Constant>(firstState->Store->getOperand(0));
   fields.push_back(tryLow);
 
-  MSEHState::UnwindTableTy::iterator lastEntry = firstState;
+  MSEHState::UnwindTableTy::reverse_iterator lastEntry = 
+    EHState.GlobalUnwindTable.rbegin();
   
-  while (lastEntry != EHState.GlobalUnwindTable.end()) {
-    if (lastEntry->RestoreKind != RestoreOpInfo::CatchRestore) {
-      ++lastEntry;
-      continue;
+  while (lastEntry != EHState.GlobalUnwindTable.rend()) {
+    if (lastEntry->RestoreKind == RestoreOpInfo::CatchRestore &&
+        lastEntry->StoreInstTryLevel == firstState->StoreInstTryLevel &&
+        lastEntry->TryNumber == firstState->TryNumber) {
+      break;
     }
-    break;
+    ++lastEntry;
   }
   
-  assert (lastEntry != EHState.GlobalUnwindTable.end() &&
+  assert (lastEntry != EHState.GlobalUnwindTable.rend() &&
           "Can not find last entry for this try block!");
 
-  --lastEntry;
-  
-  llvm::Constant *tryHigh = 
-    cast<llvm::Constant>(lastEntry->Store->getOperand(0));
-  fields.push_back(tryHigh);
-  
-  ++lastEntry;
-  assert (lastEntry != EHState.GlobalUnwindTable.end() &&
-          "Can not find catch entry for this try block!");
-  
   llvm::Constant *catchHigh = 
     llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
+
+  ++lastEntry;
+  
+  assert (lastEntry != EHState.GlobalUnwindTable.rend() &&
+          "Can not find catch entry for this try block!");
+
+  llvm::Constant *tryHigh = 
+    llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
+  
+  fields.push_back(tryHigh);
   fields.push_back(catchHigh);
 
   fields.push_back(llvm::ConstantInt::get(Int32Ty, EHState.TryHandlers.size()));
@@ -988,6 +990,19 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     EHState.CreateStateStoreWithoutEmit(restoringState);
 
   EHState.GlobalUnwindTable.back().Store = store;
+
+  // TryNumber must be right because it necessary for GenerateTryBlockEntry.
+  // If TryNumber is wrong then GenerateTryBlockEntry can not find this entry
+  // in global unwind table.
+  if (!EHState.LastEntries.empty()) {
+    EHState.GlobalUnwindTable.back().TryNumber = 
+      EHState.LastEntries.back()->TryNumber + 1;
+  } else {
+    EHState.GlobalUnwindTable.back().TryNumber = 
+      (*(EHState.LocalUnwindTable.back().begin()))->TryNumber;
+  }
+
+  EHState.GlobalUnwindTable.back().StoreInstTryLevel = EHState.TryLevel;
   EHState.GlobalUnwindTable.back().StoreIndex = EHState.StoreIndex++;
   EHState.GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
 
