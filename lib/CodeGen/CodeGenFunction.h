@@ -1211,10 +1211,6 @@ private:
     /// LocalUnwindTable holds refs to
     /// unwind entries in this try block.
     TryStates LocalUnwindTable;
-
-    ///  This array holds index of first state store in try block.
-    typedef std::list<int> TriesStartIndexesArrayTy;
-    TriesStartIndexesArrayTy FirstStateStore;
     
     UnwindEntryRefList LastEntries;
 
