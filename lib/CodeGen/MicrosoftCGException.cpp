@@ -93,6 +93,32 @@ static llvm::Function *getMSFrameHandlerFunction(CodeGenFunction &CGF,
   return F;
 }
 
+static llvm::StructType *getOrCreateCatchableType(CodeGenModule &CGM) {
+  if (llvm::StructType *catchablesType = 
+                           CGM.getModule().getTypeByName("catchable.type")) {
+    return catchablesType;
+  }
+
+  llvm::SmallVector<llvm::Type *, 5> types;
+  
+  types.push_back(CGM.Int32Ty);
+
+  llvm::Constant *typeInfo = 
+    CGM.getModule().getGlobalVariable("\01??_7type_info@@6B@");
+  if (!typeInfo) {
+    typeInfo = CGM.getModule().getOrInsertGlobal("\01??_7type_info@@6B@",
+                                                 CGM.Int8PtrTy);
+  }
+
+  types.push_back(CGM.GetDescriptorPtrType(typeInfo->getType()));
+  types.push_back(CGM.GetPMDtype());
+  types.push_back(CGM.Int32Ty);
+  types.push_back(llvm::FunctionType::get(CGM.VoidTy, false)->getPointerTo());
+
+  return llvm::StructType::create(CGM.getLLVMContext(), types,
+                                  "catchable.type");
+}
+
 // r4start
 //  struct CatchableType {
 //    // 0x01: simple type (can be copied by memmove), 
@@ -124,7 +150,7 @@ static llvm::StructType *getCatchableType(CodeGenModule &CGM,
   // Name in TypeDecriptor is ".?A{V, U}class_name@@" + terminating null.
   // So we need extra memory to fit this name.
   types.push_back(CGM.GetTypeDescriptorType(typeInfo->getType(), 
-    RD->getName().size() + 7));
+                  RD->getName().size() + 7));
 
   // TODO: remove it!
   for (int i = 0; i < 4; ++i) {
@@ -173,9 +199,13 @@ static llvm::StructType *getCatchableArrayType(CodeGenModule &CGM,
 //    // i.e. the actual type and all its ancestors.
 //    CatchableTypeArray* pCatchableTypeArray;
 //  };
-static llvm::StructType *getThrowInfoType(CodeGenModule &CGM,
-                                          const CXXRecordDecl *CaughtClass) {
-  llvm::Type *catchableTy = getCatchableType(CGM, CaughtClass);
+static llvm::StructType *getThrowInfoType(CodeGenModule &CGM) {
+  if (llvm::StructType *tiType = 
+          CGM.getModule().getTypeByName("throw.info.type")) {
+    return tiType;
+  }
+
+  llvm::Type *catchableTy = getOrCreateCatchableType(CGM);
 
   llvm::SmallVector<llvm::Type *, 4> types;
 
@@ -184,9 +214,10 @@ static llvm::StructType *getThrowInfoType(CodeGenModule &CGM,
   types.push_back(llvm::FunctionType::get(CGM.VoidTy, false)->getPointerTo());
   types.push_back(llvm::FunctionType::get(CGM.Int32Ty, false)->getPointerTo());
 
-  types.push_back(getCatchableArrayType(CGM, catchableTy, 1)->getPointerTo());
+  types.push_back(catchableTy->getPointerTo());
 
-  return llvm::StructType::get(CGM.getLLVMContext(), types);
+  return llvm::StructType::create(CGM.getLLVMContext(), types,
+                                  "throw.info.type");
 }
 
 // r4start
@@ -231,7 +262,7 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
     return gv;
   }
 
-  llvm::StructType *throwInfoTy = getThrowInfoType(CGF.CGM, catchDecl);
+  llvm::StructType *throwInfoTy = getThrowInfoType(CGF.CGM);
   llvm::Constant *throwInfoInit = generateThrowInfoInit(CGF, throwInfoTy);
 
   return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
@@ -785,8 +816,16 @@ llvm::GlobalValue *CodeGenFunction::EmitTryBlockTable() {
 
 // r4start
 llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
-  llvm::GlobalValue *unwindTable = EmitUnwindTable();
-  llvm::GlobalValue *tryBlocksTable = EmitTryBlockTable();
+  llvm::GlobalValue *unwindTable = 0;
+  llvm::GlobalValue *tryBlocksTable = 0;
+
+  if (!EHState.GlobalUnwindTable.empty()) {
+    unwindTable = EmitUnwindTable();
+  }
+
+  if (!EHState.TryBlockTableEntries.empty()) {
+    tryBlocksTable = EmitTryBlockTable();
+  }
 
   const FunctionDecl *function = 
     cast_or_null<FunctionDecl>(CurGD.getDecl());
@@ -809,22 +848,28 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   initializerFields.push_back(
     llvm::ConstantInt::get(Int32Ty, EHState.GlobalUnwindTable.size()));
 
-  // pUnwindTable
-  llvm::Constant *idxList[] = { llvm::ConstantInt::get(Int32Ty, 0),
-                                llvm::ConstantInt::get(Int32Ty, 0)
-  };
-  initializerFields.push_back(
-    llvm::ConstantExpr::getInBoundsGetElementPtr(unwindTable, idxList));
+  llvm::Constant *zeroVal = llvm::ConstantInt::get(Int32Ty, 0);
+  llvm::Constant *idxList[] = { zeroVal, zeroVal };
 
+  // pUnwindTable
+  if (unwindTable) {
+    initializerFields.push_back(
+      llvm::ConstantExpr::getInBoundsGetElementPtr(unwindTable, idxList));
+  } else {
+    initializerFields.push_back(llvm::UndefValue::get(getUnwindMapEntryTy(CGM)->getPointerTo()));
+  }
   // number of try blocks in the function
   initializerFields.push_back(llvm::ConstantInt::get(Int32Ty,
                                           EHState.TryBlockTableEntries.size()));
-
-  initializerFields.push_back(
-    llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
+  if (tryBlocksTable) {
+    initializerFields.push_back(
+      llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
+  } else {
+    initializerFields.push_back(llvm::UndefValue::get(getTryBlockMapEntryTy(CGM)->getPointerTo()));
+  }
 
   // not used on x86
-  initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
+  initializerFields.push_back(zeroVal);
 
   // not used on x86
   initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
