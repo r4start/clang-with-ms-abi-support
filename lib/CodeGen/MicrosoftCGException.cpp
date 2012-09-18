@@ -44,8 +44,6 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   
   LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
 
-  FirstStateStore.push_back(StoreIndex);
-
   backRef.IsUsed = true;
 
   backRef.Store = CreateStateStore(state);
@@ -443,9 +441,7 @@ static llvm::StructType *getUnwindMapEntryTy(CodeGenModule &CGM) {
 //    // VC8+ only, bit 0 set if function was compiled with /EHs
 //    int EHFlags;
 //  };
-static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM,
-                                             llvm::Type *UnwindMapEntriesTy,
-                                             llvm::Type *TryBlockMapEntriesTy) {
+static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
   llvm::SmallVector<llvm::Type *, 9> ehfuncinfoFields;
 
   // magic number.
@@ -757,7 +753,6 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Constant *init = llvm::ConstantStruct::get(entryTy, fields);
   
   EHState.TryBlockTableEntries.push_back(init);
-  EHState.FirstStateStore.pop_back();
 }
 
 // r4start
@@ -801,8 +796,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   if (llvm::Type *funcInfo = CGM.getModule().getTypeByName("ehfuncinfo")) {
     ehFuncInfoTy = cast<llvm::StructType>(funcInfo);
   } else {
-    ehFuncInfoTy = generateEHFuncInfoType(CGM, unwindTable->getType(),
-                                          0);//tryBlocksTable->getType());
+    ehFuncInfoTy = generateEHFuncInfoType(CGM);
   }
   assert(ehFuncInfoTy && "Problems with __ehfuncinfo type!");
 
