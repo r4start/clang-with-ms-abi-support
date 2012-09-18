@@ -1184,11 +1184,9 @@ private:
 
   public:
     /// Indicates that current try is nested.
-    /// When TryLevel == 1 we must set try state to -1.
     int TryLevel;
 
     /// This field tracks count of tries.
-    /// It is used for optimize unwind table.
     int TryNumber;
 
     int StoreIndex;

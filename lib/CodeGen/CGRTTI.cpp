@@ -533,118 +533,123 @@ void RTTIBuilder::BuildVTablePointer(const Type *Ty) {
   if (CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft) {
     VTableName = "\01??_7type_info@@6B@";
 
+    if (VTable = CGM.getModule().getGlobalVariable(VTableName)) {
+      Fields.push_back(VTable);
+      return;
+    }
+
     VTable = CGM.getModule().getOrInsertGlobal(VTableName, Int8PtrTy);
   } else {
-  // abi::__class_type_info.
-  static const char * const ClassTypeInfo =
-    "_ZTVN10__cxxabiv117__class_type_infoE";
-  // abi::__si_class_type_info.
-  static const char * const SIClassTypeInfo =
-    "_ZTVN10__cxxabiv120__si_class_type_infoE";
-  // abi::__vmi_class_type_info.
-  static const char * const VMIClassTypeInfo =
-    "_ZTVN10__cxxabiv121__vmi_class_type_infoE";
+    // abi::__class_type_info.
+    static const char * const ClassTypeInfo =
+      "_ZTVN10__cxxabiv117__class_type_infoE";
+    // abi::__si_class_type_info.
+    static const char * const SIClassTypeInfo =
+      "_ZTVN10__cxxabiv120__si_class_type_infoE";
+    // abi::__vmi_class_type_info.
+    static const char * const VMIClassTypeInfo =
+      "_ZTVN10__cxxabiv121__vmi_class_type_infoE";
 
-  switch (Ty->getTypeClass()) {
+    switch (Ty->getTypeClass()) {
 #define TYPE(Class, Base)
 #define ABSTRACT_TYPE(Class, Base)
 #define NON_CANONICAL_UNLESS_DEPENDENT_TYPE(Class, Base) case Type::Class:
 #define NON_CANONICAL_TYPE(Class, Base) case Type::Class:
 #define DEPENDENT_TYPE(Class, Base) case Type::Class:
 #include "clang/AST/TypeNodes.def"
-    llvm_unreachable("Non-canonical and dependent types shouldn't get here");
+      llvm_unreachable("Non-canonical and dependent types shouldn't get here");
 
-  case Type::LValueReference:
-  case Type::RValueReference:
-    llvm_unreachable("References shouldn't get here");
+    case Type::LValueReference:
+    case Type::RValueReference:
+      llvm_unreachable("References shouldn't get here");
 
-  case Type::Builtin:
-  // GCC treats vector and complex types as fundamental types.
-  case Type::Vector:
-  case Type::ExtVector:
-  case Type::Complex:
-  case Type::Atomic:
-  // FIXME: GCC treats block pointers as fundamental types?!
-  case Type::BlockPointer:
-    // abi::__fundamental_type_info.
-    VTableName = "_ZTVN10__cxxabiv123__fundamental_type_infoE";
-    break;
+    case Type::Builtin:
+    // GCC treats vector and complex types as fundamental types.
+    case Type::Vector:
+    case Type::ExtVector:
+    case Type::Complex:
+    case Type::Atomic:
+    // FIXME: GCC treats block pointers as fundamental types?!
+    case Type::BlockPointer:
+      // abi::__fundamental_type_info.
+      VTableName = "_ZTVN10__cxxabiv123__fundamental_type_infoE";
+      break;
 
-  case Type::ConstantArray:
-  case Type::IncompleteArray:
-  case Type::VariableArray:
-    // abi::__array_type_info.
-    VTableName = "_ZTVN10__cxxabiv117__array_type_infoE";
-    break;
+    case Type::ConstantArray:
+    case Type::IncompleteArray:
+    case Type::VariableArray:
+      // abi::__array_type_info.
+      VTableName = "_ZTVN10__cxxabiv117__array_type_infoE";
+      break;
 
-  case Type::FunctionNoProto:
-  case Type::FunctionProto:
-    // abi::__function_type_info.
-    VTableName = "_ZTVN10__cxxabiv120__function_type_infoE";
-    break;
+    case Type::FunctionNoProto:
+    case Type::FunctionProto:
+      // abi::__function_type_info.
+      VTableName = "_ZTVN10__cxxabiv120__function_type_infoE";
+      break;
 
-  case Type::Enum:
-    // abi::__enum_type_info.
-    VTableName = "_ZTVN10__cxxabiv116__enum_type_infoE";
-    break;
+    case Type::Enum:
+      // abi::__enum_type_info.
+      VTableName = "_ZTVN10__cxxabiv116__enum_type_infoE";
+      break;
 
-  case Type::Record: {
-    const CXXRecordDecl *RD = 
-      cast<CXXRecordDecl>(cast<RecordType>(Ty)->getDecl());
+    case Type::Record: {
+      const CXXRecordDecl *RD = 
+        cast<CXXRecordDecl>(cast<RecordType>(Ty)->getDecl());
     
-    if (!RD->hasDefinition() || !RD->getNumBases()) {
-      VTableName = ClassTypeInfo;
-    } else if (CanUseSingleInheritance(RD)) {
-      VTableName = SIClassTypeInfo;
-    } else {
-      VTableName = VMIClassTypeInfo;
-    }
+      if (!RD->hasDefinition() || !RD->getNumBases()) {
+        VTableName = ClassTypeInfo;
+      } else if (CanUseSingleInheritance(RD)) {
+        VTableName = SIClassTypeInfo;
+      } else {
+        VTableName = VMIClassTypeInfo;
+      }
     
-    break;
-  }
-
-  case Type::ObjCObject:
-    // Ignore protocol qualifiers.
-    Ty = cast<ObjCObjectType>(Ty)->getBaseType().getTypePtr();
-
-    // Handle id and Class.
-    if (isa<BuiltinType>(Ty)) {
-      VTableName = ClassTypeInfo;
       break;
     }
 
-    assert(isa<ObjCInterfaceType>(Ty));
-    // Fall through.
+    case Type::ObjCObject:
+      // Ignore protocol qualifiers.
+      Ty = cast<ObjCObjectType>(Ty)->getBaseType().getTypePtr();
 
-  case Type::ObjCInterface:
-    if (cast<ObjCInterfaceType>(Ty)->getDecl()->getSuperClass()) {
-      VTableName = SIClassTypeInfo;
-    } else {
-      VTableName = ClassTypeInfo;
+      // Handle id and Class.
+      if (isa<BuiltinType>(Ty)) {
+        VTableName = ClassTypeInfo;
+        break;
+      }
+
+      assert(isa<ObjCInterfaceType>(Ty));
+      // Fall through.
+
+    case Type::ObjCInterface:
+      if (cast<ObjCInterfaceType>(Ty)->getDecl()->getSuperClass()) {
+        VTableName = SIClassTypeInfo;
+      } else {
+        VTableName = ClassTypeInfo;
+      }
+      break;
+
+    case Type::ObjCObjectPointer:
+    case Type::Pointer:
+      // abi::__pointer_type_info.
+      VTableName = "_ZTVN10__cxxabiv119__pointer_type_infoE";
+      break;
+
+    case Type::MemberPointer:
+      // abi::__pointer_to_member_type_info.
+      VTableName = "_ZTVN10__cxxabiv129__pointer_to_member_type_infoE";
+      break;
     }
-    break;
 
-  case Type::ObjCObjectPointer:
-  case Type::Pointer:
-    // abi::__pointer_type_info.
-    VTableName = "_ZTVN10__cxxabiv119__pointer_type_infoE";
-    break;
-
-  case Type::MemberPointer:
-    // abi::__pointer_to_member_type_info.
-    VTableName = "_ZTVN10__cxxabiv129__pointer_to_member_type_infoE";
-    break;
-  }
-
-      VTable = 
+    VTable = 
       CGM.getModule().getOrInsertGlobal(VTableName, Int8PtrTy);
     
-  llvm::Type *PtrDiffTy = 
-    CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
+    llvm::Type *PtrDiffTy = 
+      CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
 
-  // The vtable address point is 2.
-  llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
-  VTable = llvm::ConstantExpr::getInBoundsGetElementPtr(VTable, Two);
+    // The vtable address point is 2.
+    llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
+    VTable = llvm::ConstantExpr::getInBoundsGetElementPtr(VTable, Two);
     VTable = llvm::ConstantExpr::getBitCast(VTable, Int8PtrTy);
   }
   Fields.push_back(VTable);
@@ -1801,6 +1806,20 @@ llvm::StructType *CodeGenModule::GetTypeDescriptorType(llvm::Type *TypeInfo,
   descrTypes.push_back(llvm::ArrayType::get(Int8Ty, NameLength));
 
   return llvm::StructType::get(getLLVMContext(), descrTypes);
+}
+
+llvm::StructType *CodeGenModule::GetPMDtype() {
+  if (llvm::StructType *pmd = getModule().getTypeByName("pmd.type")) {
+    return pmd;
+  }
+
+  llvm::SmallVector<llvm::Type*, 3> types;
+
+  for (unsigned I = 0; I != 3; ++I) {
+    types.push_back(Int32Ty);
+  }
+
+  return llvm::StructType::create(getLLVMContext(), types, "pmd.type");
 }
 
 llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
