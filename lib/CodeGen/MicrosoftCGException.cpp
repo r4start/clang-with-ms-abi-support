@@ -168,20 +168,20 @@ static llvm::StructType *getCatchableType(CodeGenModule &CGM,
 //    int nCatchableTypes; 
 //    CatchableType* arrayOfCatchableTypes[0];
 //  };
-static llvm::StructType *getCatchableArrayType(CodeGenModule &CGM, 
-                                               llvm::Type *CatchableType,
-                                               uint32_t NumberOfTypes) {
-  assert(CatchableType && "CatchableType must be not null pointer!");
-  assert(NumberOfTypes && "Catchable array size must be > 0");
-
+static llvm::StructType *getCatchableArrayType(CodeGenModule &CGM) {
+  if (llvm::StructType *cta = 
+            CGM.getModule().getTypeByName("catchable.array.type")) {
+    return cta;
+  }
   llvm::SmallVector<llvm::Type *, 2> types;
   types.push_back(CGM.Int32Ty);
 
-  for (uint32_t i = 0; i < NumberOfTypes; ++i) {
-    types.push_back(CatchableType->getPointerTo());
-  }
+  llvm::StructType *catchableType = getOrCreateCatchableType(CGM);
 
-  return llvm::StructType::get(CGM.getLLVMContext(), types);
+  types.push_back(llvm::ArrayType::get(catchableType->getPointerTo(), 0));
+
+  return llvm::StructType::create(CGM.getLLVMContext(), types,
+                                  "catchable.array.type");
 }
 
 // r4start
@@ -205,8 +205,6 @@ static llvm::StructType *getThrowInfoType(CodeGenModule &CGM) {
     return tiType;
   }
 
-  llvm::Type *catchableTy = getOrCreateCatchableType(CGM);
-
   llvm::SmallVector<llvm::Type *, 4> types;
 
   types.push_back(CGM.Int32Ty);
@@ -214,7 +212,7 @@ static llvm::StructType *getThrowInfoType(CodeGenModule &CGM) {
   types.push_back(llvm::FunctionType::get(CGM.VoidTy, false)->getPointerTo());
   types.push_back(llvm::FunctionType::get(CGM.Int32Ty, false)->getPointerTo());
 
-  types.push_back(catchableTy->getPointerTo());
+  types.push_back(getCatchableArrayType(CGM)->getPointerTo());
 
   return llvm::StructType::create(CGM.getLLVMContext(), types,
                                   "throw.info.type");
@@ -222,14 +220,30 @@ static llvm::StructType *getThrowInfoType(CodeGenModule &CGM) {
 
 // r4start
 static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF, 
+                                             const QualType &ThrowTy,
                                              llvm::StructType *ThrowInfoTy) {
+  const CXXRecordDecl *throwTypeDecl = ThrowTy->getAsCXXRecordDecl();
+  assert(throwTypeDecl && "Can not generate throw info!");
+
+  const CXXDestructorDecl *dtorDecl = throwTypeDecl->getDestructor();
+  assert(dtorDecl && "Where is destructor?");
+
+  llvm::GlobalValue *dtorPtr = 
+    CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, CXXDtorType::Dtor_Base);
+
   llvm::SmallVector<llvm::Constant *, 4> initVals;
 
-  // TODO: remove it!
-  llvm::Constant *initVal = llvm::ConstantInt::get(CGF.CGM.Int32Ty, 0);
-  for (int i = 0; i < 4; ++i) {
-    initVals.push_back(initVal);
-  }
+  initVals.push_back(llvm::ConstantInt::get(CGF.CGM.Int32Ty, 0));
+
+  initVals.push_back(llvm::ConstantExpr::getBitCast(dtorPtr,
+                                 ThrowInfoTy->getStructElementType(1)));
+
+  llvm::Constant *forwardComp = 
+    llvm::UndefValue::get(ThrowInfoTy->getStructElementType(2));
+  initVals.push_back(forwardComp);
+
+  initVals.push_back(
+    llvm::UndefValue::get(ThrowInfoTy->getStructElementType(3)));
 
   return llvm::ConstantStruct::get(ThrowInfoTy, initVals);
 }
@@ -263,7 +277,8 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
   }
 
   llvm::StructType *throwInfoTy = getThrowInfoType(CGF.CGM);
-  llvm::Constant *throwInfoInit = generateThrowInfoInit(CGF, throwInfoTy);
+  llvm::Constant *throwInfoInit = 
+    generateThrowInfoInit(CGF, CatchType, throwInfoTy);
 
   return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
                                   llvm::GlobalValue::InternalLinkage,
@@ -278,6 +293,7 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
   }
 
   QualType ThrowType = E->getSubExpr()->getType();
+
   uint64_t ThrowTypeSize = 
     getContext().getTypeSizeInChars(ThrowType).getQuantity();
 
@@ -856,16 +872,19 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
     initializerFields.push_back(
       llvm::ConstantExpr::getInBoundsGetElementPtr(unwindTable, idxList));
   } else {
-    initializerFields.push_back(llvm::UndefValue::get(getUnwindMapEntryTy(CGM)->getPointerTo()));
+    initializerFields.push_back(
+      llvm::UndefValue::get(getUnwindMapEntryTy(CGM)->getPointerTo()));
   }
   // number of try blocks in the function
   initializerFields.push_back(llvm::ConstantInt::get(Int32Ty,
                                           EHState.TryBlockTableEntries.size()));
+  // pTryBlockTable
   if (tryBlocksTable) {
     initializerFields.push_back(
       llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
   } else {
-    initializerFields.push_back(llvm::UndefValue::get(getTryBlockMapEntryTy(CGM)->getPointerTo()));
+    initializerFields.push_back(
+      llvm::UndefValue::get(getTryBlockMapEntryTy(CGM)->getPointerTo()));
   }
 
   // not used on x86
@@ -966,17 +985,6 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
   llvm::Constant *handler = 
     llvm::ConstantStruct::get(cast<llvm::StructType>(HandlerTy), fields);
   EHState.TryHandlers.push_back(handler);
-}
-
-// r4start
-static bool HasCatchHandlerTryBlock(const Stmt *Handler) {
-  for (Stmt::const_child_iterator I = Handler->child_begin(),
-       E = Handler->child_end(); I != E; ++I) {
-    if (isa<CXXTryStmt>(*I)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,

@@ -1217,7 +1217,7 @@ private:
 
     /// Catch handlers for current try.
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
-    
+
     llvm::Constant *ESTypeList;
 
     MSEHState(CodeGenFunction &cgf) 
