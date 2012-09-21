@@ -198,9 +198,13 @@ public:
 
   virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
 
-  virtual void mangleThrowInfo(const CXXRecordDecl *RD, raw_ostream &Out);
+  virtual void mangleThrowInfo(const CXXRecordDecl *, 
+                               uint8_t,
+                               raw_ostream &);
 
-  virtual void mangleCatchTypeArray(const CXXRecordDecl *RD, raw_ostream &Out);
+  virtual void mangleCatchTypeArray(const CXXRecordDecl *,
+                                    uint8_t,
+                                    raw_ostream &);
 
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &);
 
@@ -2284,18 +2288,30 @@ void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
 }
 
 void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
+                                             uint8_t ExceptionTypesCount,
                                              raw_ostream &Out) {
   Out << '\01';
-  Out << "__TI1?A";
+  Out << "__TI";
+
+  // Number of types that can catch this exception.
+  Out << ExceptionTypesCount;
   
+  Out << "?A";
+
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
 }
 
 void MicrosoftMangleContext::mangleCatchTypeArray(const CXXRecordDecl *RD,
+                                                  uint8_t ExceptionTypesCount,
                                                   raw_ostream &Out) {
   Out << '\01';
-  Out << "__CTA1?A";
+  Out << "__CTA";
+
+  // Number of types that can catch this exception.
+  Out << ExceptionTypesCount;
+  
+  Out << "?A";
   
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());

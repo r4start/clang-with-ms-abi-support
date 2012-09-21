@@ -325,7 +325,7 @@ static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF,
     CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
 
   assert(extensions && "Not in MS mode!");
-  extensions->mangleCatchTypeArray(throwTypeDecl, stream);
+  extensions->mangleCatchTypeArray(throwTypeDecl, 1, stream);
   stream.flush();
   llvm::StringRef mangledName(name);
 
@@ -358,7 +358,7 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
   llvm::SmallString<256> buffer;
   llvm::raw_svector_ostream out(buffer);
 
-  msMangler->mangleThrowInfo(catchDecl, out);
+  msMangler->mangleThrowInfo(catchDecl, 1, out);
   out.flush();
 
   StringRef throwInfo(buffer);
@@ -928,6 +928,8 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   llvm::GlobalValue *unwindTable = 0;
   llvm::GlobalValue *tryBlocksTable = 0;
 
+  // If function doesn`t have try-block,
+  // then funcinfo is not necessary.
   if (!EHState.TryBlockTableEntries.empty()) {
     tryBlocksTable = EmitTryBlockTable();
   } else {
