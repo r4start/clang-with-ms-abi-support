@@ -96,9 +96,11 @@ public:
                                             raw_ostream &) = 0;
   virtual void mangleEHFuncInfo(const FunctionDecl *, raw_ostream &) = 0;
 
-  virtual void mangleThrowInfo(const CXXRecordDecl *, raw_ostream &) = 0;
+  virtual void mangleThrowInfo(const CXXRecordDecl *, 
+                               uint8_t, raw_ostream &) = 0;
 
-  virtual void mangleCatchTypeArray(const CXXRecordDecl *, raw_ostream &) = 0;
+  virtual void mangleCatchTypeArray(const CXXRecordDecl *, 
+                                    uint8_t, raw_ostream &) = 0;
 
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &) = 0;
 
