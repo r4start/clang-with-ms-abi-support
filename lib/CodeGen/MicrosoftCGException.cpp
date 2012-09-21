@@ -928,12 +928,14 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   llvm::GlobalValue *unwindTable = 0;
   llvm::GlobalValue *tryBlocksTable = 0;
 
-  if (!EHState.GlobalUnwindTable.empty()) {
-    unwindTable = EmitUnwindTable();
-  }
-
   if (!EHState.TryBlockTableEntries.empty()) {
     tryBlocksTable = EmitTryBlockTable();
+  } else {
+    return 0;
+  }
+
+  if (!EHState.GlobalUnwindTable.empty()) {
+    unwindTable = EmitUnwindTable();
   }
 
   const FunctionDecl *function = 
@@ -966,7 +968,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
       llvm::ConstantExpr::getInBoundsGetElementPtr(unwindTable, idxList));
   } else {
     initializerFields.push_back(
-      llvm::UndefValue::get(getUnwindMapEntryTy(CGM)->getPointerTo()));
+     llvm::ConstantPointerNull::get(getUnwindMapEntryTy(CGM)->getPointerTo()));
   }
   // number of try blocks in the function
   initializerFields.push_back(llvm::ConstantInt::get(Int32Ty,
@@ -977,7 +979,8 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
       llvm::ConstantExpr::getInBoundsGetElementPtr(tryBlocksTable, idxList));
   } else {
     initializerFields.push_back(
-      llvm::UndefValue::get(getTryBlockMapEntryTy(CGM)->getPointerTo()));
+      llvm::ConstantPointerNull::get(
+        getTryBlockMapEntryTy(CGM)->getPointerTo()));
   }
 
   // not used on x86
@@ -1018,6 +1021,9 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 // r4start
 void CodeGenFunction::EmitEHInformation() {
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
+  if (!ehFuncInfo) {
+    return;
+  }
 
   llvm::Function *ehHandler = getEHHandler(*this);
 
