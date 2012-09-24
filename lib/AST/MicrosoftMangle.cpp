@@ -590,7 +590,11 @@ void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
   Out << "?_R0";
   
   // This is always reference?
-  Out << "?A";
+  // Doesn`t need for builtin types.
+  if (Type->getAsCXXRecordDecl()) {
+    Out << "?A";
+  }
+
   mangleType(Type, SourceRange());
   // End magic number
   Out << "@8";
@@ -2301,9 +2305,12 @@ void MicrosoftMangleContext::mangleThrowInfo(QualType Type,
 
   // Number of types that can catch this exception.
   Out << (int64_t)ExceptionTypesCount;
-  
-  Out << "?A";
 
+  // Doesn`t need for builtin types.
+  if (Type->getAsCXXRecordDecl()) {
+    Out << "?A";
+  }
+  
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleType(Type, SourceRange());
 }
@@ -2317,7 +2324,10 @@ void MicrosoftMangleContext::mangleCatchTypeArray(QualType Type,
   // Number of types that can catch this exception.
   Out << (int64_t)ExceptionTypesCount;
   
-  Out << "?A";
+  // Doesn`t need for builtin types.
+  if (Type->getAsCXXRecordDecl()) {
+    Out << "?A";
+  }
   
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleType(Type, SourceRange());
@@ -2327,7 +2337,13 @@ void MicrosoftMangleContext::mangleCatchTypeElement(QualType Type,
                                                     raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleCXXRTTITypeDescriptor(Type, "__CT?");
-  Out << (int64_t) 1;
+  
+  // Last number is size of type.
+  if (Type->isBuiltinType()) {
+    Out << (int64_t) 4;
+  } else {
+    Out << (int64_t) 1;
+  }
 }
 
 void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
