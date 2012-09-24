@@ -66,7 +66,7 @@ public:
   void mangleCompleteObjLocatorOrVFTable(const CXXRecordDecl *RD,
                                          const CXXRecordDecl *BaseClass = 0,
                                          StringRef FuncName = "??_R4");
-  void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *RD, 
+  void mangleCXXRTTITypeDescriptor(QualType Type, 
                                    StringRef Prefix = "?");
   void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
                                         int64_t MemberDisplacement,
@@ -167,7 +167,7 @@ public:
                                                   const CXXRecordDecl *BaseClass,
                                                   raw_ostream &);
 
-  virtual void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *,
+  virtual void mangleCXXRTTITypeDescriptor(QualType ,
                                            raw_ostream &);
 
   virtual void mangleCXXRTTICompleteObjectLocator(const CXXRecordDecl *RD,
@@ -191,22 +191,22 @@ public:
                                 const CXXRecordDecl *BaseDecl,
                                 raw_ostream &);
 
-  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
+  virtual void mangleSpareForTypeDescriptor(QualType Type,
                                             raw_ostream &Out);
 
   // Microsoft EH specific.
 
   virtual void mangleEHFuncInfo(const FunctionDecl *F, raw_ostream &Out);
 
-  virtual void mangleThrowInfo(const CXXRecordDecl *, 
+  virtual void mangleThrowInfo(QualType , 
                                uint8_t,
                                raw_ostream &);
 
-  virtual void mangleCatchTypeArray(const CXXRecordDecl *,
+  virtual void mangleCatchTypeArray(QualType ,
                                     uint8_t,
                                     raw_ostream &);
 
-  virtual void mangleCatchTypeElement(const CXXRecordDecl *,
+  virtual void mangleCatchTypeElement(QualType ,
                                       raw_ostream &);
 
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &);
@@ -582,7 +582,7 @@ void MicrosoftCXXNameMangler::mangleCompleteObjLocatorOrVFTable(
 }
 
 void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
-                                        const CXXRecordDecl *RD,
+                                        QualType Type,
                                         StringRef Prefix) {
   Out << '\01';
   Out << Prefix;
@@ -591,7 +591,7 @@ void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
   
   // This is always reference?
   Out << "?A";
-  mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
+  mangleType(Type, SourceRange());
   // End magic number
   Out << "@8";
 }
@@ -2159,10 +2159,10 @@ void MicrosoftMangleContext::mangleCXXRTTI(QualType T,
     << T.getBaseTypeIdentifier();
 }
 void 
-MicrosoftMangleContext::mangleCXXRTTITypeDescriptor(const CXXRecordDecl *RD,
+MicrosoftMangleContext::mangleCXXRTTITypeDescriptor(QualType Type,
                                                     raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangleCXXRTTITypeDescriptor(RD);
+  mangler.mangleCXXRTTITypeDescriptor(Type);
 }
 void MicrosoftMangleContext::mangleCXXRTTIName(QualType T,
                                                raw_ostream &Out) {
@@ -2268,13 +2268,13 @@ void MicrosoftMangleContext::mangleReferenceTemporary(const clang::VarDecl *VD,
 }
 
 void 
-MicrosoftMangleContext::mangleSpareForTypeDescriptor(const CXXRecordDecl *RD,
+MicrosoftMangleContext::mangleSpareForTypeDescriptor(QualType Type,
                                                      raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
 
   // Prefix for spare.
   Out << ".?A";
-  mangler.mangleType(getASTContext().getRecordType(RD), SourceRange());
+  mangler.mangleType(Type, SourceRange());
 }
 
 static void MangleEHSpecificNames(MicrosoftMangleContext &ctx, const FunctionDecl *F,
@@ -2293,7 +2293,7 @@ void MicrosoftMangleContext::mangleEHFuncInfo(const FunctionDecl *F,
   MangleEHSpecificNames(*this, F, Out, "\01__ehfuncinfo$");
 }
 
-void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
+void MicrosoftMangleContext::mangleThrowInfo(QualType Type,
                                              uint8_t ExceptionTypesCount,
                                              raw_ostream &Out) {
   Out << '\01';
@@ -2305,10 +2305,10 @@ void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
   Out << "?A";
 
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
+  mangler.mangleType(Type, SourceRange());
 }
 
-void MicrosoftMangleContext::mangleCatchTypeArray(const CXXRecordDecl *RD,
+void MicrosoftMangleContext::mangleCatchTypeArray(QualType Type,
                                                   uint8_t ExceptionTypesCount,
                                                   raw_ostream &Out) {
   Out << '\01';
@@ -2320,13 +2320,13 @@ void MicrosoftMangleContext::mangleCatchTypeArray(const CXXRecordDecl *RD,
   Out << "?A";
   
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
+  mangler.mangleType(Type, SourceRange());
 }
 
-void MicrosoftMangleContext::mangleCatchTypeElement(const CXXRecordDecl *RD,
+void MicrosoftMangleContext::mangleCatchTypeElement(QualType Type,
                                                     raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
-  mangler.mangleCXXRTTITypeDescriptor(RD, "__CT?");
+  mangler.mangleCXXRTTITypeDescriptor(Type, "__CT?");
   Out << (int64_t) 1;
 }
 

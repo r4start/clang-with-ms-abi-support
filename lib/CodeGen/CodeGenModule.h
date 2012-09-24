@@ -555,6 +555,10 @@ public:
   llvm::Constant *
   GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy, bool ForEH = false);
 
+  /// r4start
+  llvm::Constant *
+  GetAddrOfMSTypeDescriptor(QualType Type);
+
   /// GetAddrOfThunk - Get the address of the thunk for the given global decl.
   llvm::Constant *GetAddrOfThunk(GlobalDecl GD, const ThunkInfo &Thunk);
 
