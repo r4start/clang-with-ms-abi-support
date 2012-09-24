@@ -147,8 +147,24 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
   assert(CatchableType->isStructureOrClassType() &&
          "Fix for trivial types!");
 
-  int properties = 0;
+  llvm::SmallString<256> nameBuffer;
+  llvm::raw_svector_ostream stream(nameBuffer);
+
+  MSMangleContextExtensions *msExt = 
+    CGM.getCXXABI().getMangleContext().getMsExtensions();
+
+  assert(msExt && "Catchable meaningful only in MS C++ ABI!");
   const CXXRecordDecl *caught = CatchableType->getAsCXXRecordDecl();
+  msExt->mangleCatchTypeElement(caught, stream);
+  stream.flush();
+
+  llvm::StringRef mangledName(nameBuffer);
+
+  if (llvm::Constant *elem = CGM.getModule().getGlobalVariable(mangledName)) {
+    return elem;
+  }
+
+  int properties = 0;
 
   if (caught->isPOD()) {
     properties |= 1;
@@ -211,7 +227,8 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
 
   llvm::Constant *init = llvm::ConstantStruct::get(catchableTy, catchableEntry);
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
-                                  llvm::GlobalValue::InternalLinkage, init);
+                                  llvm::GlobalValue::ExternalLinkage, 
+                                  init, mangledName);
 }
 
 // r4start

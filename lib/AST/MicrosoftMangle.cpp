@@ -206,6 +206,9 @@ public:
                                     uint8_t,
                                     raw_ostream &);
 
+  virtual void mangleCatchTypeElement(const CXXRecordDecl *,
+                                      raw_ostream &);
+
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &);
 
   virtual void mangleEHCatchFunction(const FunctionDecl *, uint8_t,
@@ -2263,18 +2266,21 @@ void MicrosoftMangleContext::mangleCXXVBTable(const CXXRecordDecl *RD,
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleCXXRTTIVBTable(RD, BaseDecl);
 }
+
 void MicrosoftMangleContext::mangleCXXCtor(const CXXConstructorDecl *D,
                                            CXXCtorType Type,
                                            raw_ostream & Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangle(D);
 }
+
 void MicrosoftMangleContext::mangleCXXDtor(const CXXDestructorDecl *D,
                                            CXXDtorType Type,
                                            raw_ostream & Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangle(D);
 }
+
 void MicrosoftMangleContext::mangleReferenceTemporary(const clang::VarDecl *VD,
                                                       raw_ostream &) {
   unsigned DiagID = getDiags().getCustomDiagID(DiagnosticsEngine::Error,
@@ -2336,6 +2342,13 @@ void MicrosoftMangleContext::mangleCatchTypeArray(const CXXRecordDecl *RD,
   
   MicrosoftCXXNameMangler mangler(*this, Out);
   mangler.mangleType(RD->getASTContext().getRecordType(RD), SourceRange());
+}
+
+void MicrosoftMangleContext::mangleCatchTypeElement(const CXXRecordDecl *RD,
+                                                    raw_ostream &Out) {
+  MicrosoftCXXNameMangler mangler(*this, Out);
+  mangler.mangleCXXRTTITypeDescriptor(RD, "__CT?");
+  Out << (int64_t) 1;
 }
 
 void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
