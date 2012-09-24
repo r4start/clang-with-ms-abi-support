@@ -73,7 +73,7 @@ public:
                                                   StringRef ,
                                                   raw_ostream &) = 0;
 
-  virtual void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *,
+  virtual void mangleCXXRTTITypeDescriptor(QualType ,
                                            raw_ostream &) = 0;
 
   virtual void mangleCXXRTTIClassHierarhyDescriptor(const CXXRecordDecl *,
@@ -92,17 +92,17 @@ public:
   virtual void mangleCXXVBTable(const CXXRecordDecl *,
                                 const CXXRecordDecl *,
                                 raw_ostream &) = 0;
-  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *,
+  virtual void mangleSpareForTypeDescriptor(QualType ,
                                             raw_ostream &) = 0;
   virtual void mangleEHFuncInfo(const FunctionDecl *, raw_ostream &) = 0;
 
-  virtual void mangleThrowInfo(const CXXRecordDecl *, 
+  virtual void mangleThrowInfo(QualType , 
                                uint8_t, raw_ostream &) = 0;
 
-  virtual void mangleCatchTypeArray(const CXXRecordDecl *, 
+  virtual void mangleCatchTypeArray(QualType , 
                                     uint8_t, raw_ostream &) = 0;
 
-  virtual void mangleCatchTypeElement(const CXXRecordDecl *, 
+  virtual void mangleCatchTypeElement(QualType , 
                                       raw_ostream &) = 0;
 
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &) = 0;

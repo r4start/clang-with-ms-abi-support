@@ -164,20 +164,6 @@ class RTTIBuilder {
   /// };
   llvm::Constant *BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD);
 
-  /// r4start
-  /// Build Microsoft specific structure RTTI Type Descriptor.
-  /// struct RTTITypeDescriptor 
-  /// {
-  ///  // pointer to type_info vftable
-  ///  struct type_info* pVFTable;
-  /// 
-  ///   //always null?
-  ///   DWORD spare;
-  /// 
-  ///   char* name;
-  /// };
-  llvm::Constant *BuildRTTITypeDescriptor(QualType Ty);
-
 public:
   RTTIBuilder(CodeGenModule &CGM) : CGM(CGM), 
     VMContext(CGM.getModule().getContext()),
@@ -250,6 +236,20 @@ public:
   /// };
   llvm::Constant *BuildMSTypeInfo(QualType Ty,
                                   QualType BaseTy);
+
+  /// r4start
+  /// Build Microsoft specific structure RTTI Type Descriptor.
+  /// struct RTTITypeDescriptor 
+  /// {
+  ///  // pointer to type_info vftable
+  ///  struct type_info* pVFTable;
+  /// 
+  ///   //always null?
+  ///   DWORD spare;
+  /// 
+  ///   char* name;
+  /// };
+  llvm::Constant *BuildRTTITypeDescriptor(QualType Ty);
 };
 }
 
@@ -957,11 +957,10 @@ RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD) {
 llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   SmallString<256> Name;
   llvm::raw_svector_ostream Out(Name);
-  const CXXRecordDecl* RD = Ty->getAsCXXRecordDecl();
 
   MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
 
-  Ctx.getMsExtensions()->mangleCXXRTTITypeDescriptor(RD, Out);
+  Ctx.getMsExtensions()->mangleCXXRTTITypeDescriptor(Ty, Out);
   Out.flush();
 
   StringRef DescrName = Name.str();
@@ -975,7 +974,7 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   SmallString<256> Spare;
   llvm::raw_svector_ostream OutSpare(Spare);
   // Last field of type descriptor contains mangled name of class
-  Ctx.getMsExtensions()->mangleSpareForTypeDescriptor(RD, OutSpare);
+  Ctx.getMsExtensions()->mangleSpareForTypeDescriptor(Ty, OutSpare);
 
   OutSpare.flush();
 
@@ -1644,6 +1643,11 @@ CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
   if (!getContext().getLangOpts().RTTI)
     return llvm::Constant::getNullValue(Int8PtrTy);
   return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy, ForEH);
+}
+
+llvm::Constant *
+CodeGenModule::GetAddrOfMSTypeDescriptor(QualType Ty) {
+  return RTTIBuilder(*this).BuildRTTITypeDescriptor(Ty);
 }
 
 void CodeGenModule::EmitFundamentalRTTIDescriptor(QualType Type) {

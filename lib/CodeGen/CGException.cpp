@@ -463,8 +463,7 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   if (!isMSABI) {
     TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
   } else {
-    TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(ThrowType, ThrowType, 
-                                                                /*ForEH=*/true);
+    TypeInfo = CGM.GetAddrOfMSTypeDescriptor(ThrowType);
   }
 
   // The address of the destructor.  If the exception type has a
@@ -658,8 +657,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
         if (!IsMSExceptions) {
           TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
         } else {
-          TypeInfo = CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, 
-                                                                /*ForEH=*/true);
+          TypeInfo = CGM.GetAddrOfMSTypeDescriptor(CaughtType);
         }
       }
       CatchScope->setHandler(I, TypeInfo, Handler);

@@ -567,6 +567,10 @@ public:
   /// GetAddrOfUuidDescriptor - Get the address of a uuid descriptor .
   llvm::Constant *GetAddrOfUuidDescriptor(const CXXUuidofExpr* E);
 
+  /// r4start
+  llvm::Constant *
+  GetAddrOfMSTypeDescriptor(QualType Type);
+
   /// GetAddrOfThunk - Get the address of the thunk for the given global decl.
   llvm::Constant *GetAddrOfThunk(GlobalDecl GD, const ThunkInfo &Thunk);
 

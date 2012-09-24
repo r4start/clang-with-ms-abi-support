@@ -68,6 +68,10 @@ CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
   return new llvm::StoreInst(State, MSTryState);
 }
 
+static llvm::Constant *getNullPointer(llvm::Type *Type) {
+  return llvm::ConstantPointerNull::get(cast<llvm::PointerType>(Type)); 
+}
+
 // r4start
 static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF, 
                                     llvm::Type *ThrowInfoPtrTy) {
@@ -143,10 +147,7 @@ static llvm::Constant *getPMDInit(CodeGenModule &CGM, int mdisp,
 //    void (*copyFunction)();
 //  };
 static llvm::Constant *getCatchable(CodeGenModule &CGM, 
-                                    const QualType &CatchableType) {
-  assert(CatchableType->isStructureOrClassType() &&
-         "Fix for trivial types!");
-
+                                    QualType CatchableType) {
   llvm::SmallString<256> nameBuffer;
   llvm::raw_svector_ostream stream(nameBuffer);
 
@@ -154,8 +155,7 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
     CGM.getCXXABI().getMangleContext().getMsExtensions();
 
   assert(msExt && "Catchable meaningful only in MS C++ ABI!");
-  const CXXRecordDecl *caught = CatchableType->getAsCXXRecordDecl();
-  msExt->mangleCatchTypeElement(caught, stream);
+  msExt->mangleCatchTypeElement(CatchableType, stream);
   stream.flush();
 
   llvm::StringRef mangledName(nameBuffer);
@@ -165,20 +165,53 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
   }
 
   int properties = 0;
+  int sizeOrOffset = 0;
+  llvm::Constant *ctorAddr = 0;
+  llvm::StructType *catchableTy = getOrCreateCatchableType(CGM);
 
-  if (caught->isPOD()) {
-    properties |= 1;
+  if (const CXXRecordDecl *caught = CatchableType->getAsCXXRecordDecl()) {
+    if (caught->isPOD()) {
+      properties |= 1;
+    }
+
+    // TODO: 0x02: can be caught by reference only
+    // When ?
+
+    if (caught->getNumVBases()) {
+      properties |= 4;
+    }
+
+    const ASTRecordLayout &Layout = 
+      caught->getASTContext().getASTRecordLayout(caught);
+    sizeOrOffset = Layout.getSize().getQuantity();
+
+    if (caught->hasUserDeclaredCopyConstructor()) {
+      const CXXConstructorDecl *copyCtorDecl = 0;
+    
+      // replace with find_if.
+      for (CXXRecordDecl::method_iterator M = caught->method_begin(),
+           E = caught->method_end(); M != E; ++M) {
+        if (isa<CXXConstructorDecl>(*M)) {
+          const CXXConstructorDecl *ctor = cast<CXXConstructorDecl>(*M);
+          if (ctor->isCopyConstructor()) {
+            copyCtorDecl = ctor;
+            break;
+          }
+        }
+      }
+
+      ctorAddr = CGM.GetAddrOfCXXConstructor(copyCtorDecl,
+                         Ctor_Base);
+      ctorAddr = llvm::ConstantExpr::getBitCast(ctorAddr,
+                                         catchableTy->getStructElementType(4));
+    } else {
+      ctorAddr = getNullPointer(catchableTy->getStructElementType(4));
+    }
+  } else {
+    ctorAddr = getNullPointer(catchableTy->getStructElementType(4));
   }
 
-  // TODO: 0x02: can be caught by reference only
-  // When ?
-
-  if (caught->getNumVBases()) {
-    properties |= 4;
-  }
-
-  llvm::Constant *typeDescr =
-    CGM.GetAddrOfMSRTTIDescriptor(CatchableType, CatchableType, true);
+  llvm::Constant *typeDescr = CGM.GetAddrOfMSTypeDescriptor(CatchableType);
 
   SmallVector<llvm::Constant *, 5> catchableEntry;
 
@@ -188,40 +221,9 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
                                    CGM.GetDescriptorPtrType(CGM.Int8PtrTy)));
   catchableEntry.push_back(getPMDInit(CGM, 0, -1, 0));
 
-  const ASTRecordLayout &Layout = 
-    caught->getASTContext().getASTRecordLayout(caught);
+  
   catchableEntry.push_back(
-    llvm::ConstantInt::get(CGM.Int32Ty, Layout.getSize().getQuantity()));
-
-  llvm::StructType *catchableTy = getOrCreateCatchableType(CGM);
-  llvm::Constant *ctorAddr = 0;
-
-  if (caught->hasUserDeclaredCopyConstructor()) {
-    const CXXConstructorDecl *copyCtorDecl = 0;
-    
-    // replace with find_if.
-    for (CXXRecordDecl::method_iterator M = caught->method_begin(),
-         E = caught->method_end(); M != E; ++M) {
-      if (isa<CXXConstructorDecl>(*M)) {
-        const CXXConstructorDecl *ctor = cast<CXXConstructorDecl>(*M);
-        if (ctor->isCopyConstructor()) {
-          copyCtorDecl = ctor;
-          break;
-        }
-      }
-    }
-
-    ctorAddr = CGM.GetAddrOfCXXConstructor(copyCtorDecl,
-                       Ctor_Base);
-    ctorAddr = llvm::ConstantExpr::getBitCast(ctorAddr,
-                                         catchableTy->getStructElementType(4));
-  } else {
-    llvm::PointerType *temp = 
-      cast<llvm::PointerType>(catchableTy->getStructElementType(4)); 
-    ctorAddr = 
-      llvm::ConstantPointerNull::get(temp);
-    
-  }
+    llvm::ConstantInt::get(CGM.Int32Ty, sizeOrOffset));
   
   catchableEntry.push_back(ctorAddr);
 
@@ -300,16 +302,15 @@ public:
    : container(Accumulator), cgm(CGM), 
      catchableType(getOrCreateCatchableType(cgm)->getPointerTo()) {}
   
-  void operator() (const CXXRecordDecl *Class) {
-    QualType type = Class->getASTContext().getRecordType(Class);
-    container.push_back(getCatchable(cgm, type));
+  void operator() (QualType Type) {
+    container.push_back(getCatchable(cgm, Type));
   }
 };
 
 template<typename ContainerTy>
 void discoverAllCatchabletypes(const CXXRecordDecl *Class, 
                                ContainerTy &Accum) {
-  Accum.push_back(Class);
+  Accum.push_back(Class->getASTContext().getRecordType(Class));
 
   if (!Class->getNumBases()) {
     return;
@@ -325,19 +326,45 @@ void discoverAllCatchabletypes(const CXXRecordDecl *Class,
 
 // r4start
 static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM, 
-                                              const QualType &ThrowType) {
-  int numberOfElements = ThrowType->getAsCXXRecordDecl()->getNumBases() + 1;
+                                                  QualType ThrowType) {
+  MSMangleContextExtensions *extensions = 
+    CGM.getCXXABI().getMangleContext().getMsExtensions();
+  
+  assert(extensions && "Not in MS mode!");
+  
+  llvm::SmallString<256> name;
+  llvm::raw_svector_ostream stream(name);
+
+  int numberOfBases = 1;
+  if (const CXXRecordDecl *catchDecl = ThrowType->getAsCXXRecordDecl()) {
+    numberOfBases += catchDecl->getNumBases();
+  }
+
+  extensions->mangleCatchTypeArray(ThrowType, 
+                                   numberOfBases,
+                                   stream);
+  stream.flush();
+  llvm::StringRef mangledName(name);
+
+  llvm::GlobalVariable *gv = 
+    CGM.getModule().getGlobalVariable(mangledName);
+  if (gv) {
+    return gv;
+  }
 
   typedef llvm::SmallVector<llvm::Constant *, 8> InitContainerTy;
   typedef llvm::SmallVector<llvm::Type *, 8> CTATypes;
-  typedef llvm::SmallVector<const CXXRecordDecl *, 8> CatchablesContainerTy;
+  typedef llvm::SmallVector<QualType, 8> CatchablesContainerTy;
 
-  const CXXRecordDecl *throwDecl = ThrowType->getAsCXXRecordDecl();
   CatchablesContainerTy catchableTypes;
-  discoverAllCatchabletypes<CatchablesContainerTy>(throwDecl, catchableTypes);
+  if (const CXXRecordDecl *throwDecl = ThrowType->getAsCXXRecordDecl()) {
+    discoverAllCatchabletypes<CatchablesContainerTy>(throwDecl, catchableTypes);
+  } else {
+    catchableTypes.push_back(ThrowType);
+  }
 
   InitContainerTy init;
-  init.push_back(llvm::ConstantInt::get(CGM.Int32Ty, numberOfElements));
+  init.push_back(llvm::ConstantInt::get(CGM.Int32Ty, numberOfBases));
   std::for_each(catchableTypes.begin(), catchableTypes.end(), 
                 CatchableGenerator<InitContainerTy>(CGM, init));
   
@@ -350,51 +377,46 @@ static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM,
   llvm::StructType *ctaType = 
     llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
 
-  return llvm::ConstantStruct::get(ctaType, init);
+  llvm::Constant *cta = llvm::ConstantStruct::get(ctaType, init);
+
+  return
+    new llvm::GlobalVariable(CGM.getModule(), cta->getType(), true,
+                             llvm::GlobalValue::ExternalLinkage,
+                             cta, mangledName);
 }
 
 // r4start
 static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF, 
-                                             const QualType &ThrowTy,
+                                             QualType ThrowTy,
                                              llvm::StructType *ThrowInfoTy) {
   const CXXRecordDecl *throwTypeDecl = ThrowTy->getAsCXXRecordDecl();
-  assert(throwTypeDecl && "Can not generate throw info!");
-
-  const CXXDestructorDecl *dtorDecl = throwTypeDecl->getDestructor();
-  assert(dtorDecl && "Where is destructor?");
-
-  llvm::GlobalValue *dtorPtr = 
-    CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, Dtor_Base);
-
+  llvm::GlobalValue *dtorPtr = 0;
+  if (throwTypeDecl) {
+    const CXXDestructorDecl *dtorDecl = throwTypeDecl->getDestructor();
+    dtorPtr = CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, Dtor_Base);
+  }
+  
   llvm::SmallVector<llvm::Constant *, 4> initVals;
 
   initVals.push_back(llvm::ConstantInt::get(CGF.CGM.Int32Ty, 0));
 
-  initVals.push_back(llvm::ConstantExpr::getBitCast(dtorPtr,
-                                 ThrowInfoTy->getStructElementType(1)));
+  if (dtorPtr) {
+    initVals.push_back(llvm::ConstantExpr::getBitCast(dtorPtr,
+                                        ThrowInfoTy->getStructElementType(1)));
+  } else {
+    initVals.push_back(llvm::ConstantPointerNull::get(
+               cast<llvm::PointerType>(ThrowInfoTy->getStructElementType(1))));
+  }
 
   llvm::Constant *forwardComp = 
-    llvm::UndefValue::get(ThrowInfoTy->getStructElementType(2));
+    llvm::ConstantPointerNull::get(
+          cast<llvm::PointerType>(ThrowInfoTy->getStructElementType(2)));
   initVals.push_back(forwardComp);
 
   llvm::SmallString<256> name;
   llvm::raw_svector_ostream stream(name);
 
-  MSMangleContextExtensions *extensions = 
-    CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
-
-  assert(extensions && "Not in MS mode!");
-  extensions->mangleCatchTypeArray(throwTypeDecl, 
-                                   throwTypeDecl->getNumBases() + 1,
-                                   stream);
-  stream.flush();
-  llvm::StringRef mangledName(name);
-
-  llvm::Constant *ctaInit = generateCatchableArrayInit(CGF.CGM, ThrowTy);
-  llvm::GlobalVariable *cta = 
-    new llvm::GlobalVariable(CGF.CGM.getModule(), ctaInit->getType(), true,
-                             llvm::GlobalValue::ExternalLinkage,
-                             ctaInit, mangledName);
+  llvm::Constant *cta = generateCatchableArrayInit(CGF.CGM, ThrowTy);
 
   initVals.push_back(
     llvm::ConstantExpr::getBitCast(cta, ThrowInfoTy->getStructElementType(3)));
@@ -405,21 +427,19 @@ static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF,
 // r4start
 // This function is generate throw info for catch type.
 static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
-                                               const QualType &CatchType) {
-  const CXXRecordDecl *catchDecl = CatchType->getAsCXXRecordDecl();
-  if (!catchDecl) {
-    assert(false && 
-      "At now I don`t know how build throw info for builtin types.");
-    return 0;
-  }
-
+                                                    QualType CatchType) {
   MSMangleContextExtensions *msMangler = 
     CGF.CGM.getCXXABI().getMangleContext().getMsExtensions();
 
   llvm::SmallString<256> buffer;
   llvm::raw_svector_ostream out(buffer);
 
-  msMangler->mangleThrowInfo(catchDecl, catchDecl->getNumBases() + 1, out);
+  int numberOfBases = 1;
+  if (const CXXRecordDecl *catchDecl = CatchType->getAsCXXRecordDecl()) {
+    numberOfBases += catchDecl->getNumBases();
+  }
+
+  msMangler->mangleThrowInfo(CatchType, numberOfBases, out);
   out.flush();
 
   StringRef throwInfo(buffer);
@@ -435,7 +455,7 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
     generateThrowInfoInit(CGF, CatchType, throwInfoTy);
 
   return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
-                                  llvm::GlobalValue::InternalLinkage,
+                                  llvm::GlobalValue::ExternalLinkage,
                                   throwInfoInit, throwInfo);
 }
 
@@ -532,7 +552,7 @@ static llvm::Constant *getTypeHandlerForESList(CodeGenModule &CGM,
                                                QualType &ExceptionType) {
   ExceptionType = ExceptionType.getNonReferenceType().getUnqualifiedType();
   llvm::Constant *TypeDescriptor = 
-    CGM.GetAddrOfMSRTTIDescriptor(ExceptionType, ExceptionType, true);
+    CGM.GetAddrOfMSTypeDescriptor(ExceptionType);
 
   llvm::SmallVector<llvm::Constant *, 4> fields;
 
@@ -1125,8 +1145,7 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
   }
 
   CaughtType = CaughtType.getNonReferenceType().getUnqualifiedType();
-  llvm::Constant *TypeDescriptor = 
-    CGM.GetAddrOfMSRTTIDescriptor(CaughtType, CaughtType, true);
+  llvm::Constant *TypeDescriptor = CGM.GetAddrOfMSTypeDescriptor(CaughtType);
 
   llvm::SmallVector<llvm::Constant *, 4> fields;
 
