@@ -347,7 +347,7 @@ static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF,
   assert(dtorDecl && "Where is destructor?");
 
   llvm::GlobalValue *dtorPtr = 
-    CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, CXXDtorType::Dtor_Base);
+    CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, Dtor_Base);
 
   llvm::SmallVector<llvm::Constant *, 4> initVals;
 
