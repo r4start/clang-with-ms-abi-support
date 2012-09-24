@@ -2294,7 +2294,7 @@ void MicrosoftMangleContext::mangleThrowInfo(const CXXRecordDecl *RD,
   Out << "__TI";
 
   // Number of types that can catch this exception.
-  Out << ExceptionTypesCount;
+  Out << (int64_t)ExceptionTypesCount;
   
   Out << "?A";
 
@@ -2309,7 +2309,7 @@ void MicrosoftMangleContext::mangleCatchTypeArray(const CXXRecordDecl *RD,
   Out << "__CTA";
 
   // Number of types that can catch this exception.
-  Out << ExceptionTypesCount;
+  Out << (int64_t)ExceptionTypesCount;
   
   Out << "?A";
   
