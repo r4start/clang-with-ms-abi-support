@@ -104,6 +104,9 @@ public:
   virtual void mangleCatchTypeArray(const CXXRecordDecl *, 
                                     uint8_t, raw_ostream &) = 0;
 
+  virtual void mangleCatchTypeElement(const CXXRecordDecl *, 
+                                      raw_ostream &) = 0;
+
   virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &) = 0;
 
   virtual void mangleEHCatchFunction(const FunctionDecl *,
