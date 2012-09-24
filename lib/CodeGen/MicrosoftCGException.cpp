@@ -209,7 +209,7 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
   
   catchableEntry.push_back(ctorAddr);
 
-  auto init = llvm::ConstantStruct::get(catchableTy, catchableEntry);
+  llvm::Constant *init = llvm::ConstantStruct::get(catchableTy, catchableEntry);
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
                                   llvm::GlobalValue::InternalLinkage, init);
 }
