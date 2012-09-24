@@ -196,7 +196,7 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
     }
 
     ctorAddr = CGM.GetAddrOfCXXConstructor(copyCtorDecl,
-                       CXXCtorType::Ctor_Base);
+                       Ctor_Base);
     ctorAddr = llvm::ConstantExpr::getBitCast(ctorAddr,
                                          catchableTy->getStructElementType(4));
   } else {
