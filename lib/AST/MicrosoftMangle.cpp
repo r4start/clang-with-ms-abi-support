@@ -2277,7 +2277,12 @@ MicrosoftMangleContext::mangleSpareForTypeDescriptor(QualType Type,
   MicrosoftCXXNameMangler mangler(*this, Out);
 
   // Prefix for spare.
-  Out << ".?A";
+  Out << ".";
+
+  // Doesn`t need for builtin types.
+  if (Type->getAsCXXRecordDecl()) {
+    Out << "?A";
+  }
   mangler.mangleType(Type, SourceRange());
 }
 
@@ -2339,11 +2344,9 @@ void MicrosoftMangleContext::mangleCatchTypeElement(QualType Type,
   mangler.mangleCXXRTTITypeDescriptor(Type, "__CT?");
   
   // Last number is size of type.
-  if (Type->isBuiltinType()) {
-    Out << (int64_t) 4;
-  } else {
-    Out << (int64_t) 1;
-  }
+  std::pair<int64_t, unsigned> info = getASTContext().getTypeInfo(Type);
+  // FIXME: remove 8 with size of byte in bits.
+  Out << info.first / 8;
 }
 
 void MicrosoftMangleContext::mangleEHHandlerFunction(const FunctionDecl *F,
