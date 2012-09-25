@@ -63,11 +63,13 @@ llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(llvm::Value *State
   return CGF.Builder.CreateStore(State, MSTryState);
 }
 
+// r4start
 llvm::StoreInst *
 CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
   return new llvm::StoreInst(State, MSTryState);
 }
 
+// r4start
 static llvm::Constant *getNullPointer(llvm::Type *Type) {
   return llvm::ConstantPointerNull::get(cast<llvm::PointerType>(Type)); 
 }
@@ -169,14 +171,17 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
   llvm::Constant *ctorAddr = 0;
   llvm::StructType *catchableTy = getOrCreateCatchableType(CGM);
 
+  // 0x01: simple type (can be copied by memmove)
+  if (CatchableType.isCXX98PODType(CGM.getContext())) {
+    properties |= 1;
+  }
+
   if (const CXXRecordDecl *caught = CatchableType->getAsCXXRecordDecl()) {
-    if (caught->isPOD()) {
-      properties |= 1;
-    }
 
     // TODO: 0x02: can be caught by reference only
     // When ?
 
+    // 0x04: has virtual bases
     if (caught->getNumVBases()) {
       properties |= 4;
     }
@@ -209,6 +214,8 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
     }
   } else {
     ctorAddr = getNullPointer(catchableTy->getStructElementType(4));
+    // FIXME: remove 8 with size of byte in bits.
+    sizeOrOffset = CGM.getContext().getTypeInfo(CatchableType).first / 8;
   }
 
   llvm::Constant *typeDescr = CGM.GetAddrOfMSTypeDescriptor(CatchableType);
