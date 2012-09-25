@@ -2308,7 +2308,7 @@ MicrosoftMangleContext::mangleSpareForTypeDescriptor(QualType Type,
 }
 
 static void MangleEHSpecificNames(MicrosoftMangleContext &ctx, const FunctionDecl *F,
-                             raw_ostream &Out, StringRef Prefix) {
+                                  raw_ostream &Out, StringRef Prefix) {
   if (F->isMain()) {
     Out << Prefix << "_main";
     return;
