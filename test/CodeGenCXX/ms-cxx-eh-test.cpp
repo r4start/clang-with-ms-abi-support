@@ -114,6 +114,7 @@ int test1() {
 
 // CHECK: "\01__catch$test1@@YAHXZ$0":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test1@@YAHXZ$1":                     ; preds = %call.cont1
@@ -168,6 +169,7 @@ int test2() {
 
 // CHECK: "\01__catch$test2@@YAHXZ$0":                      ; No predecessors!
 // CHECK-NEXT:   store i32 2, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test2@@YAHXZ$1":                    
@@ -180,6 +182,7 @@ int test2() {
 
 // CHECK: "\01__catch$test2@@YAHXZ$3":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test2@@YAHXZ$4":                     ; preds = %"\01__tryend$test2@@YAHXZ$1"
@@ -241,6 +244,7 @@ int test3() {
 
 // CHECK: "\01__catch$test3@@YAHXZ$0":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test3@@YAHXZ$1":                     ; preds = %call.cont1
@@ -265,6 +269,7 @@ int test3() {
 
 // CHECK: "\01__catch$test3@@YAHXZ$3":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test3@@YAHXZ$4":                     ; preds = %call.cont5
@@ -334,6 +339,7 @@ int test4() {
 
 // CHECK: "\01__catch$test4@@YAHXZ$0":                      ; No predecessors!
 // CHECK-NEXT:   store i32 1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test4@@YAHXZ$1":                     ; preds = %call.cont3
@@ -363,6 +369,7 @@ int test4() {
 
 // CHECK: "\01__catch$test4@@YAHXZ$3":                      ; No predecessors!
 // CHECK-NEXT:   store i32 6, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test4@@YAHXZ$4":                     ; preds = %call.cont9
@@ -375,6 +382,7 @@ int test4() {
 
 // CHECK: "\01__catch$test4@@YAHXZ$6":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test4@@YAHXZ$7":                     ; preds = %"\01__tryend$test4@@YAHXZ$4"
@@ -488,6 +496,7 @@ int test5() {
 
 // CHECK: "\01__catch$test5@@YAHXZ$3":                      ; No predecessors!
 // CHECK-NEXT:   store i32 7, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test5@@YAHXZ$4":                     ; preds = %call.cont11
@@ -500,6 +509,7 @@ int test5() {
 
 // CHECK: "\01__catch$test5@@YAHXZ$6":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test5@@YAHXZ$7":                     ; preds = %"\01__tryend$test5@@YAHXZ$4"
@@ -616,6 +626,7 @@ int test6() {
 
 // CHECK: "\01__catch$test6@@YAHXZ$1":                      ; No predecessors!
 // CHECK-NEXT:   store i32 8, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test6@@YAHXZ$2":                     ; preds = %call.cont9
@@ -660,6 +671,7 @@ int test6() {
 
 // CHECK: "\01__catch$test6@@YAHXZ$6":                      ; No predecessors!
 // CHECK-NEXT:   store i32 12, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test6@@YAHXZ$7":                     ; preds = %call.cont17
@@ -672,6 +684,7 @@ int test6() {
 
 // CHECK: "\01__catch$test6@@YAHXZ$9":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test6@@YAHXZ$10":                     ; preds = %"\01__tryend$test6@@YAHXZ$7"
