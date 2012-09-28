@@ -644,6 +644,7 @@ int test6() {
 // CHECK-NEXT:   store i32 4, i32* %try.id
 // CHECK-NEXT:   call x86_thiscallcc void @"\01??1A@@QAE@XZ"(%struct.A* %sd)
 // CHECK-NEXT:   store i32 3, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test6@@YAHXZ$4":                     ; preds = %call.cont7
