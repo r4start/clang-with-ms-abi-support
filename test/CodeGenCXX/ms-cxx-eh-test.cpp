@@ -467,6 +467,7 @@ int test5() {
 
 // CHECK: "\01__catch$test5@@YAHXZ$0":                      ; No predecessors!
 // CHECK-NEXT:   store i32 2, i32* %try.id
+// CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
 // CHECK: "\01__tryend$test5@@YAHXZ$1":                     ; preds = %call.cont5
@@ -509,6 +510,7 @@ int test5() {
 
 // CHECK: "\01__catch$test5@@YAHXZ$6":                      ; No predecessors!
 // CHECK-NEXT:   store i32 -1, i32* %try.id
+
 // CHECK-NEXT:   call void asm "ret", ""() nounwind
 // CHECK-NEXT:   unreachable
 
