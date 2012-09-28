@@ -20,6 +20,7 @@
 #include "clang/AST/StmtCXX.h"
 #include "llvm/Intrinsics.h"
 #include "llvm/Support/CallSite.h"
+#include "llvm/InlineAsm.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -1175,6 +1176,7 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
   EHState.TryHandlers.push_back(handler);
 }
 
+// r4start
 static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,
                                        int Value, int StoreTryLevel,
                                        int TopTryNumber) {
@@ -1185,6 +1187,32 @@ static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,
 //              int TopLevelTryNumber = -1, int Index = -1)
   return MsUnwindInfo(-1, 0, 0, Value, true, RestoreOpInfo::CatchRestore,
                       Store, StoreTryLevel, TopTryNumber, Index);
+}
+
+// r4start
+static void insertCatchRet(CodeGenFunction &CGF) {
+  llvm::FunctionType *fty = llvm::FunctionType::get(CGF.VoidTy, false);
+  llvm::InlineAsm *ia = llvm::InlineAsm::get(fty, "ret", "", false);
+
+  llvm::CallInst *result = CGF.Builder.CreateCall(ia);
+  result->addAttribute(~0, llvm::Attribute::NoUnwind);
+  result->addAttribute(~0, llvm::Attribute::IANSDialect);
+}
+
+// r4start
+static void insertCatchBlockMarker(CodeGenFunction &CGF) {
+  llvm::FunctionType *fty = llvm::FunctionType::get(CGF.VoidTy, false);
+
+  llvm::InlineAsm *ia = llvm::InlineAsm::get(fty, "nop", "", false);
+
+  llvm::CallInst *result = CGF.Builder.CreateCall(ia);
+  result->addAttribute(~0, llvm::Attribute::NoUnwind);
+  result->addAttribute(~0, llvm::Attribute::IANSDialect);
+
+  llvm::MDNode *meta = 
+    llvm::MDNode::get(CGF.CGM.getLLVMContext(), 
+                      llvm::SmallVector<llvm::Value *, 1>());
+  result->setMetadata("ms.catch", meta);
 }
 
 // r4start
@@ -1225,7 +1253,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     EHState.CreateStateStoreWithoutEmit(restoringState);
 
   EHState.GlobalUnwindTable.back().Store = store;
-
+  
   // TryNumber must be right because it necessary for GenerateTryBlockEntry.
   // If TryNumber is wrong then GenerateTryBlockEntry can not find this entry
   // in global unwind table.
@@ -1260,13 +1288,17 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
       llvm::BasicBlock::Create(CGM.getLLVMContext(),
                                mangledCatchName,
                                CurFn);
-
     Builder.SetInsertPoint(entryBB);
     
+    // TODO: This instruction needs only to determine that
+    // this block is catch handler. In future this must be removed.
+    insertCatchBlockMarker(*this);
+
     EmitStmt(C->getHandlerBlock());
-    
+
     Builder.Insert(store);
     
+    insertCatchRet(*this);
     Builder.CreateUnreachable();
     
     QualType CaughtType = C->getCaughtType();
