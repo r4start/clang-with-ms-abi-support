@@ -1200,22 +1200,6 @@ static void insertCatchRet(CodeGenFunction &CGF) {
 }
 
 // r4start
-static void insertCatchBlockMarker(CodeGenFunction &CGF) {
-  llvm::FunctionType *fty = llvm::FunctionType::get(CGF.VoidTy, false);
-
-  llvm::InlineAsm *ia = llvm::InlineAsm::get(fty, "nop", "", false);
-
-  llvm::CallInst *result = CGF.Builder.CreateCall(ia);
-  result->addAttribute(~0, llvm::Attribute::NoUnwind);
-  result->addAttribute(~0, llvm::Attribute::IANSDialect);
-
-  llvm::MDNode *meta = 
-    llvm::MDNode::get(CGF.CGM.getLLVMContext(), 
-                      llvm::SmallVector<llvm::Value *, 1>());
-  result->setMetadata("ms.catch", meta);
-}
-
-// r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
@@ -1273,7 +1257,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
-
     llvm::SmallString<256>  catchHandlerName;
     llvm::raw_svector_ostream stream(catchHandlerName);
 
@@ -1289,10 +1272,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
                                mangledCatchName,
                                CurFn);
     Builder.SetInsertPoint(entryBB);
-    
-    // TODO: This instruction needs only to determine that
-    // this block is catch handler. In future this must be removed.
-    insertCatchBlockMarker(*this);
 
     EmitStmt(C->getHandlerBlock());
 
