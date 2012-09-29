@@ -1801,6 +1801,8 @@ EmitDynamicCastCall(CodeGenFunction &CGF, llvm::Value *Value,
     Value = CGF.Builder.CreateCall5(getMSDynamicCastFn(CGF), Value, VfDelta,
                                     SrcRTTI, DestRTTI, IsReference);
     Value = CGF.Builder.CreateBitCast(Value, DestLTy);
+
+    // TODO: A failed cast to reference type.
     return Value;
   }
   // FIXME: Actually compute a hint here.
