@@ -71,6 +71,26 @@ CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
 }
 
 // r4start
+typedef CodeGenFunction::LPadStack LPadStack;
+void CodeGenFunction::MSEHState::FinishLPad(const LPadStack &Handlers) {
+  assert(!LandingPads.empty() && "Function doesn`t contain landing pad!");
+  
+  llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
+  CGF.Builder.SetInsertPoint(LandingPads.back());
+  
+  for (LPadStack::const_iterator I = Handlers.begin(), E = Handlers.end();
+       I != E; ++I) {
+    llvm::AllocaInst *temp = CGF.CreateTempAlloca(CGF.Int8PtrTy);
+    CGF.Builder.CreateStore(llvm::BlockAddress::get(*I), temp);
+  }
+
+  CGF.Builder.CreateUnreachable();
+  CGF.Builder.SetInsertPoint(oldBB);
+   
+  LandingPads.pop_back();
+}
+
+// r4start
 static llvm::Constant *getNullPointer(llvm::Type *Type) {
   return llvm::ConstantPointerNull::get(cast<llvm::PointerType>(Type)); 
 }
@@ -671,6 +691,10 @@ static llvm::StructType *getUnwindMapEntryTy(CodeGenModule &CGM) {
 //    int EHFlags;
 //  };
 static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
+  if (llvm::StructType *infoTy = CGM.getModule().getTypeByName("ehfuncinfo")) {
+    return infoTy;
+  }
+
   llvm::SmallVector<llvm::Type *, 9> ehfuncinfoFields;
 
   // magic number.
@@ -790,18 +814,6 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
   EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
                                                 init->getType(), true,
                                   llvm::GlobalValue::InternalLinkage, init, "");
-}
-
-// r4start
-void CodeGenFunction::SaveUnwindFuncletForLaterEmit(int ToState, 
-                                                    llvm::Value *This, 
-                                                    llvm::Value *ReleaseFunc) {
-  const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
-  assert(fd && "Unwind funclet must be emit for function!");
-
-  MsUnwindInfo funcletInfo(ToState, This, ReleaseFunc);
-  funcletInfo.TryNumber = EHState.TryNumber;
-  EHState.GlobalUnwindTable.push_back(funcletInfo);
 }
 
 // r4start
@@ -1199,6 +1211,14 @@ static void insertCatchRet(CodeGenFunction &CGF) {
   result->addAttribute(~0, llvm::Attribute::IANSDialect);
 }
 
+static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
+  llvm::Constant *Fn =
+    CGF.CGM.CreateRuntimeFunction(
+                              llvm::FunctionType::get(CGF.CGM.Int32Ty, true),
+                              "ms_fake_personality");
+  return Fn;
+}
+
 // r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
@@ -1255,6 +1275,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   EHState.LastEntries.push_back(--EHState.GlobalUnwindTable.end());
 
+  LPadStack handlers;
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
     llvm::SmallString<256>  catchHandlerName;
@@ -1282,7 +1303,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     
     QualType CaughtType = C->getCaughtType();
     GenerateCatchHandler(CaughtType, handlerTy,
-                           llvm::BlockAddress::get(CurFn, entryBB));
+                         llvm::BlockAddress::get(CurFn, entryBB));
+    handlers.push_back(entryBB);
   }
   
   EHState.LastEntries.pop_back();
@@ -1316,6 +1338,10 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     EHState.LastEntries.pop_back();
   }
   EHState.LocalUnwindTable.pop_back();
+
+  if (!EHState.LandingPads.empty()) {
+    EHState.FinishLPad(handlers);
+  }
 }
 
 // r4start
@@ -1335,11 +1361,6 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
   if (MD) {
     kind = MD->getKind();
     if (kind == Decl::CXXConstructor) {
-      llvm::BasicBlock *Cont = 
-        llvm::BasicBlock::Create(CGM.getLLVMContext(), "call.cont", CurFn);
-      Builder.CreateBr(Cont);
-      Builder.SetInsertPoint(Cont);
-
       const CXXRecordDecl *parent = MD->getParent();
       llvm::Value *dtor = 
         CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
@@ -1361,4 +1382,36 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
       EHState.LocalUnwindTable.back().pop_back();
     }
   }
+}
+
+llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
+  if (EHState.CachedLPad) {
+    return EHState.CachedLPad;
+  }
+
+  if (!EHState.LandingPads.empty()) {
+    EHState.CachedLPad = EHState.LandingPads.back();
+    return EHState.CachedLPad;
+  }
+
+  // Create and configure the landing pad.
+  EHState.CachedLPad = createBasicBlock("lpad");
+  EHState.LandingPads.push_back(EHState.CachedLPad);
+
+  // Save the current IR generation state.
+  CGBuilderTy::InsertPoint savedIP = Builder.saveAndClearIP();
+
+  EmitBlock(EHState.CachedLPad);
+
+  llvm::LandingPadInst *lPad = 
+      Builder.CreateLandingPad(
+                llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
+                llvm::ConstantExpr::getBitCast(getFakePersonality(*this),
+                                               CGM.Int8PtrTy),
+                0);
+  lPad->setCleanup(true);
+  // Restore the old IR generation state.
+  Builder.restoreIP(savedIP);
+
+  return EHState.CachedLPad;
 }

@@ -728,10 +728,13 @@ static bool isNonEHScope(const EHScope &S) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
-  // r4start
-  if (!CGM.getLangOpts().Exceptions ||
-      IsMSExceptions)
+  if (!CGM.getLangOpts().Exceptions)
     return 0;
+
+  // r4start
+  if (IsMSExceptions) {
+    return getMSInvokeDestImpl();
+  }
 
   assert(EHStack.requiresLandingPad());
   assert(!EHStack.empty());

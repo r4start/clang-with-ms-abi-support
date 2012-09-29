@@ -2121,13 +2121,17 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   llvm::CallSite CS;
   if (!InvokeDest) {
-    // r4start
+    CS = Builder.CreateCall(Callee, Args);
+  } else {
+  // r4start
     if (IsMSExceptions &&
         isa<CXXDestructorDecl>(TargetDecl)) {
       UpdateEHInfo(TargetDecl, Args[0]);
     }
 
-    CS = Builder.CreateCall(Callee, Args);
+    llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
+    CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
+    EmitBlock(Cont);
 
     // r4start
     // This is need for Microsoft C++ EH.
@@ -2135,10 +2139,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         isa<CXXConstructorDecl>(TargetDecl)) {
       UpdateEHInfo(TargetDecl, Args[0]);
     }
-  } else {
-    llvm::BasicBlock *Cont = createBasicBlock("invoke.cont");
-    CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
-    EmitBlock(Cont);
   }
   if (callOrInvoke)
     *callOrInvoke = CS.getInstruction();

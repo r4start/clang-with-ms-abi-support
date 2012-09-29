@@ -383,6 +383,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   Builder.SetInsertPoint(EntryBB);
 
   // r4start
+  // TODO: Add checking if function has try block.
   if (IsMSExceptions && !EHState.IsInited()) {
     EHState.InitMSTryState();
   }
