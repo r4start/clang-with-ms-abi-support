@@ -70,6 +70,35 @@ CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
   return new llvm::StoreInst(State, MSTryState);
 }
 
+llvm::Instruction *
+CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(size_t Index,
+                                                       llvm::Value *State) {
+  GlobalUnwindTable.push_back(Index);
+  GlobalUnwindTable.back().StoreValue = Index;
+
+  llvm::StoreInst *store = CreateStateStoreWithoutEmit(State);
+
+  GlobalUnwindTable.back().Store = store;
+  
+  // TryNumber must be right because it necessary for GenerateTryBlockEntry.
+  // If TryNumber is wrong then GenerateTryBlockEntry can not find this entry
+  // in global unwind table.
+  if (!LastEntries.empty()) {
+    GlobalUnwindTable.back().TryNumber = 
+      LastEntries.back()->TryNumber + 1;
+  } else {
+    GlobalUnwindTable.back().TryNumber = 
+      (*(LocalUnwindTable.back().begin()))->TryNumber;
+  }
+
+  GlobalUnwindTable.back().StoreInstTryLevel = TryLevel;
+  GlobalUnwindTable.back().StoreIndex = StoreIndex++;
+  GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
+
+  LastEntries.push_back(--GlobalUnwindTable.end());
+  return store;
+}
+
 // r4start
 typedef CodeGenFunction::LPadStack LPadStack;
 void CodeGenFunction::MSEHState::FinishLPad(const LPadStack &Handlers) {
@@ -88,6 +117,25 @@ void CodeGenFunction::MSEHState::FinishLPad(const LPadStack &Handlers) {
   CGF.Builder.SetInsertPoint(oldBB);
    
   LandingPads.pop_back();
+}
+
+llvm::BasicBlock *
+CodeGenFunction::MSEHState::GenerateTryEndBlock(const FunctionDecl *FD, 
+                                          MSMangleContextExtensions *Mangler) {
+  assert(FD);
+  assert(Mangler);
+  
+  llvm::SmallString<256> tryEndName;
+  llvm::raw_svector_ostream stream(tryEndName);
+
+  Mangler->mangleEHTryEnd(FD, EHManglingCounter, stream);
+  EHManglingCounter++;
+
+  stream.flush();
+  StringRef tryEndNameRef(tryEndName);
+
+  return llvm::BasicBlock::Create(CGF.CGM.getLLVMContext(),
+                                  tryEndNameRef, CGF.CurFn);
 }
 
 // r4start
@@ -1222,15 +1270,9 @@ static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
 // r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
-  EHCatchScope &CatchScope = cast<EHCatchScope>(*EHStack.begin());
-  assert(CatchScope.getNumHandlers() == NumHandlers);
-
-  SmallVector<EHCatchScope::Handler, 8> Handlers(NumHandlers);
-  memcpy(Handlers.data(), CatchScope.begin(),
-         NumHandlers * sizeof(EHCatchScope::Handler));
-
+  
   EHStack.popCatch();
-
+  
   const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
   assert(fd && "Something goes wrong!");
 
@@ -1250,30 +1292,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   restoringState = llvm::ConstantInt::get(Int32Ty, index);
-  EHState.GlobalUnwindTable.push_back(index);
-  EHState.GlobalUnwindTable.back().StoreValue = index;
-
-  llvm::StoreInst *store = 
-    EHState.CreateStateStoreWithoutEmit(restoringState);
-
-  EHState.GlobalUnwindTable.back().Store = store;
-  
-  // TryNumber must be right because it necessary for GenerateTryBlockEntry.
-  // If TryNumber is wrong then GenerateTryBlockEntry can not find this entry
-  // in global unwind table.
-  if (!EHState.LastEntries.empty()) {
-    EHState.GlobalUnwindTable.back().TryNumber = 
-      EHState.LastEntries.back()->TryNumber + 1;
-  } else {
-    EHState.GlobalUnwindTable.back().TryNumber = 
-      (*(EHState.LocalUnwindTable.back().begin()))->TryNumber;
-  }
-
-  EHState.GlobalUnwindTable.back().StoreInstTryLevel = EHState.TryLevel;
-  EHState.GlobalUnwindTable.back().StoreIndex = EHState.StoreIndex++;
-  EHState.GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
-
-  EHState.LastEntries.push_back(--EHState.GlobalUnwindTable.end());
+  llvm::Instruction *store = 
+    EHState.AddCatchEntryInUnwindTable(index, restoringState);
 
   LPadStack handlers;
   // In MS do it in straight way.
@@ -1296,8 +1316,12 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
     EmitStmt(C->getHandlerBlock());
 
-    Builder.Insert(store);
-    
+    if (I) {
+      Builder.Insert(store->clone());
+    } else {
+      Builder.Insert(store);
+    }
+
     insertCatchRet(*this);
     Builder.CreateUnreachable();
     
@@ -1311,17 +1335,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
 
   Builder.SetInsertPoint(oldBB);
 
-  llvm::SmallString<256> tryEndName;
-  llvm::raw_svector_ostream stream(tryEndName);
-
-  msMangler->mangleEHTryEnd(fd, EHState.EHManglingCounter, stream);
-  EHState.EHManglingCounter++;
-
-  stream.flush();
-  StringRef tryEndNameRef(tryEndName);
-
-  llvm::BasicBlock *tryEnd = 
-    llvm::BasicBlock::Create(CGM.getLLVMContext(), tryEndNameRef, CurFn);
+  llvm::BasicBlock *tryEnd = EHState.GenerateTryEndBlock(fd, msMangler);
   
   Builder.CreateBr(tryEnd);
   
