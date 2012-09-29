@@ -1248,6 +1248,12 @@ private:
 
     void InitMSTryState();
 
+    llvm::Instruction *
+    AddCatchEntryInUnwindTable(size_t Index, llvm::Value *State);
+
+    llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
+                                          MSMangleContextExtensions *Mangler);
+
     void FinishLPad(const LPadStack &Handlers);
 
     bool IsInited() const { return MSTryState != 0; }
