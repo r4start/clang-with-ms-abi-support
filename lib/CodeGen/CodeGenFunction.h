@@ -693,6 +693,9 @@ public:
 
   llvm::BasicBlock *getInvokeDestImpl();
 
+  // r4start
+  llvm::BasicBlock *getMSInvokeDestImpl();
+
   template <class T>
   typename DominatingValue<T>::saved_type saveValueInCond(T value) {
     return DominatingValue<T>::save(*this, value);
@@ -1177,6 +1180,12 @@ private:
 
   /// r4start
   class MSEHState {
+  public:
+    typedef std::list< MsUnwindInfo > UnwindTableTy;
+    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
+    typedef std::list< UnwindEntryRefList > TryStates;
+    typedef llvm::SmallVector<llvm::BasicBlock *, 4> LPadStack;
+  private:
     /// MS C++ EH specific.
     /// State of current try level.
     llvm::Value *MSTryState;
@@ -1195,10 +1204,6 @@ private:
     /// This counter increments each time when we mangle some eh symbol.
     /// Also it passes to mangler.
     int EHManglingCounter;
-
-    typedef std::list< MsUnwindInfo > UnwindTableTy;
-    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
-    typedef std::list< UnwindEntryRefList > TryStates;
 
     /// Unwind table necessary for correct unwinding.
     /// It has 2 fields: action(what we must do in this state)
@@ -1219,11 +1224,19 @@ private:
     /// Catch handlers for current try.
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
 
+    /// LandingPads stores landing pad for current stack frame.
+    /// MS SEH doesn`t have landing pads, but we use this,
+    /// because we want use invoke instead of call + br.
+    /// Also landing pad contains references to catch handlers.
+    /// This is necessary, because optimization passes can delete this blocks.
+    LPadStack LandingPads;
+    llvm::BasicBlock *CachedLPad;
+
     llvm::Constant *ESTypeList;
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), StoreIndex(0), TryNumber(0) {}
+     ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0) {}
 
     void SetMSTryState();
 
@@ -1235,6 +1248,8 @@ private:
     llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
 
     void InitMSTryState();
+
+    void FinishLPad(const LPadStack &Handlers);
 
     bool IsInited() const { return MSTryState != 0; }
   };
@@ -2195,6 +2210,8 @@ public:
 
   /// r4start
   void ExitMSCXXTryStmt(const CXXTryStmt &S);
+  /// r4start
+  typedef MSEHState::LPadStack LPadStack;
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);
@@ -2859,10 +2876,6 @@ private:
 
   /// r4start
   void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This = 0);
-
-  /// r4start
-  void SaveUnwindFuncletForLaterEmit(int ToState, llvm::Value *This,
-                                     llvm::Value *ReleaseFunc);
 
   /// r4start
   llvm::GlobalValue *EmitUnwindTable();
