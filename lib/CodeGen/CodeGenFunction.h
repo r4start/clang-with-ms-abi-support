@@ -1231,11 +1231,16 @@ private:
     LPadStack LandingPads;
     llvm::BasicBlock *CachedLPad;
 
+    /// We want to add br to unwind funclets, make them reachable.
+    /// If function has funclets, then we will add br to the end of last catch.
+    llvm::BasicBlock *LastCatchHandler;
+
     llvm::Constant *ESTypeList;
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0) {}
+     ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
+     LastCatchHandler(0) {}
 
     void SetMSTryState();
 

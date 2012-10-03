@@ -904,6 +904,14 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::BasicBlock *funclet = 
       llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletNameRef, CurFn);
 
+    if (EHState.LastCatchHandler) {
+      // At first remove unreachable instruction from the end.
+      EHState.LastCatchHandler->getTerminator()->eraseFromParent();
+      Builder.SetInsertPoint(EHState.LastCatchHandler);
+      Builder.CreateBr(funclet);
+      EHState.LastCatchHandler = 0;
+    }
+
     if (prevBlock) {
       Builder.CreateBr(funclet);
     }
@@ -1252,8 +1260,8 @@ static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
 // BrFrom - previous handler or lpad.
 // BrTo - current catch handler.
 static void doHandlerReachable(CodeGen::CGBuilderTy &Builder,
-                               llvm::BasicBlock *BrFrom,
-                               llvm::BasicBlock *BrTo) {
+                               llvm::BasicBlock * &BrFrom,
+                               llvm::BasicBlock * &BrTo) {
   Builder.SetInsertPoint(BrFrom);
   Builder.CreateBr(BrTo);
   Builder.SetInsertPoint(BrTo);
@@ -1328,6 +1336,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   Builder.CreateUnreachable();
+  EHState.LastCatchHandler = Builder.GetInsertBlock();
 
   EHState.LastEntries.pop_back();
 
