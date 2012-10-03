@@ -1224,9 +1224,9 @@ private:
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
 
     /// LandingPads stores landing pad for current stack frame.
-    /// MS SEH doesn`t have landing pads, but we use this,
+    /// MS SEH doesn`t have landing pads, but we use lpads,
     /// because we want use invoke instead of call + br.
-    /// Also landing pad contains references to catch handlers.
+    /// Also landing pad contains br to first catch handler.
     /// This is necessary, because optimization passes can delete this blocks.
     LPadStack LandingPads;
     llvm::BasicBlock *CachedLPad;
@@ -1253,8 +1253,6 @@ private:
 
     llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
                                           MSMangleContextExtensions *Mangler);
-
-    void FinishLPad(const LPadStack &Handlers);
 
     bool IsInited() const { return MSTryState != 0; }
   };
@@ -2192,8 +2190,6 @@ public:
 
   /// r4start
   void ExitMSCXXTryStmt(const CXXTryStmt &S);
-  /// r4start
-  typedef MSEHState::LPadStack LPadStack;
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);

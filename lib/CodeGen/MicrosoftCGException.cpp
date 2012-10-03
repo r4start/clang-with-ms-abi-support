@@ -99,26 +99,6 @@ CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(size_t Index,
   return store;
 }
 
-// r4start
-typedef CodeGenFunction::LPadStack LPadStack;
-void CodeGenFunction::MSEHState::FinishLPad(const LPadStack &Handlers) {
-  assert(!LandingPads.empty() && "Function doesn`t contain landing pad!");
-  
-  llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
-  CGF.Builder.SetInsertPoint(LandingPads.back());
-  
-  for (LPadStack::const_iterator I = Handlers.begin(), E = Handlers.end();
-       I != E; ++I) {
-    llvm::AllocaInst *temp = CGF.CreateTempAlloca(CGF.Int8PtrTy);
-    CGF.Builder.CreateStore(llvm::BlockAddress::get(*I), temp);
-  }
-
-  CGF.Builder.CreateUnreachable();
-  CGF.Builder.SetInsertPoint(oldBB);
-   
-  LandingPads.pop_back();
-}
-
 llvm::BasicBlock *
 CodeGenFunction::MSEHState::GenerateTryEndBlock(const FunctionDecl *FD, 
                                           MSMangleContextExtensions *Mangler) {
@@ -1267,6 +1247,19 @@ static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
   return Fn;
 }
 
+// This is need to avoid deleting catch handler from function.
+// We generate a chain of br instructions from lpad to last of catch handlers.
+// BrFrom - previous handler or lpad.
+// BrTo - current catch handler.
+static void doHandlerReachable(CodeGen::CGBuilderTy &Builder,
+                               llvm::BasicBlock *BrFrom,
+                               llvm::BasicBlock *BrTo) {
+  Builder.SetInsertPoint(BrFrom);
+  Builder.CreateBr(BrTo);
+  Builder.SetInsertPoint(BrTo);
+  BrFrom = BrTo;
+}
+
 // r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
@@ -1295,7 +1288,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   llvm::Instruction *store = 
     EHState.AddCatchEntryInUnwindTable(index, restoringState);
 
-  LPadStack handlers;
+  llvm::BasicBlock *brBlock = getMSInvokeDestImpl();
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
     llvm::SmallString<256>  catchHandlerName;
@@ -1320,17 +1313,22 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
       Builder.Insert(store->clone());
     } else {
       Builder.Insert(store);
+      doHandlerReachable(Builder, brBlock, entryBB);
     }
 
     insertCatchRet(*this);
-    Builder.CreateUnreachable();
     
+    if (I) {
+      doHandlerReachable(Builder, brBlock, entryBB);
+    }
+
     QualType CaughtType = C->getCaughtType();
     GenerateCatchHandler(CaughtType, handlerTy,
                          llvm::BlockAddress::get(CurFn, entryBB));
-    handlers.push_back(entryBB);
   }
-  
+
+  Builder.CreateUnreachable();
+
   EHState.LastEntries.pop_back();
 
   Builder.SetInsertPoint(oldBB);
@@ -1352,10 +1350,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     EHState.LastEntries.pop_back();
   }
   EHState.LocalUnwindTable.pop_back();
-
-  if (!EHState.LandingPads.empty()) {
-    EHState.FinishLPad(handlers);
-  }
 }
 
 // r4start
