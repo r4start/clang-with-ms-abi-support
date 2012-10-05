@@ -130,7 +130,7 @@ static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF,
   llvm::FunctionType *FTy =
     llvm::FunctionType::get(CGF.VoidTy, Args, /*IsVarArgs=*/false);
 
-  return CGF.CGM.CreateRuntimeFunction(FTy, "__CxxThrowException@8");
+  return CGF.CGM.CreateRuntimeFunction(FTy, "_CxxThrowException@8");
 }
 
 // r4start
@@ -142,7 +142,7 @@ static llvm::Function *getMSFrameHandlerFunction(CodeGenFunction &CGF,
 
   llvm::Function *F = llvm::Function::Create(FTy,
                                              llvm::GlobalValue::ExternalLinkage, 
-                                             "__CxxFrameHandler",
+                                             "__CxxFrameHandler3",
                                              &CGF.CGM.getModule());
   F->addAttribute(1, llvm::Attribute::InReg | llvm::Attribute::NoCapture);
   return F;
@@ -778,7 +778,7 @@ static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
   llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
 
   F = llvm::Function::Create(FTy,
-        llvm::GlobalValue::InternalLinkage, mangledName,
+        llvm::GlobalValue::ExternalLinkage, mangledName,
         &CGF.CGM.getModule());
   return F;
 }
