@@ -1259,6 +1259,8 @@ private:
     llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
                                           MSMangleContextExtensions *Mangler);
 
+    void CreateLPad();
+    void FinishLPad();
     bool IsInited() const { return MSTryState != 0; }
   };
 

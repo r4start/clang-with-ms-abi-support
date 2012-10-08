@@ -612,37 +612,6 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   }
 }
 
-// r4start
-static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
-  llvm::Constant *Fn =
-    CGF.CGM.CreateRuntimeFunction(
-                              llvm::FunctionType::get(CGF.CGM.Int32Ty, true),
-                              "ms_fake_personality");
-  return Fn;
-}
-
-// r4start
-static llvm::BasicBlock *getLPadBlock(CodeGenFunction &CGF) {
-  // Create and configure the landing pad.
-  llvm::BasicBlock *lpadBlock = CGF.createBasicBlock("lpad");
-  
-  // Save the current IR generation state.
-  CGBuilderTy::InsertPoint savedIP = CGF.Builder.saveAndClearIP();
-
-  CGF.EmitBlock(lpadBlock);
-
-  llvm::LandingPadInst *lPad = 
-      CGF.Builder.CreateLandingPad(
-                llvm::StructType::get(CGF.Int8PtrTy, CGF.Int32Ty, NULL),
-                llvm::ConstantExpr::getBitCast(getFakePersonality(CGF),
-                                               CGF.CGM.Int8PtrTy),
-                0);
-  lPad->setCleanup(true);
-  // Restore the old IR generation state.
-  CGF.Builder.restoreIP(savedIP);
-  return lpadBlock;
-}
-
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
@@ -663,8 +632,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
 
     EHState.SetMSTryState();
 
-    EHState.CachedLPad = getLPadBlock(*this);
-    EHState.LandingPads.push_back(EHState.CachedLPad);
+    EHState.CreateLPad();
   } 
   
   for (unsigned I = 0; I != NumHandlers; ++I) {
