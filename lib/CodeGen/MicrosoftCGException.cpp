@@ -119,6 +119,55 @@ CodeGenFunction::MSEHState::GenerateTryEndBlock(const FunctionDecl *FD,
 }
 
 // r4start
+static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
+  llvm::Constant *Fn =
+    CGF.CGM.CreateRuntimeFunction(
+                              llvm::FunctionType::get(CGF.CGM.Int32Ty, true),
+                              "ms_fake_personality");
+  return Fn;
+}
+
+// r4start
+static llvm::BasicBlock *getLPadBlock(CodeGenFunction &CGF) {
+  // Create and configure the landing pad.
+  llvm::BasicBlock *lpadBlock = CGF.createBasicBlock("lpad");
+  
+  // Save the current IR generation state.
+  CGBuilderTy::InsertPoint savedIP = CGF.Builder.saveAndClearIP();
+
+  CGF.EmitBlock(lpadBlock);
+
+  llvm::LandingPadInst *lPad = 
+      CGF.Builder.CreateLandingPad(
+                llvm::StructType::get(CGF.Int8PtrTy, CGF.Int32Ty, NULL),
+                llvm::ConstantExpr::getBitCast(getFakePersonality(CGF),
+                                               CGF.CGM.Int8PtrTy),
+                0);
+  lPad->setCleanup(true);
+  // Restore the old IR generation state.
+  CGF.Builder.restoreIP(savedIP);
+  return lpadBlock;
+}
+
+// r4start
+void CodeGenFunction::MSEHState::CreateLPad() {
+  CachedLPad = getLPadBlock(CGF);
+  LandingPads.push_back(CachedLPad);
+}
+
+// r4start
+void CodeGenFunction::MSEHState::FinishLPad() {
+  if(LandingPads.empty()) {
+    return;
+  }
+
+  llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
+  CGF.Builder.SetInsertPoint(LandingPads.back());
+  CGF.Builder.CreateUnreachable();
+  CGF.Builder.SetInsertPoint(oldBB);
+}
+
+// r4start
 static llvm::Constant *getNullPointer(llvm::Type *Type) {
   return llvm::ConstantPointerNull::get(cast<llvm::PointerType>(Type)); 
 }
@@ -1159,6 +1208,8 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
 // r4start
 void CodeGenFunction::EmitEHInformation() {
+  EHState.FinishLPad();
+
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
   if (!ehFuncInfo) {
     return;
@@ -1354,6 +1405,9 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   EHState.LocalUnwindTable.pop_back();
 
   EHState.CachedLPad = 0;
+  
+  assert(!EHState.LandingPads.empty() && 
+         "Try block have to have landing pad!");
   EHState.LandingPads.pop_back();
 }
 
@@ -1406,4 +1460,7 @@ llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
     EHState.CachedLPad = EHState.LandingPads.back();
     return EHState.CachedLPad;
   }
+
+  EHState.CreateLPad();
+  return EHState.CachedLPad;
 }
