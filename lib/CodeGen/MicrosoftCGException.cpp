@@ -1247,14 +1247,6 @@ static void insertCatchRet(CodeGenFunction &CGF) {
   result->addAttribute(~0, llvm::Attribute::IANSDialect);
 }
 
-static llvm::Constant *getFakePersonality(CodeGenFunction &CGF) {
-  llvm::Constant *Fn =
-    CGF.CGM.CreateRuntimeFunction(
-                              llvm::FunctionType::get(CGF.CGM.Int32Ty, true),
-                              "ms_fake_personality");
-  return Fn;
-}
-
 // This is need to avoid deleting catch handler from function.
 // We generate a chain of br instructions from lpad to last of catch handlers.
 // BrFrom - previous handler or lpad.
@@ -1358,7 +1350,11 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   if (!EHState.LastEntries.empty()) {
     EHState.LastEntries.pop_back();
   }
+
   EHState.LocalUnwindTable.pop_back();
+
+  EHState.CachedLPad = 0;
+  EHState.LandingPads.pop_back();
 }
 
 // r4start
@@ -1410,25 +1406,4 @@ llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
     EHState.CachedLPad = EHState.LandingPads.back();
     return EHState.CachedLPad;
   }
-
-  // Create and configure the landing pad.
-  EHState.CachedLPad = createBasicBlock("lpad");
-  EHState.LandingPads.push_back(EHState.CachedLPad);
-
-  // Save the current IR generation state.
-  CGBuilderTy::InsertPoint savedIP = Builder.saveAndClearIP();
-
-  EmitBlock(EHState.CachedLPad);
-
-  llvm::LandingPadInst *lPad = 
-      Builder.CreateLandingPad(
-                llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
-                llvm::ConstantExpr::getBitCast(getFakePersonality(*this),
-                                               CGM.Int8PtrTy),
-                0);
-  lPad->setCleanup(true);
-  // Restore the old IR generation state.
-  Builder.restoreIP(savedIP);
-
-  return EHState.CachedLPad;
 }
