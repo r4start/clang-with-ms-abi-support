@@ -1303,8 +1303,8 @@ static void insertCatchRet(CodeGenFunction &CGF) {
 // BrFrom - previous handler or lpad.
 // BrTo - current catch handler.
 static void doHandlerReachable(CodeGen::CGBuilderTy &Builder,
-                               llvm::BasicBlock * &BrFrom,
-                               llvm::BasicBlock * &BrTo) {
+                               llvm::BasicBlock *&BrFrom,
+                               llvm::BasicBlock *BrTo) {
   Builder.SetInsertPoint(BrFrom);
   Builder.CreateBr(BrTo);
   Builder.SetInsertPoint(BrTo);
@@ -1364,13 +1364,16 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
       Builder.Insert(store->clone());
     } else {
       Builder.Insert(store);
-      doHandlerReachable(Builder, brBlock, entryBB);
+      // We can not use entryBB as BrTo in doHandlerReachable,
+      // because handler block can have try-block and we will have 
+      // tryend block without terminator.
+      doHandlerReachable(Builder, brBlock, Builder.GetInsertBlock());
     }
 
     insertCatchRet(*this);
     
     if (I) {
-      doHandlerReachable(Builder, brBlock, entryBB);
+      doHandlerReachable(Builder, brBlock, Builder.GetInsertBlock());
     }
 
     QualType CaughtType = C->getCaughtType();
