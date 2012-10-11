@@ -1247,7 +1247,7 @@ private:
     /// This function opposite to SetMSTrystate
     /// does not change unwind table.
     /// It just generates store instruction and return it.
-    llvm::StoreInst *CreateStateStore(uint32_t State);
+    llvm::StoreInst *CreateStateStore(uint32_t State, bool IsInit = false);
     llvm::StoreInst *CreateStateStore(llvm::Value* State);
     llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
 

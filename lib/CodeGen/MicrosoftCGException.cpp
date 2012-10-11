@@ -26,10 +26,25 @@ using namespace clang;
 using namespace CodeGen;
 
 // r4start
+static llvm::MDNode *getMetaData(llvm::LLVMContext &Ctx) {
+  static llvm::SmallVector<llvm::Value *, 1> vals;
+  static llvm::MDNode *md =  llvm::MDNode::get(Ctx, vals);
+  return md;
+}
+
+// r4start
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
-    MSTryState = CGF.CreateTempAlloca(CGF.Int32Ty, "try.id");
-    CreateStateStore(-1);
+    llvm::AllocaInst *stateAlloca = 
+      CGF.CreateTempAlloca(CGF.Int32Ty, "try.id");
+    
+    stateAlloca->setMetadata(
+      CGF.CGM.getLLVMContext().getMDKindID("seh.state.alloca"),
+      getMetaData(CGF.CGM.getLLVMContext()));
+    
+    MSTryState = stateAlloca;
+
+    CreateStateStore(-1, true);
   }
 }
 
@@ -55,19 +70,36 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
 }
 
 // r4start
-llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(uint32_t State) {
-  return CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
-                                 MSTryState);
+llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(uint32_t State,
+                                                              bool IsInit) {
+  llvm::StoreInst *store =  
+    CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
+                            MSTryState);
+  if (IsInit) {
+    store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.init"), 
+                       getMetaData(CGF.CGM.getLLVMContext()));
+  } else {
+    store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.store"), 
+                       getMetaData(CGF.CGM.getLLVMContext()));
+  }
+
+  return store;
 }
 
 llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(llvm::Value *State) {
-  return CGF.Builder.CreateStore(State, MSTryState);
+  llvm::StoreInst *store = CGF.Builder.CreateStore(State, MSTryState);
+  store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.store"), 
+                     getMetaData(CGF.CGM.getLLVMContext()));
+  return store;
 }
 
 // r4start
 llvm::StoreInst *
 CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
-  return new llvm::StoreInst(State, MSTryState);
+  llvm::StoreInst *store = new llvm::StoreInst(State, MSTryState);
+  store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.store"), 
+                     getMetaData(CGF.CGM.getLLVMContext()));
+  return store;
 }
 
 llvm::Instruction *

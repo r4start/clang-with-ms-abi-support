@@ -12,11 +12,6 @@ struct B : A {
  ~B() { }
 };
 
-struct C : virtual A {
- C() { }
- ~C() { }
-};
-
 // CHECK: @"\01__CT??_R0H@84" = constant %catchable.type { i32 1, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), %pmd.type { i32 0, i32 -1, i32 0 }, i32 4, void ()* null }
 // CHECK: @"\01__CTA1H" = constant { i32, %catchable.type* } { i32 1, %catchable.type* @"\01__CT??_R0H@84" }
 // CHECK: @"\01__TI1H" = constant %throw.info.type { i32 0, void ()* null, i32 ()* null, %catchable.array.type* bitcast ({ i32, %catchable.type* }* @"\01__CTA1H" to %catchable.array.type*) }
