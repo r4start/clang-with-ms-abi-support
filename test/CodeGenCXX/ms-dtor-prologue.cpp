@@ -1,5 +1,8 @@
 // RUN: %clang_cc1 -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
 
+// In this test we check destructor prologue for class with virtual bases.
+// Destructor prologue reinitialize all vf-tables of the class.
+
 namespace test1 {
   class IA
   {
