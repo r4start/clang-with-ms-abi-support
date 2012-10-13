@@ -1,5 +1,8 @@
 // RUN: %clang_cc1 -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
+
 // r4start
+// Test for properly building RTTI information.
+// Vf-table check is necessary because vf-table contains pointer to RTTI info.
 #pragma pack(push, 8)
 class first {
 public:

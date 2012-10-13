@@ -1,5 +1,9 @@
 // RUN: %clang_cc1  -emit-llvm %s -o - -cxx-abi microsoft -triple=i686-pc-win32 | FileCheck %s
+
 // r4start
+// Test for properly building RTTI information.
+// Vf-table check is necessary because vf-table contains pointer to RTTI info.
+
 #pragma pack(push, 8)
 class first {
 public:
@@ -23,7 +27,6 @@ int main() {
 //CHECK: %class.third = type { i32 (...)**, i32*, %class.first }
 //CHECK: %class.first = type { i32 (...)** }
 
-//CHECK: @"\01??_8third@@7B@" = unnamed_addr constant [2 x i32] [i32 -4, i32 4]
 //CHECK: @"\01??_7third@@6B0@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6B0@@" to i8*), i8* bitcast (void (%class.third*)* @"\01?a@third@@UAEXXZ" to i8*)]
 //CHECK: @"\01??_7third@@6Bfirst@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6Bfirst@@@" to i8*), i8* bitcast (void (%class.first*)* @"\01?b@first@@UAEXXZ" to i8*)]
 //CHECK: @"\01??_7type_info@@6B@" = external global i8*
