@@ -1,5 +1,8 @@
 // RUN: %clang_cc1 -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
 
+// r4start
+// Test for properly mangling of vf-table inside namespaces.
+
 namespace test1 { namespace test2 { namespace test3 { namespace test4 { namespace test5 {
 namespace test6 { namespace test7 { namespace test8 { namespace test9 { namespace test10 {
 namespace test11 {
