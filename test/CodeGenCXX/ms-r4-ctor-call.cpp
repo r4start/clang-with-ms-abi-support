@@ -39,4 +39,4 @@ void test1() {
 
 // CHECK:      %call4 = call x86_thiscallcc %"class.test::B"* @"\01??0B@test@@QAE@XZ"(%"class.test::B"* %7, i32 zeroext 0) nounwind
 
-// CHECK:      %call5 = call x86_thiscallcc %"class.test::C"* @"\01??0C@@QAE@XZ"(%"class.test::C"* %8, i32 zeroext 0)
+// CHECK:      %call5 = call x86_thiscallcc %"class.test::C"* @"\01??0C@test@@QAE@XZ"(%"class.test::C"* %8, i32 zeroext 0)
