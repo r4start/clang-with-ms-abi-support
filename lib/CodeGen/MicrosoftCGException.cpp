@@ -838,7 +838,7 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
 }
 
 // r4start
-static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
+static llvm::BasicBlock *getEHHandler(CodeGenFunction &CGF) {
   const FunctionDecl *func = cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
   assert(func && "EH handler can be generated only for function or method!");
 
@@ -851,6 +851,9 @@ static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
   nameStream.flush();
   StringRef mangledName(nameBuffer);
 
+  return llvm::BasicBlock::Create(CGF.CGM.getLLVMContext(),
+                                  mangledName, CGF.CurFn);
+  #if 0
   llvm::Function *F = CGF.CGM.getModule().getFunction(mangledName);
   if (F) {
     return F;
@@ -862,6 +865,7 @@ static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
         llvm::GlobalValue::ExternalLinkage, mangledName,
         &CGF.CGM.getModule());
   return F;
+  #endif
 }
 
 // r4start
@@ -1018,10 +1022,8 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   if (prevBlock) {
     // last funclet jumps to ehhandler
-    llvm::Function *ehHandler = getEHHandler(*this);
-    llvm::CallInst *call = Builder.CreateCall(ehHandler);
-    call->setDoesNotReturn();
-    Builder.CreateUnreachable();
+    EHState.EHHandler = getEHHandler(*this);
+    Builder.CreateBr(EHState.EHHandler);
   }
 
   Builder.SetInsertPoint(oldBB);
@@ -1254,6 +1256,19 @@ void CodeGenFunction::EmitEHInformation() {
     return;
   }
 
+  llvm::BasicBlock *old = Builder.GetInsertBlock();
+  Builder.SetInsertPoint(EHState.EHHandler);
+
+  llvm::Function *frameHandlerFunc = 
+    getMSFrameHandlerFunction(*this, ehFuncInfo->getType());
+
+  llvm::CallInst *call = Builder.CreateCall(frameHandlerFunc, ehFuncInfo);
+  call->setTailCall();
+  call->setDoesNotReturn();
+
+  Builder.CreateUnreachable();
+  Builder.SetInsertPoint(old);
+  #if 0
   llvm::Function *ehHandler = getEHHandler(*this);
 
   CodeGenFunction cgf(CGM);
@@ -1270,6 +1285,7 @@ void CodeGenFunction::EmitEHInformation() {
   call->setDoesNotReturn();
 
   cgf.Builder.CreateUnreachable();
+  #endif
 }
 
 // r4start
