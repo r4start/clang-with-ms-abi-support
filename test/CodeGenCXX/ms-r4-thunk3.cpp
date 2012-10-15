@@ -3,6 +3,7 @@
 // r4start
 // This test checks properly mangling of thunk functions, properly building vf-table with thunk function,
 // properly generation thunk body.
+// We do vf-table checks because we need to be sure that virtual functions were replaced by thunks.
 
 class IA
 {

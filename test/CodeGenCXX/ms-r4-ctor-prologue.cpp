@@ -31,9 +31,6 @@ void test() { B b; }
 
 }
 
-// FIXME: ??_7B@test2@@6B@
-// FIXME: ??_R4B@test2@@6B@ 
-
 // CHECK: @"\01??_7B@test2@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4B@test2@@6B@" to i8*), i8* bitcast (void (%"struct.test2::A"*)* @"\01?foo@A@test2@@UAEXXZ" to i8*)]
 
 // CHECK: @"\01??_7A@test1@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4A@test1@@6B@" to i8*), i8* bitcast (void (%"struct.test1::A"*)* @"\01?foo@A@test1@@UAEXXZ" to i8*)]
