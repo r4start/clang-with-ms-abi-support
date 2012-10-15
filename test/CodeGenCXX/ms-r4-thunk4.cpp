@@ -1,4 +1,9 @@
 // RUN: %clang_cc1 -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
+
+// r4start
+// This test checks properly mangling of thunk functions, properly building vf-table with thunk function,
+// properly generation thunk body.
+
 #pragma pack(push, 8)
 struct null {
   virtual void uiiiii(){}
@@ -20,9 +25,6 @@ int main() {
 	second f;
   return 0;
 }
-
-// Насколько я понимаю PPPPPPPM@A@A это все какие-то числа и скорее всего всякие оффсеты, аналогично как и некоторые структуры RTTI "манглятся".
-// FIXME: @"\01?asdf@second@@$4PPPPPPPM@A@AEXXZ"
 
 // CHECK: @"\01??_7second@@6Bfirst@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4second@@6Bfirst@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@$4PPPPPPPM@A@AEXXZ" to i8*)]
 

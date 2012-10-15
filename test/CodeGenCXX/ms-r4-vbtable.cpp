@@ -4,6 +4,7 @@
 // Test for vb-table layout.
 
 // FIXME: Fix vb-table name mangling with namespaces.
+// CHECK: @"\01??_8s@test4@@7B@" = unnamed_addr constant [3 x i32] [i32 0, i32 8, i32 16]
 // CHECK: @"\01??_8s@test3@@7B@" = unnamed_addr constant [2 x i32] [i32 0, i32 8]
 // CHECK: @"\01??_8third@test2@@7B@" = unnamed_addr constant [2 x i32] [i32 -8, i32 8]
 // CHECK: @"\01??_8third@test1@@7B@" = unnamed_addr constant [2 x i32] [i32 -4, i32 4]
@@ -67,4 +68,24 @@ struct s : public virtual f {
 void test() { 
   s ss; 
 }
+}
+
+namespace test4 {
+
+struct f {
+  virtual int asd() {return -90;}
+};
+
+struct fd {
+  virtual int asfd() {return -90;}
+};
+
+struct s : public virtual f, public virtual fd {
+  s(){}
+  virtual int asd() {return -9;}
+  virtual int asfd() {return -9;}
+};
+
+void test2() { s ss; }
+
 }
