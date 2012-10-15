@@ -54,9 +54,6 @@ int main() {
 
 /////////  VFTables in s start
 
-// FIXME: @"\01??_7s@@6B@@@"
-// FIXME: @"\01??_R4s@@6B@@@"
-
 // CHECK: @"\01??_7s@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6B@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ" to i8*)]
 
 /////////  VFTables in s end
