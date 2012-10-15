@@ -853,19 +853,6 @@ static llvm::BasicBlock *getEHHandler(CodeGenFunction &CGF) {
 
   return llvm::BasicBlock::Create(CGF.CGM.getLLVMContext(),
                                   mangledName, CGF.CurFn);
-  #if 0
-  llvm::Function *F = CGF.CGM.getModule().getFunction(mangledName);
-  if (F) {
-    return F;
-  }
-
-  llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.VoidTy, false);
-
-  F = llvm::Function::Create(FTy,
-        llvm::GlobalValue::ExternalLinkage, mangledName,
-        &CGF.CGM.getModule());
-  return F;
-  #endif
 }
 
 // r4start
@@ -959,6 +946,12 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   llvm::BasicBlock *prevBlock = 0;
 
+  // If we don`t have catch handler then
+  // I think that we have invoke dest.
+  llvm::BasicBlock *h = 
+    EHState.LastCatchHandler ? EHState.LastCatchHandler : 
+                               getMSInvokeDestImpl();
+
   // We must skip first element, because it is initial state
   // and it is not valuable for unwind table.
   for (MSEHState::UnwindTableTy::iterator 
@@ -993,12 +986,12 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::BasicBlock *funclet = 
       llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletNameRef, CurFn);
 
-    if (EHState.LastCatchHandler) {
+    if (h) {
       // At first remove unreachable instruction from the end.
-      EHState.LastCatchHandler->getTerminator()->eraseFromParent();
-      Builder.SetInsertPoint(EHState.LastCatchHandler);
+      h->getTerminator()->eraseFromParent();
+      Builder.SetInsertPoint(h);
       Builder.CreateBr(funclet);
-      EHState.LastCatchHandler = 0;
+      h = 0;
     }
 
     if (prevBlock) {
@@ -1268,24 +1261,6 @@ void CodeGenFunction::EmitEHInformation() {
 
   Builder.CreateUnreachable();
   Builder.SetInsertPoint(old);
-  #if 0
-  llvm::Function *ehHandler = getEHHandler(*this);
-
-  CodeGenFunction cgf(CGM);
-
-  llvm::Function *frameHandlerFunc = 
-    getMSFrameHandlerFunction(cgf, ehFuncInfo->getType());
-
-  llvm::BasicBlock *BB = 
-    llvm::BasicBlock::Create(cgf.CGM.getLLVMContext(), "entry", ehHandler);
-  cgf.Builder.SetInsertPoint(BB);
-
-  llvm::CallInst *call = cgf.Builder.CreateCall(frameHandlerFunc, ehFuncInfo);
-  call->setTailCall();
-  call->setDoesNotReturn();
-
-  cgf.Builder.CreateUnreachable();
-  #endif
 }
 
 // r4start
