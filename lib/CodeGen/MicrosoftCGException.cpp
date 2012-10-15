@@ -867,6 +867,10 @@ static llvm::Function *getEHHandler(CodeGenFunction &CGF) {
 // r4start
 void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
   assert(FuncProto && "ESList builder needs function protype!");
+
+  if (!FuncProto->getNumExceptions())
+    return;
+
   llvm::Type *esListTy = getESListType(CGM);
 
   llvm::SmallVector<llvm::Constant *, 2> fields;
@@ -1150,8 +1154,6 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   // then funcinfo is not necessary.
   if (!EHState.TryBlockTableEntries.empty()) {
     tryBlocksTable = EmitTryBlockTable();
-  } else {
-    return 0;
   }
 
   if (!EHState.GlobalUnwindTable.empty()) {
@@ -1207,10 +1209,15 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   initializerFields.push_back(zeroVal);
 
   // not used on x86
-  initializerFields.push_back(llvm::UndefValue::get(VoidPtrTy));
+  initializerFields.push_back(llvm::ConstantPointerNull::get(VoidPtrTy));
 
   // ESTypeList
-  initializerFields.push_back(EHState.ESTypeList);
+  if (!EHState.ESTypeList) {
+    initializerFields.push_back(
+      llvm::ConstantPointerNull::get(getESListType(CGM)->getPointerTo()));
+  } else {
+    initializerFields.push_back(EHState.ESTypeList);
+  }
 
   // EHFlags
   // Bit 0 was setted, because at now driver doesn`t support MS

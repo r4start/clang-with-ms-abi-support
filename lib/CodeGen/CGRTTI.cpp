@@ -1231,7 +1231,7 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   llvm::Constant* Init = llvm::ConstantStruct::get(DescrTy, TypeDescrVals);
 
   return new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
-                                  true, llvm::GlobalValue::ExternalLinkage,
+                                  true, llvm::GlobalValue::WeakODRLinkage,//llvm::GlobalValue::ExternalLinkage,
                                   Init, DescrName);
 }
 
