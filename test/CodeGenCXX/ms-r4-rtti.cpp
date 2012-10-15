@@ -33,9 +33,6 @@ int main() {
   k.a();
   return 0;
 }
-//CHECK: %class.third = type { %class.second, i32 }
-//CHECK: %class.second = type { %class.first, i32 }
-//CHECK: %class.first = type { i32 (...)**, double }
 
 //CHECK: @"\01??_7third@@6B@" = linkonce_odr unnamed_addr constant [4 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6B@" to i8*), i8* bitcast (void (%class.first*)* @"\01?b@first@@UAEXXZ" to i8*), i8* bitcast (void (%class.second*)* @"\01?C_f@second@@UAEXXZ" to i8*), i8* bitcast (void (%class.third*)* @"\01?a@third@@UAEXXZ" to i8*)]
 //CHECK: @"\01??_7type_info@@6B@" = external global i8*

@@ -1,5 +1,9 @@
 // RUN: %clang_cc1 -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
 
+// r4start
+// In this test we control vtordisp fields layouting & initializing them in ctor.
+// Vb-table checks are necessary for initialization checks.
+
 namespace test1 {
 
 struct f {
