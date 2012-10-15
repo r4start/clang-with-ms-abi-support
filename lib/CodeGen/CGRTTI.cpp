@@ -1002,7 +1002,6 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   return new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
                                   false, CurLinkage, Init, DescrName);
 }
-
 static CharUnits GetClassOffset(const ASTContext &Ctx,
                                 const CXXRecordDecl *RD,
                                 const CXXRecordDecl *Base) {
