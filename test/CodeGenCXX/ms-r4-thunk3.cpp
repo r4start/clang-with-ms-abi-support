@@ -1,4 +1,9 @@
 // RUN: %clang_cc1 -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
+
+// r4start
+// This test checks properly mangling of thunk functions, properly building vf-table with thunk function,
+// properly generation thunk body.
+
 class IA
 {
 public:
