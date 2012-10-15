@@ -1235,6 +1235,10 @@ private:
     /// If function has funclets, then we will add br to the end of last catch.
     llvm::BasicBlock *LastCatchHandler;
 
+    // Address of eh-handler block.
+    // Necessary for deferred block body generation.
+    llvm::BasicBlock *EHHandler;
+
     llvm::Constant *ESTypeList;
 
     MSEHState(CodeGenFunction &cgf) 
