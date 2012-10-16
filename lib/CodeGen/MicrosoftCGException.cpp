@@ -206,6 +206,11 @@ static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF,
 // r4start
 static llvm::Function *getMSFrameHandlerFunction(CodeGenFunction &CGF, 
                                                  llvm::Type *EHFuncInfoTy) {
+  if (llvm::Function *handler = 
+            CGF.CGM.getModule().getFunction("__CxxFrameHandler3")) {
+    return handler;
+  }
+
   llvm::Type *Args[1] = { EHFuncInfoTy };
   llvm::FunctionType *FTy = 
     llvm::FunctionType::get(CGF.VoidTy, Args, /*IsVarArgs=*/false);
