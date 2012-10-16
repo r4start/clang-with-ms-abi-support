@@ -1268,6 +1268,23 @@ void CodeGenFunction::EmitEHInformation() {
   }
 
   llvm::BasicBlock *old = Builder.GetInsertBlock();
+
+  // This case will be true if we have such function:
+  //  int foo() {
+  //    try {
+  //      s();
+  //    } catch (A&) {
+  //      printf("A caught!\n");
+  //    }
+  //    return 0;
+  //  }
+  if (!EHState.EHHandler) {
+    EHState.EHHandler = getEHHandler(*this);
+    EHState.LastCatchHandler->getTerminator()->eraseFromParent();
+    Builder.SetInsertPoint(EHState.LastCatchHandler);
+    Builder.CreateBr(EHState.EHHandler);
+  }
+
   Builder.SetInsertPoint(EHState.EHHandler);
 
   llvm::Function *frameHandlerFunc = 

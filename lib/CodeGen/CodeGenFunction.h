@@ -1243,8 +1243,8 @@ private:
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-     ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
-     LastCatchHandler(0) {}
+       ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
+       LastCatchHandler(0), EHHandler(0) {}
 
     void SetMSTryState();
 

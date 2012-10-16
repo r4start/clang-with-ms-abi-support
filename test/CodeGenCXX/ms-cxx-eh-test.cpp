@@ -181,3 +181,12 @@ int test6() {
   s();
   return 0;
 }
+
+int test7() {
+  try {
+    s();
+  } catch (A&) {
+
+  }
+  return 0;
+}
