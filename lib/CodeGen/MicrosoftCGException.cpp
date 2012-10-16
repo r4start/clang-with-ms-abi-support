@@ -948,9 +948,39 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
   // If we don`t have catch handler then
   // I think that we have invoke dest.
-  llvm::BasicBlock *h = 
-    EHState.LastCatchHandler ? EHState.LastCatchHandler : 
-                               getMSInvokeDestImpl();
+  llvm::BasicBlock *h = EHState.LastCatchHandler;
+  if (!h) {
+    if (!EHState.CachedLPad &&
+        EHState.LandingPads.empty()) {
+      // Here we generate one fake block with conditional br to it
+      // from function body. It is necessary for unwind funclet reachability.
+      // We do this because in this case we don`t have catch handler or any
+      // invoke instr in function body. So we haven`t got any place where
+      // we can insert fake br to unwind funclet.
+
+      llvm::BasicBlock *curBB = Builder.GetInsertBlock();
+      llvm::Instruction *terminator = curBB->getTerminator()->clone();
+      curBB->getTerminator()->eraseFromParent();
+
+      llvm::BasicBlock *lastBB = 
+        llvm::BasicBlock::Create(CGM.getLLVMContext(), "", CurFn);
+      h = 
+        llvm::BasicBlock::Create(CGM.getLLVMContext(), "fake_block", CurFn);
+
+      llvm::Value *expr = 
+        llvm::ConstantInt::get(llvm::IntegerType::get(CGM.getLLVMContext(), 1),
+                               1);
+      Builder.CreateCondBr(expr, lastBB, h);
+      
+      Builder.SetInsertPoint(lastBB);
+      Builder.Insert(terminator);
+      
+      Builder.SetInsertPoint(h);
+      Builder.CreateUnreachable();
+    } else {
+      h = getMSInvokeDestImpl();
+    }
+  }
 
   // We must skip first element, because it is initial state
   // and it is not valuable for unwind table.
