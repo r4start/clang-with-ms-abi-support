@@ -35,16 +35,17 @@ static llvm::MDNode *getMetaData(llvm::LLVMContext &Ctx) {
 // r4start
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
-    llvm::AllocaInst *stateAlloca = 
-      CGF.CreateTempAlloca(CGF.Int32Ty, "try.id");
-    
-    stateAlloca->setMetadata(
-      CGF.CGM.getLLVMContext().getMDKindID("seh.state.alloca"),
-      getMetaData(CGF.CGM.getLLVMContext()));
-    
-    MSTryState = stateAlloca;
-
-    CreateStateStore(-1, true);
+    llvm::Function *frameAddr = 
+      CGF.CGM.getIntrinsic(llvm::Intrinsic::frameaddress);
+    llvm::CallInst *ebp = 
+      CGF.Builder.CreateCall(frameAddr, 
+                             llvm::ConstantInt::get(CGF.Int32Ty, 0));
+    MSTryState = 
+      CGF.Builder.CreateGEP(ebp, llvm::ConstantInt::get(CGF.Int32Ty, -4));
+    MSTryState = 
+      CGF.Builder.CreateBitCast(MSTryState,
+           llvm::IntegerType::get(CGF.CGM.getLLVMContext(), 32)->getPointerTo(),
+           "try.id");
   }
 }
 
@@ -75,21 +76,11 @@ llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(uint32_t State,
   llvm::StoreInst *store =  
     CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
                             MSTryState);
-  if (IsInit) {
-    store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.init"), 
-                       getMetaData(CGF.CGM.getLLVMContext()));
-  } else {
-    store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.store"), 
-                       getMetaData(CGF.CGM.getLLVMContext()));
-  }
-
   return store;
 }
 
 llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(llvm::Value *State) {
   llvm::StoreInst *store = CGF.Builder.CreateStore(State, MSTryState);
-  store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.store"), 
-                     getMetaData(CGF.CGM.getLLVMContext()));
   return store;
 }
 
@@ -97,8 +88,6 @@ llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(llvm::Value *State
 llvm::StoreInst *
 CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
   llvm::StoreInst *store = new llvm::StoreInst(State, MSTryState);
-  store->setMetadata(CGF.CGM.getLLVMContext().getMDKindID("seh.state.store"), 
-                     getMetaData(CGF.CGM.getLLVMContext()));
   return store;
 }
 
@@ -1034,7 +1023,6 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::CallInst *call = 
       Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
 
-    
     // creating unwind table entry
     fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
     fields.push_back(llvm::BlockAddress::get(CurFn, funclet));
