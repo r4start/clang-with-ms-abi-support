@@ -484,7 +484,7 @@ static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM,
   }
 
   typedef llvm::SmallVector<llvm::Constant *, 8> InitContainerTy;
-  typedef llvm::SmallVector<llvm::Type *, 8> CTATypes;
+  typedef llvm::SmallVector<llvm::Type *, 2> CTATypes;
   typedef llvm::SmallVector<QualType, 8> CatchablesContainerTy;
 
   CatchablesContainerTy catchableTypes;
@@ -495,15 +495,27 @@ static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM,
   }
 
   InitContainerTy init;
-  init.push_back(llvm::ConstantInt::get(CGM.Int32Ty, numberOfBases));
   std::for_each(catchableTypes.begin(), catchableTypes.end(), 
                 CatchableGenerator<InitContainerTy>(CGM, init));
   
+  assert(numberOfBases == init.size() && 
+         "Array size must be equal bases count!");
+
+  llvm::Type *catchableTy = getOrCreateCatchableType(CGM)->getPointerTo();
+  
+  llvm::ArrayType *arrTy = 
+    llvm::ArrayType::get(catchableTy, numberOfBases);
+
+  llvm::Constant *arr = llvm::ConstantArray::get(arrTy, init);
+  llvm::Constant *number = llvm::ConstantInt::get(CGM.Int32Ty, numberOfBases);
+  
   CTATypes fieldTypes;
-  for (InitContainerTy::iterator I = init.begin(), E = init.end();
-       I != E; ++I) {
-    fieldTypes.push_back((*I)->getType());
-  }
+  fieldTypes.push_back(number->getType());
+  fieldTypes.push_back(arr->getType());
+
+  init.clear();
+  init.push_back(number);
+  init.push_back(arr);
 
   llvm::StructType *ctaType = 
     llvm::StructType::get(CGM.getLLVMContext(), fieldTypes);
