@@ -197,7 +197,7 @@ static llvm::Constant *getNullPointer(llvm::Type *Type) {
 static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF, 
                                     llvm::Type *ThrowInfoPtrTy) {
   if (llvm::Function *throwFn = 
-            CGF.CGM.getModule().getFunction("_CxxThrowException@8")) {
+            CGF.CGM.getModule().getFunction("_CxxThrowException")) {
     return throwFn;
   }
 
@@ -207,7 +207,7 @@ static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF,
 
   llvm::Function *throwFn = 
     cast<llvm::Function>(CGF.CGM.CreateRuntimeFunction(FTy,
-                                             "_CxxThrowException@8"));
+                                             "_CxxThrowException"));
   throwFn->setCallingConv(llvm::CallingConv::X86_StdCall);
   return throwFn;
 }
@@ -638,7 +638,9 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
 
   llvm::Value *Params[] = { CXXThrowExParam, ThrowInfo };
                         
-  Builder.CreateCall(getMSThrowFn(*this, ThrowInfo->getType()), Params);
+  llvm::CallInst *call = 
+    Builder.CreateCall(getMSThrowFn(*this, ThrowInfo->getType()), Params);
+  call->setCallingConv(llvm::CallingConv::X86_StdCall);
 }
 
 // r4start
