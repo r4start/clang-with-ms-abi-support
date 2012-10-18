@@ -196,11 +196,20 @@ static llvm::Constant *getNullPointer(llvm::Type *Type) {
 // r4start
 static llvm::Constant *getMSThrowFn(CodeGenFunction &CGF, 
                                     llvm::Type *ThrowInfoPtrTy) {
+  if (llvm::Function *throwFn = 
+            CGF.CGM.getModule().getFunction("_CxxThrowException@8")) {
+    return throwFn;
+  }
+
   llvm::Type *Args[2] = { CGF.Int8PtrTy, ThrowInfoPtrTy };
   llvm::FunctionType *FTy =
     llvm::FunctionType::get(CGF.VoidTy, Args, /*IsVarArgs=*/false);
 
-  return CGF.CGM.CreateRuntimeFunction(FTy, "_CxxThrowException@8");
+  llvm::Function *throwFn = 
+    cast<llvm::Function>(CGF.CGM.CreateRuntimeFunction(FTy,
+                                             "_CxxThrowException@8"));
+  throwFn->setCallingConv(llvm::CallingConv::X86_StdCall);
+  return throwFn;
 }
 
 // r4start
