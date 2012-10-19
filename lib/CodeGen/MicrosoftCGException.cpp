@@ -107,9 +107,11 @@ CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(size_t Index,
   if (!LastEntries.empty()) {
     GlobalUnwindTable.back().TryNumber = 
       LastEntries.back()->TryNumber + 1;
-  } else {
+  } else if (!LocalUnwindTable.back().empty()) {
     GlobalUnwindTable.back().TryNumber = 
       (*(LocalUnwindTable.back().begin()))->TryNumber;
+  } else {
+    GlobalUnwindTable.back().TryNumber = TryNumber;
   }
 
   GlobalUnwindTable.back().StoreInstTryLevel = TryLevel;
@@ -1507,6 +1509,13 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   EHState.LandingPads.pop_back();
 }
 
+static llvm::Value *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
+  if (!Class->hasUserDeclaredDestructor()) {
+    return 0;
+  }
+  return CGM.GetAddrOfCXXDestructor(Class->getDestructor(), Dtor_Base);
+}
+
 // r4start
 void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
   // Function call or we not in try stmt.
@@ -1525,8 +1534,7 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
     kind = MD->getKind();
     if (kind == Decl::CXXConstructor) {
       const CXXRecordDecl *parent = MD->getParent();
-      llvm::Value *dtor = 
-        CGM.GetAddrOfCXXDestructor(parent->getDestructor(), Dtor_Base);
+      llvm::Value *dtor = getDtor(CGM, parent);
       EHState.SetMSTryState();
       EHState.GlobalUnwindTable.back().ThisPtr = This;
       EHState.GlobalUnwindTable.back().ReleaseFunc = dtor;
