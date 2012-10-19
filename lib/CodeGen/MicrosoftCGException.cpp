@@ -828,6 +828,9 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
   // magic number.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
+  // bbtFlags ??
+  //ehfuncinfoFields.push_back(CGM.Int32Ty);
+
   // max state.
   ehfuncinfoFields.push_back(CGM.Int32Ty);
 
@@ -1052,6 +1055,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
     llvm::CallInst *call = 
       Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
+    call->setCallingConv(llvm::CallingConv::X86_ThisCall);
 
     // creating unwind table entry
     fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
@@ -1220,11 +1224,15 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   // magic number
   initializerFields.push_back(llvm::ConstantInt::get(Int32Ty, 0x19930522));
 
+  llvm::Constant *zeroVal = llvm::ConstantInt::get(Int32Ty, 0);
+
+  // bbtFlags ??
+  //initializerFields.push_back(zeroVal);
+
   // number of entries in unwind table
   initializerFields.push_back(
     llvm::ConstantInt::get(Int32Ty, EHState.GlobalUnwindTable.size()));
 
-  llvm::Constant *zeroVal = llvm::ConstantInt::get(Int32Ty, 0);
   llvm::Constant *idxList[] = { zeroVal, zeroVal };
 
   // pUnwindTable
