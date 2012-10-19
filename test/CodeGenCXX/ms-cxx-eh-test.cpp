@@ -86,6 +86,10 @@ struct C {
  ~C() { }
 };
 
+struct D{
+  ~D(){}
+};
+
 extern void s();
 
 int test1() {
@@ -187,6 +191,23 @@ int test7() {
     s();
   } catch (A&) {
 
+  }
+  return 0;
+}
+
+int test8() {
+  try {
+    throw D();
+  } catch (D&) {
+  }
+  return 0;
+}
+
+int test9() {
+  try {
+    D a;
+    throw a;
+  } catch (D&) {
   }
   return 0;
 }
