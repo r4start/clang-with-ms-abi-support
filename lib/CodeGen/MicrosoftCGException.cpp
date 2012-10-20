@@ -26,13 +26,6 @@ using namespace clang;
 using namespace CodeGen;
 
 // r4start
-static llvm::MDNode *getMetaData(llvm::LLVMContext &Ctx) {
-  static llvm::SmallVector<llvm::Value *, 1> vals;
-  static llvm::MDNode *md =  llvm::MDNode::get(Ctx, vals);
-  return md;
-}
-
-// r4start
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
     llvm::Function *frameAddr = 
@@ -547,8 +540,8 @@ static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF,
   const CXXRecordDecl *throwTypeDecl = ThrowTy->getAsCXXRecordDecl();
   llvm::GlobalValue *dtorPtr = 0;
   if (throwTypeDecl) {
-    const CXXDestructorDecl *dtorDecl = throwTypeDecl->getDestructor();
-    dtorPtr = CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, Dtor_Base);
+    if (const CXXDestructorDecl *dtorDecl = throwTypeDecl->getDestructor())
+      dtorPtr = CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, Dtor_Base);
   }
   
   llvm::SmallVector<llvm::Constant *, 4> initVals;
@@ -1415,6 +1408,12 @@ static void insertCatchRet(CodeGenFunction &CGF) {
 static void doHandlerReachable(CodeGen::CGBuilderTy &Builder,
                                llvm::BasicBlock *&BrFrom,
                                llvm::BasicBlock *BrTo) {
+  // TODO: this must be REMOVED after we implement
+  // proper SEH CodeGeneration.
+  if (llvm::Instruction *term = BrFrom->getTerminator()) {
+    term->eraseFromParent();
+  }
+
   Builder.SetInsertPoint(BrFrom);
   Builder.CreateBr(BrTo);
   Builder.SetInsertPoint(BrTo);
