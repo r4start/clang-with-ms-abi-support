@@ -161,7 +161,7 @@ static llvm::BasicBlock *getLPadBlock(CodeGenFunction &CGF) {
                                                CGF.CGM.Int8PtrTy),
                 0);
   lPad->setCleanup(true);
-  CGF.Builder.CreateUnreachable();
+
   // Restore the old IR generation state.
   CGF.Builder.restoreIP(savedIP);
   return lpadBlock;
@@ -179,10 +179,23 @@ void CodeGenFunction::MSEHState::FinishLPad() {
     return;
   }
 
+  // TODO: Remove it!
+  llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
+  for (LPadStack::iterator I = LandingPads.begin(), E = LandingPads.end();
+       I != E; ++I) {
+    if (!(*I)->getTerminator()) {
+      CGF.Builder.SetInsertPoint(*I);
+      CGF.Builder.CreateUnreachable();
+    }
+  }
+  CGF.Builder.SetInsertPoint(oldBB);
+
+  #if 0
   llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
   CGF.Builder.SetInsertPoint(LandingPads.back());
   CGF.Builder.CreateUnreachable();
   CGF.Builder.SetInsertPoint(oldBB);
+  #endif
 }
 
 // r4start
@@ -1227,9 +1240,6 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
   llvm::Constant *zeroVal = llvm::ConstantInt::get(Int32Ty, 0);
 
-  // bbtFlags ??
-  //initializerFields.push_back(zeroVal);
-
   // number of entries in unwind table
   initializerFields.push_back(
     llvm::ConstantInt::get(Int32Ty, EHState.GlobalUnwindTable.size()));
@@ -1409,12 +1419,6 @@ static void insertCatchRet(CodeGenFunction &CGF) {
 static void doHandlerReachable(CodeGen::CGBuilderTy &Builder,
                                llvm::BasicBlock *&BrFrom,
                                llvm::BasicBlock *BrTo) {
-  // TODO: this must be REMOVED after we implement
-  // proper SEH CodeGeneration.
-  if (llvm::Instruction *term = BrFrom->getTerminator()) {
-    term->eraseFromParent();
-  }
-
   Builder.SetInsertPoint(BrFrom);
   Builder.CreateBr(BrTo);
   Builder.SetInsertPoint(BrTo);
