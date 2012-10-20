@@ -167,6 +167,7 @@ static llvm::BasicBlock *getLPadBlock(CodeGenFunction &CGF) {
                                                CGF.CGM.Int8PtrTy),
                 0);
   lPad->setCleanup(true);
+  CGF.Builder.CreateUnreachable();
   // Restore the old IR generation state.
   CGF.Builder.restoreIP(savedIP);
   return lpadBlock;
@@ -640,9 +641,15 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
 
   llvm::Value *Params[] = { CXXThrowExParam, ThrowInfo };
                         
-  llvm::CallInst *call = 
-    Builder.CreateCall(getMSThrowFn(*this, ThrowInfo->getType()), Params);
-  call->setCallingConv(llvm::CallingConv::X86_StdCall);
+  llvm::BasicBlock *normalDest = 
+    llvm::BasicBlock::Create(CGM.getLLVMContext(), "", CurFn);
+  
+  llvm::InvokeInst *invoke = 
+    Builder.CreateInvoke(getMSThrowFn(*this, ThrowInfo->getType()),
+                         normalDest, getMSInvokeDestImpl(), Params);
+  invoke->setCallingConv(llvm::CallingConv::X86_StdCall);
+  
+  Builder.SetInsertPoint(normalDest);
 }
 
 // r4start
