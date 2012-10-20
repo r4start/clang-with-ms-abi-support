@@ -217,7 +217,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
     EmitDeclMetadata();
 
   // r4start
-  if (IsMSExceptions && !EHState.GlobalUnwindTable.empty()) {
+  if (IsMSExceptions && CGM.getLangOpts().CXXExceptions) {
     EmitEHInformation();
   }
 
