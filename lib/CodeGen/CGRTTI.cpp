@@ -1001,7 +1001,8 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
 
   return new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
                                   false, CurLinkage, Init, DescrName);
-}static CharUnits GetClassOffset(const ASTContext &Ctx,
+}
+static CharUnits GetClassOffset(const ASTContext &Ctx,
                                 const CXXRecordDecl *RD,
                                 const CXXRecordDecl *Base) {
   assert(RD != Base && 
@@ -1070,7 +1071,6 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   
   // This linkage same as Microsoft do.
   CurLinkage = llvm::GlobalValue::WeakAnyLinkage;
-
   llvm::Type* Int32Ty = 
     llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
 
