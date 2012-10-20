@@ -50,6 +50,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   } else {
     GlobalUnwindTable.push_back(GlobalUnwindTable.back().StoreValue);
   }
+
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
   
   LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
@@ -1564,7 +1565,13 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
         restoringVal = llvm::ConstantInt::get(Int32Ty, -1);
       }
       EHState.CreateStateStore(restoringVal);
-      EHState.LocalUnwindTable.back().pop_back();
+      
+      // Here we must check that last state is for ctor.
+      // This check necessary, because we can delete
+      // entry try-block state. 
+      if (EHState.LocalUnwindTable.back().back()->ThisPtr) {
+        EHState.LocalUnwindTable.back().pop_back();
+      }
     }
   }
 }
