@@ -1231,7 +1231,7 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   llvm::Constant* Init = llvm::ConstantStruct::get(DescrTy, TypeDescrVals);
 
   return new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
-                                  true, llvm::GlobalValue::ExternalLinkage,
+                                  true, llvm::GlobalValue::WeakAnyLinkage,
                                   Init, DescrName);
 }
 
@@ -1312,7 +1312,7 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   
   //CurLinkage = getTypeInfoLinkage(CGM, Ty);
   // This linkage same to Microsoft.
-  CurLinkage = llvm::GlobalValue::ExternalLinkage;
+  CurLinkage = llvm::GlobalValue::WeakAnyLinkage;
 
   llvm::Type* Int32Ty = 
     llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
