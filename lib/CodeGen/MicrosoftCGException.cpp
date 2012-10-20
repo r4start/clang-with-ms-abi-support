@@ -1329,9 +1329,8 @@ void CodeGenFunction::EmitEHInformation() {
   //  }
   if (!EHState.EHHandler) {
     EHState.EHHandler = getEHHandler(*this);
-    llvm::BasicBlock *lpad = getMSInvokeDestImpl();
-    lpad->getTerminator()->eraseFromParent();
-    Builder.SetInsertPoint(lpad);
+    EHState.LastCatchHandler->getTerminator()->eraseFromParent();
+    Builder.SetInsertPoint(EHState.LastCatchHandler);
     Builder.CreateBr(EHState.EHHandler);
   }
 
