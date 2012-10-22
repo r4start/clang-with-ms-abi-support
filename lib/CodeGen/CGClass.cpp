@@ -1670,10 +1670,14 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
 
   CharUnits vbTableOffset = L.getVBPtrOffset();
 
+  const CXXRecordDecl *Primary = L.getPrimaryBase();
+  if (!Primary) {
+    Primary = ClassDecl;
+  }
+  
+  llvm::GlobalVariable *vbTable = 0;
+  
   VBTableContext& vbContext = CGM.getVBTableContext();
-
-  llvm::GlobalVariable *vbTable = 
-    CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
 
   for (CXXRecordDecl::base_class_const_iterator I = ClassDecl->vbases_begin(),
        E = ClassDecl->vbases_end(); I != E; ++I) {
@@ -1681,13 +1685,17 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
       vbaseOffset = vbasesOffsets.find(I->getType()->getAsCXXRecordDecl());
     assert(vbaseOffset != vbasesOffsets.end() && 
-                                           "VBase is not present in vb-table!");
+           "VBase is not present in vb-table!");
 
     if (!vbaseOffset->second.hasVtorDisp())
       continue;
 
+    if (!vbTable) {
+      vbTable = CGM.getVTables().GetAddrOfVBTable(ClassDecl, Primary);
+    }
+
     const VBTableContext::VBTableEntry vbEntry = 
-      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, vbaseOffset->first);
+      vbContext.getEntryFromVBTable(ClassDecl, Primary, vbaseOffset->first);
 
     llvm::Value *thisPtr = LoadCXXThis();
     thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
