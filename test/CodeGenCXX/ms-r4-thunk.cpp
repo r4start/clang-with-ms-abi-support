@@ -29,9 +29,9 @@ int main() {
   return 0;
 }
 
-// CHECK: @"\01??_7third@@6Bsecond@@@" = linkonce_odr unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6Bsecond@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@WPPPPPPPA@UAEXXZ" to i8*), i8* bitcast (void (%class.second*)* @"\01?g@second@@WPPPPPPPA@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7third@@6Bsecond@@@" = weak unnamed_addr constant [3 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4third@@6Bsecond@@@" to i8*), i8* bitcast (void (%class.second*)* @"\01?asdf@second@@WPPPPPPPA@UAEXXZ" to i8*), i8* bitcast (void (%class.second*)* @"\01?g@second@@WPPPPPPPA@UAEXXZ" to i8*)]
 
-// CHECK:      define linkonce_odr x86_thiscallcc void @"\01?asdf@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
+// CHECK:      define weak x86_thiscallcc void @"\01?asdf@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.second*, align 4
 // CHECK-NEXT:   store %class.second* %this, %class.second** %this.addr, align 4
@@ -43,7 +43,7 @@ int main() {
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
 
-// CHECK:      define linkonce_odr x86_thiscallcc void @"\01?g@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
+// CHECK:      define weak x86_thiscallcc void @"\01?g@second@@WPPPPPPPA@UAEXXZ"(%class.second* %this) {
 // CHECK-NEXT: entry:
 // CHECK-NEXT:   %this.addr = alloca %class.second*, align 4
 // CHECK-NEXT:   store %class.second* %this, %class.second** %this.addr, align 4

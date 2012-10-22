@@ -27,9 +27,9 @@ void test() { s ss; }
 // CHECK: %"struct.test2::fd" = type { i32 (...)** }
 
 // FIXME: Fix vb-table name mangling with namespaces.
-// CHECK: @"\01??_8s@test2@@7B@" = unnamed_addr constant [3 x i32] [i32 0, i32 8, i32 16]
+// CHECK: @"\01??_8s@test2@@7B@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 8, i32 16]
 
-// CHECK: @"\01??_8s@test1@@7B@" = unnamed_addr constant [2 x i32] [i32 0, i32 8]
+// CHECK: @"\01??_8s@test1@@7B@" = weak unnamed_addr constant [2 x i32] [i32 0, i32 8]
 
 // CHECK: define linkonce_odr x86_thiscallcc %"struct.test1::s"* @"\01??0s@test1@@QAE@XZ"(%"struct.test1::s"* %this, i32 zeroext %ctor.flag)
 

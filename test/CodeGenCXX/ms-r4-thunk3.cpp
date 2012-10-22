@@ -42,25 +42,25 @@ int main() {
 
 /////////  VFTables in sd start
 
-// CHECK: @"\01??_7sd@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6B@" to i8*), i8* bitcast (i32 (%struct.sd*)* @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ" to i8*)]
+// CHECK: @"\01??_7sd@@6B@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6B@" to i8*), i8* bitcast (i32 (%struct.sd*)* @"\01?asd@sd@@$4PPPPPPPM@A@AEHXZ" to i8*)]
 
-// CHECK: @"\01??_7sd@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ" to i8*)]
+// CHECK: @"\01??_7sd@@6BIA@@@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$R4BI@BA@PPPPPPPM@M@AEXXZ" to i8*)]
 
-// CHECK: @"\01??_7sd@@6BICh@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BICh@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?iCh@ICh@@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7sd@@6BICh@@@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4sd@@6BICh@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?iCh@ICh@@UAEXXZ" to i8*)]
 
 /////////  VFTables in sd end
 
 /////////  VFTables in ICh start
 
-// CHECK: @"\01??_7ICh@@6B0@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6B0@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?iCh@ICh@@UAEXXZ" to i8*)]
+// CHECK: @"\01??_7ICh@@6B0@@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6B0@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?iCh@ICh@@UAEXXZ" to i8*)]
 
-// CHECK: @"\01??_7ICh@@6BIA@@@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ" to i8*)]
+// CHECK: @"\01??_7ICh@@6BIA@@@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4ICh@@6BIA@@@" to i8*), i8* bitcast (void (%class.ICh*)* @"\01?ia@ICh@@$4PPPPPPPM@A@AEXXZ" to i8*)]
 
 /////////  VFTables in ICh end
 
 /////////  VFTables in s start
 
-// CHECK: @"\01??_7s@@6B@" = linkonce_odr unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6B@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ" to i8*)]
+// CHECK: @"\01??_7s@@6B@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4s@@6B@" to i8*), i8* bitcast (i32 (%struct.s*)* @"\01?asd@s@@$4PPPPPPPM@A@AEHXZ" to i8*)]
 
 /////////  VFTables in s end
 
