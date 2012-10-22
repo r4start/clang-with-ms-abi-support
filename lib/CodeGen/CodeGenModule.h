@@ -553,7 +553,7 @@ public:
   /// GetAddrOfRTTIDescriptor - Get the address of the RTTI descriptor 
   /// for the given type in MS ABI.
   llvm::Constant *
-  GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy, bool ForEH = false);
+  GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy);
 
   /// GetAddrOfThunk - Get the address of the thunk for the given global decl.
   llvm::Constant *GetAddrOfThunk(GlobalDecl GD, const ThunkInfo &Thunk);
