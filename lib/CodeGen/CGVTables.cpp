@@ -819,10 +819,11 @@ CodeGenVTables::GetAddrOfVBTable(const CXXRecordDecl *RD,
   const VBTableContext::BaseVBTableTy &Table = Context.getVBTable(RD, Base);
 
   llvm::ArrayType *VBTableType = 
-                                llvm::ArrayType::get(CGM.Int32Ty, Table.size());
+    llvm::ArrayType::get(CGM.Int32Ty, Table.size());
 
-  VBTable = CGM.CreateOrReplaceCXXRuntimeVariable(Name, VBTableType, 
-                                            llvm::GlobalValue::WeakAnyLinkage);
+  VBTable = 
+    CGM.CreateOrReplaceCXXRuntimeVariable(Name, VBTableType, 
+                                          llvm::GlobalValue::WeakAnyLinkage);
 
   VBTable->setUnnamedAddr(true);
 
@@ -1023,17 +1024,16 @@ void
 CodeGenVTables::MSGenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
                                     const CXXRecordDecl *RD) {
   const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
-  Linkage = llvm::GlobalValue::WeakAnyLinkage;
 
   if (!RD->getNumBases()) {
     llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);
-    EmitVFTableDefinition(VFTable, Linkage, RD, 0);
+    EmitVFTableDefinition(VFTable, llvm::GlobalValue::WeakAnyLinkage, RD, 0);
     return;
   }
 
   if (Layout.hasOwnVFPtr()) {
     llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);
-    EmitVFTableDefinition(VFTable, Linkage, RD, 0);
+    EmitVFTableDefinition(VFTable, llvm::GlobalValue::WeakAnyLinkage, RD, 0);
   }
   for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
         E = RD->bases_end(); I != E; ++I) {
@@ -1042,7 +1042,7 @@ CodeGenVTables::MSGenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
     if (!Base->isPolymorphic())
       continue;
 
-    BuildVFTables(RD, RD, Base, Linkage);
+    BuildVFTables(RD, RD, Base, llvm::GlobalValue::WeakAnyLinkage);
   }
 }
 
