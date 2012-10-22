@@ -1669,11 +1669,6 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     L.getVBaseOffsetsMap();
 
   CharUnits vbTableOffset = L.getVBPtrOffset();
-
-  const CXXRecordDecl *Primary = L.getPrimaryBase();
-  if (!Primary) {
-    Primary = ClassDecl;
-  }
   
   llvm::GlobalVariable *vbTable = 0;
   
@@ -1691,11 +1686,11 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
       continue;
 
     if (!vbTable) {
-      vbTable = CGM.getVTables().GetAddrOfVBTable(ClassDecl, Primary);
+      vbTable = CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
     }
 
     const VBTableContext::VBTableEntry vbEntry = 
-      vbContext.getEntryFromVBTable(ClassDecl, Primary, vbaseOffset->first);
+      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, vbaseOffset->first);
 
     llvm::Value *thisPtr = LoadCXXThis();
     thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
