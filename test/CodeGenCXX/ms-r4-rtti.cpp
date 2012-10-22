@@ -49,7 +49,7 @@ int main() {
 //CHECK: @"\01??_R1A@?0A@EA@second@@8" = weak global { i8*, i32, i32, i32, i32, i32 } { i8* bitcast ({ i8**, i32, [13 x i8] }* @"\01??_R0?AVsecond@@@8" to i8*), i32 1, i32 0, i32 -1, i32 0, i32 64 }
 //CHECK: @"\01??_R2second@@8" = weak global [2 x { i8*, i32, i32, i32, i32, i32 }*] [{ i8*, i32, i32, i32, i32, i32 }* @"\01??_R1A@?0A@EA@second@@8", { i8*, i32, i32, i32, i32, i32 }* @"\01??_R1A@?0A@EN@first@@8"]
 //CHECK: @"\01??_R3second@@8" = weak global { i32, i32, i32, i8* } { i32 0, i32 0, i32 2, i8* bitcast ([2 x { i8*, i32, i32, i32, i32, i32 }*]* @"\01??_R2second@@8" to i8*) }
-//CHECK: @"\01??_R4second@@6B@" = unnamed_addr weak global { i32, i32, i32, i8*, i8* } { i32 0, i32 0, i32 0, i8* bitcast ({ i8**, i32, [13 x i8] }* @"\01??_R0?AVsecond@@@8" to i8*), i8* bitcast ({ i32, i32, i32, i8* }* @"\01??_R3second@@8" to i8*) }
+//CHECK: @"\01??_R4second@@6B@" = weak unnamed_addr global { i32, i32, i32, i8*, i8* } { i32 0, i32 0, i32 0, i8* bitcast ({ i8**, i32, [13 x i8] }* @"\01??_R0?AVsecond@@@8" to i8*), i8* bitcast ({ i32, i32, i32, i8* }* @"\01??_R3second@@8" to i8*) }
 //CHECK: @"\01??_7first@@6B@" = weak unnamed_addr constant [2 x i8*] [i8* bitcast ({ i32, i32, i32, i8*, i8* }* @"\01??_R4first@@6B@" to i8*), i8* bitcast (void (%class.first*)* @"\01?b@first@@UAEXXZ" to i8*)]
 //CHECK: @"\01??_R1A@?0A@EA@first@@8" = weak global { i8*, i32, i32, i32, i32, i32 } { i8* bitcast ({ i8**, i32, [12 x i8] }* @"\01??_R0?AVfirst@@@8" to i8*), i32 0, i32 0, i32 -1, i32 0, i32 64 }
 //CHECK: @"\01??_R2first@@8" = weak global [1 x { i8*, i32, i32, i32, i32, i32 }*] [{ i8*, i32, i32, i32, i32, i32 }* @"\01??_R1A@?0A@EA@first@@8"]
