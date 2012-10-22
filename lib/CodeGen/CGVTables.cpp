@@ -848,7 +848,7 @@ CodeGenVTables::GetAddrOfVBTable(const CXXRecordDecl *RD,
                                 llvm::ArrayType::get(CGM.Int32Ty, Table.size());
 
   VBTable = CGM.CreateOrReplaceCXXRuntimeVariable(Name, VBTableType, 
-                                            llvm::GlobalValue::ExternalLinkage);
+                                            llvm::GlobalValue::WeakAnyLinkage);
 
   VBTable->setUnnamedAddr(true);
 
@@ -889,7 +889,7 @@ CodeGenVTables::GetAddrOfVFTable(const CXXRecordDecl *RD,
 
   VFTable =
     CGM.CreateOrReplaceCXXRuntimeVariable(Name, ArrayType, 
-                                          llvm::GlobalValue::ExternalLinkage);
+                                          llvm::GlobalValue::WeakAnyLinkage);
 
   VFTable->setUnnamedAddr(true);
   return VFTable;
@@ -1049,6 +1049,7 @@ void
 CodeGenVTables::MSGenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
                                     const CXXRecordDecl *RD) {
   const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
+  Linkage = llvm::GlobalValue::WeakAnyLinkage;
 
   if (!RD->getNumBases()) {
     llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);

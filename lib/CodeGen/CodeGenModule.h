@@ -561,7 +561,7 @@ public:
   /// GetAddrOfRTTIDescriptor - Get the address of the RTTI descriptor 
   /// for the given type in MS ABI.
   llvm::Constant *
-  GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy, bool ForEH = false);
+  GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy);
 
   /// GetAddrOfUuidDescriptor - Get the address of a uuid descriptor .
   llvm::Constant *GetAddrOfUuidDescriptor(const CXXUuidofExpr* E);
