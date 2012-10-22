@@ -81,9 +81,6 @@ class RTTIBuilder {
   void GetAmbiguousSubobjects(const CXXRecordDecl *RD);
 
   /// r4start
-  void BuildVBTable(const CXXRecordDecl *RD);
-
-  /// r4start
   int32_t GetMemberDisplacement(const CXXRecordDecl *RD, CXXRecordDecl *Base);
 
   /// r4start
@@ -254,8 +251,7 @@ public:
   ///   struct RTTIClassHierarchyDescriptor* ClassDescriptor;
   /// };
   llvm::Constant *BuildMSTypeInfo(QualType Ty,
-                                  QualType BaseTy,
-                                  bool Force = false);
+                                  QualType BaseTy);
 };
 }
 
@@ -748,43 +744,6 @@ static uint32_t GetBasesCount(const CXXRecordDecl *RD) {
   return BasesCount;
 }
 
-// r4start
-void
-RTTIBuilder::BuildVBTable(const CXXRecordDecl *RD) {
-  llvm::SmallString<256> Name;
-  llvm::raw_svector_ostream Out(Name);
-
-  CGM.getCXXABI().getMangleContext().
-    getMsExtensions()->mangleCXXVBTable(RD, 0, Out);
-  Out.flush();
-
-  llvm::StringRef VBTableName = Name.str();
-
-  llvm::GlobalVariable *VBTable = 
-    CGM.getModule().getGlobalVariable(VBTableName);
-  if (VBTable)
-    return;
-
-  VBTableContext& Context = CGM.getVBTableContext();
-  const VBTableContext::BaseVBTableTy &Table = Context.getVBTable(RD, RD);
-
-  llvm::ArrayType *VBTableType = llvm::ArrayType::get(Int32Ty, Table.size());
-  llvm::SmallVector<llvm::Constant *, 32> Offsets;
-
-  for (VBTableContext::BaseVBTableTy::const_iterator I = Table.begin(),
-       E = Table.end(); I != E; ++I) {
-    VBTableContext::VBTableEntry Entry = I->first;
-
-    Offsets.push_back(llvm::ConstantInt::get(Int32Ty, Entry.offset));
-  }
-
-  llvm::Constant *Init = llvm::ConstantArray::get(VBTableType, Offsets);
-
-  VBTable = 
-    new llvm::GlobalVariable(CGM.getModule(),Init->getType(), true,
-                             CurLinkage, Init, VBTableName);
-}
-
 uint32_t RTTIBuilder::GetAttributesField(const CXXRecordDecl *RD, 
                                          CXXRecordDecl *Base) {
   // At now we know that only first byte uses from attr field.
@@ -973,10 +932,12 @@ RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD,
   VBTableContext::VBTableEntry VBTableDisps = GetVBaseDisplacement(RD, Base);
 
   // Vbtable displacement.
-  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, VBTableDisps.offset));
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty,
+                                                      VBTableDisps.offset));
 
   // Displacement inside vbtable.
-  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, VBTableDisps.index));
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, 
+                                                      VBTableDisps.index));
 
   // Attributes.
   uint32_t Attributes = GetAttributesField(RD, Base);
@@ -1005,7 +966,7 @@ RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD,
 
   if (!BaseClassDescr)
     BaseClassDescr = 
-      new llvm::GlobalVariable(CGM.getModule(), Init->getType(), true,
+      new llvm::GlobalVariable(CGM.getModule(), Init->getType(), false,
                                CurLinkage, Init, DescrName);
 
   return BaseClassDescr;
@@ -1068,7 +1029,8 @@ llvm::Constant* RTTIBuilder::BuildRTTIBaseClassArray(const CXXRecordDecl* RD) {
   if (!BaseClassArray)
     BaseClassArray = 
       new llvm::GlobalVariable(CGM.getModule(), BaseClassArrayInit->getType(),
-                              true, CurLinkage, BaseClassArrayInit, ArrayName);
+                               false, CurLinkage, 
+                               BaseClassArrayInit, ArrayName);
 
   return BaseClassArray;
 }
@@ -1111,8 +1073,7 @@ void RTTIBuilder::GetAmbiguousSubobjects(const CXXRecordDecl *RD) {
 
 // r4start
 llvm::Constant * 
-RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD)
-{
+RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD) {
   llvm::SmallString<256> DescriptorName;
   llvm::raw_svector_ostream Out(DescriptorName);
 
@@ -1128,8 +1089,7 @@ RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD)
   llvm::SmallVector<llvm::Constant*, 4> CHDFieldVals;
 
   // Signature and attribute fields are integers.
-  for (int i = 0; i < 3; ++i)
-  {
+  for (int i = 0; i < 3; ++i) {
     CHDFieldTypes.push_back(Int32Ty);
   }
 
@@ -1171,7 +1131,7 @@ RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD)
   CHDVal = 
     new llvm::GlobalVariable(CGM.getModule(),
                               ClassHierarchyDescr->getType(),
-                              true,
+                              false,
                               CurLinkage,
                               ClassHierarchyDescr,
                               ClassHierarchyDescrName);
@@ -1227,7 +1187,7 @@ llvm::Constant *RTTIBuilder::BuildRTTITypeDescriptor(QualType Ty) {
   llvm::Constant* Init = llvm::ConstantStruct::get(DescrTy, TypeDescrVals);
 
   return new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
-                                  true, CurLinkage, Init, DescrName);
+                                  false, CurLinkage, Init, DescrName);
 }
 
 static CharUnits GetClassOffset(const ASTContext &Ctx,
@@ -1269,8 +1229,7 @@ static CharUnits GetClassOffset(const ASTContext &Ctx,
 
 // r4start
 llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
-                                             QualType BaseTy,
-                                             bool Force) {
+                                             QualType BaseTy) {
   // We want to operate on the canonical type.
   Ty = CGM.getContext().getCanonicalType(Ty);
 
@@ -1296,9 +1255,8 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   // Complete Object Locator name
   llvm::StringRef COLName = OutName.str();
   
-  //CurLinkage = getTypeInfoLinkage(CGM, Ty);
-  // This linkage same to Microsoft.
-  CurLinkage = llvm::GlobalValue::ExternalLinkage;
+  // This linkage same as Microsoft do.
+  CurLinkage = llvm::GlobalValue::WeakAnyLinkage;
 
   llvm::Type* Int32Ty = 
     llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
@@ -1326,17 +1284,12 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
     BuildRTTIClassHierarchyDescriptor(Ty->getAsCXXRecordDecl());
   Fields.push_back(llvm::ConstantExpr::getBitCast(CHD, Int8PtrTy));
 
-  // Build virtual bases table.
-  /*if (LayoutClass->getNumVBases())
-    BuildVBTable(LayoutClass);*/
-
   llvm::Constant* Init = llvm::ConstantStruct::getAnon(Fields);
   
   llvm::GlobalVariable* GV = CGM.getModule().getGlobalVariable(COLName);
   if (!GV)
     GV = new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
-                                 /*Constant=*/true, CurLinkage, Init, COLName);
-
+                                  false, CurLinkage, Init, COLName);
   GV->setUnnamedAddr(true);
   
   return llvm::ConstantExpr::getBitCast(GV, Int8PtrTy);
@@ -1849,7 +1802,7 @@ llvm::GlobalValue *CodeGenModule::GetTypeDescriptor(QualType ObjectType) {
   llvm::Constant* Init = llvm::ConstantStruct::get(DescrTy, TypeDescrVals);
 
   return new llvm::GlobalVariable(getModule(), Init->getType(),
-                                  true, llvm::GlobalValue::ExternalLinkage,
+                                  false, llvm::GlobalValue::WeakAnyLinkage,
                                   Init, DescrName);
 }
 
@@ -1871,8 +1824,7 @@ llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
 // r4start
 llvm::Constant *
 CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
-                                         QualType BaseTy,
-                                         bool ForEH) {
+                                         QualType BaseTy) {
   return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
 }
 

@@ -1668,20 +1668,19 @@ void CodeGenFunction::InitializeVTablePointers(const CXXRecordDecl *RD) {
 // r4start
 void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
   assert(ClassDecl->getNumVBases() && 
-                                 "Vtordisps present only if class has vbases!");
+         "Vtordisps present only if class has vbases!");
 
   const ASTRecordLayout &L = CGM.getContext().getASTRecordLayout(ClassDecl);
   llvm::Type *Int32PtrTy = llvm::Type::getInt32PtrTy(CGM.getLLVMContext());
 
   const ASTRecordLayout::VBaseOffsetsMapTy &vbasesOffsets = 
-                                                         L.getVBaseOffsetsMap();
+    L.getVBaseOffsetsMap();
 
   CharUnits vbTableOffset = L.getVBPtrOffset();
-
+  
+  llvm::GlobalVariable *vbTable = 0;
+  
   VBTableContext& vbContext = CGM.getVBTableContext();
-
-  llvm::GlobalVariable *vbTable = 
-                        CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
 
   for (CXXRecordDecl::base_class_const_iterator I = ClassDecl->vbases_begin(),
        E = ClassDecl->vbases_end(); I != E; ++I) {
@@ -1689,10 +1688,14 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     ASTRecordLayout::VBaseOffsetsMapTy::const_iterator 
       vbaseOffset = vbasesOffsets.find(I->getType()->getAsCXXRecordDecl());
     assert(vbaseOffset != vbasesOffsets.end() && 
-                                           "VBase is not present in vb-table!");
+           "VBase is not present in vb-table!");
 
     if (!vbaseOffset->second.hasVtorDisp())
       continue;
+
+    if (!vbTable) {
+      vbTable = CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
+    }
 
     const VBTableContext::VBTableEntry vbEntry = 
       vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, vbaseOffset->first);
@@ -1722,8 +1725,9 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     // r4start
     // In MS ABI
     // mov dword ptr [ecx+eax-4],edx 
-    llvm::Value *vtordispPtr = Builder.CreateConstGEP1_32(thisPtr, 
-                             vbaseOffset->second.VBaseOffset.getQuantity() - 4);
+    llvm::Value *vtordispPtr = 
+      Builder.CreateConstGEP1_32(thisPtr, 
+                            vbaseOffset->second.VBaseOffset.getQuantity() - 4);
 
     vtordispPtr = Builder.CreateBitCast(vtordispPtr, Int32PtrTy);
     Builder.CreateStore(vtordispVal, vtordispPtr);
