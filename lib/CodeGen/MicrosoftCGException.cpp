@@ -1309,6 +1309,10 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
 // r4start
 void CodeGenFunction::EmitEHInformation() {
+  if (!EHState.EHHandler) {
+    return;
+  }
+  
   EHState.FinishLPad();
 
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
@@ -1317,22 +1321,6 @@ void CodeGenFunction::EmitEHInformation() {
   }
 
   llvm::BasicBlock *old = Builder.GetInsertBlock();
-
-  // This case will be true if we have such function:
-  //  int foo() {
-  //    try {
-  //      s();
-  //    } catch (A&) {
-  //      printf("A caught!\n");
-  //    }
-  //    return 0;
-  //  }
-  if (!EHState.EHHandler) {
-    EHState.EHHandler = getEHHandler(*this);
-    EHState.LastCatchHandler->getTerminator()->eraseFromParent();
-    Builder.SetInsertPoint(EHState.LastCatchHandler);
-    Builder.CreateBr(EHState.EHHandler);
-  }
 
   Builder.SetInsertPoint(EHState.EHHandler);
 
@@ -1581,6 +1569,10 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
+  if (!EHState.EHHandler) {
+    EHState.EHHandler = getEHHandler(*this);
+  }
+
   if (EHState.CachedLPad) {
     return EHState.CachedLPad;
   }
