@@ -43,6 +43,33 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
 }
 
 // r4start
+void 
+CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock) {
+  if (!LpadBlock || CachedLPad == LpadBlock ||
+       LpadBlock == CGF.TerminateLandingPad) {
+    return;
+  }
+  
+  uint32_t id = 0;
+  CachedLPad = 0;
+
+  for (LPadStack::iterator I = LandingPads.begin(), E = LandingPads.end();
+       I != E; ++I, ++id) {
+    if (*I == LpadBlock) {
+      CachedLPad = LpadBlock;
+      break;
+    }
+  }
+
+  if (!CachedLPad) {
+    LandingPads.push_back(LpadBlock);
+    CachedLPad = LpadBlock;
+  }
+
+  SetMSTryState();
+}
+
+// r4start
 void CodeGenFunction::MSEHState::SetMSTryState() {
   size_t state = GlobalUnwindTable.size();
   if (!state) {
@@ -54,8 +81,6 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
   
   LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
-
-  backRef.IsUsed = true;
 
   backRef.Store = CreateStateStore(state);
   backRef.StoreValue = state;
@@ -653,7 +678,7 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
   
   llvm::InvokeInst *invoke = 
     Builder.CreateInvoke(getMSThrowFn(*this, ThrowInfo->getType()),
-                         normalDest, getMSInvokeDestImpl(), Params);
+                         normalDest, getInvokeDest(), Params);
   invoke->setCallingConv(llvm::CallingConv::X86_StdCall);
   
   Builder.SetInsertPoint(normalDest);
@@ -1330,7 +1355,7 @@ static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,
 //              RestoreOpInfo::RestoreOpKind RestoreOp = RestoreOpInfo::Undef,
 //              llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
 //              int TopLevelTryNumber = -1, int Index = -1)
-  return MsUnwindInfo(-1, 0, 0, Value, true, RestoreOpInfo::CatchRestore,
+  return MsUnwindInfo(-1, 0, 0, Value, RestoreOpInfo::CatchRestore,
                       Store, StoreTryLevel, TopTryNumber, Index);
 }
 
@@ -1361,8 +1386,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   restoringState = llvm::ConstantInt::get(Int32Ty, index);
   llvm::Instruction *store = 
     EHState.AddCatchEntryInUnwindTable(index, restoringState);
-
-  llvm::BasicBlock *brBlock = getMSInvokeDestImpl();
   
   llvm::BasicBlock *tryEnd = EHState.GenerateTryEndBlock(fd, msMangler);
   llvm::BlockAddress *returnAddress = llvm::BlockAddress::get(tryEnd);
@@ -1441,6 +1464,7 @@ static llvm::Value *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
   return CGM.GetAddrOfCXXDestructor(Class->getDestructor(), Dtor_Base);
 }
 
+#if 0
 // r4start
 void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
   // Function call or we not in try stmt.
@@ -1503,3 +1527,4 @@ llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
   EHState.CreateLPad();
   return EHState.CachedLPad;
 }
+#endif

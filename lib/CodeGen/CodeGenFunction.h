@@ -550,7 +550,6 @@ struct MsUnwindInfo {
   int StoreValue;
   llvm::Value *ThisPtr;
   llvm::Value *ReleaseFunc;
-  bool IsUsed;
   RestoreOpInfo::RestoreOpKind RestoreKind;
   llvm::StoreInst *Store;
   int StoreInstTryLevel;
@@ -571,16 +570,16 @@ struct MsUnwindInfo {
 
   MsUnwindInfo(int State) 
     : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
-      IsUsed(false), RestoreKind(RestoreOpInfo::Undef), Store(0), 
+      RestoreKind(RestoreOpInfo::Undef), Store(0), 
       StoreInstTryLevel(-1) {}
 
   MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
-                int StoreVal = -2, bool Used = false, 
+                int StoreVal = -2,
                 RestoreOpInfo::RestoreOpKind RestoreOp = RestoreOpInfo::Undef,
                 llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
                 int TopLevelTryNumber = -1, int Index = -1)
     : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
-      IsUsed(Used), RestoreKind(RestoreOp), Store(StoreInstruction),
+      RestoreKind(RestoreOp), Store(StoreInstruction),
       StoreInstTryLevel(StoreTryLevel), TryNumber(TopLevelTryNumber), 
       StoreIndex(Index) {}
 };
@@ -693,7 +692,7 @@ public:
   llvm::BasicBlock *getInvokeDestImpl();
 
   // r4start
-  llvm::BasicBlock *getMSInvokeDestImpl();
+  //llvm::BasicBlock *getMSInvokeDestImpl();
 
   template <class T>
   typename DominatingValue<T>::saved_type saveValueInCond(T value) {
@@ -1256,6 +1255,7 @@ private:
     llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
 
     void InitMSTryState();
+    void UpdateMSTryState(llvm::BasicBlock *LpadBlock);
 
     llvm::Instruction *
     AddCatchEntryInUnwindTable(size_t Index, llvm::Value *State);
@@ -1404,7 +1404,9 @@ public:
 
   llvm::BasicBlock *getInvokeDest() {
     if (!EHStack.requiresLandingPad()) return 0;
-    return getInvokeDestImpl();
+    llvm::BasicBlock *LP = getInvokeDestImpl();
+    EHState.UpdateMSTryState(LP);
+    return LP;
   }
 
   llvm::LLVMContext &getLLVMContext() { return CGM.getLLVMContext(); }
@@ -2832,7 +2834,7 @@ private:
   void EmitESTypeList(const FunctionProtoType *FuncProto);
 
   /// r4start
-  void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This = 0);
+  /// void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This = 0);
 
   /// r4start
   llvm::GlobalValue *EmitUnwindTable();

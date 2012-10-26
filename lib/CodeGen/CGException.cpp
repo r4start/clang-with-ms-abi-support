@@ -605,11 +605,12 @@ void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
 
-  if (IsMSExceptions) {
+  /*if (IsMSExceptions) {
     ExitMSCXXTryStmt(S);
   } else {
+  */
     ExitCXXTryStmt(S); 
-  }
+  //}
 }
 
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
@@ -619,6 +620,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   // Generate id in start of try block.
   if (IsMSExceptions) {
     EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
+    #if 0
     if (!EHState.IsInited()) {
       EHState.InitMSTryState();
     }
@@ -633,6 +635,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     EHState.SetMSTryState();
 
     EHState.CreateLPad();
+    #endif
   } 
   
   for (unsigned I = 0; I != NumHandlers; ++I) {
@@ -733,9 +736,11 @@ llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
     return 0;
 
   // r4start
+  #if 0
   if (IsMSExceptions) {
     return getMSInvokeDestImpl();
   }
+  #endif
 
   assert(EHStack.requiresLandingPad());
   assert(!EHStack.empty());
@@ -833,14 +838,21 @@ llvm::BasicBlock *CodeGenFunction::EmitLandingPad() {
   llvm::BasicBlock *lpad = createBasicBlock("lpad");
   EmitBlock(lpad);
 
-  llvm::LandingPadInst *LPadInst =
-    Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
+  // r4start
+  llvm::LandingPadInst *LPadInst = 0;
+  if (!IsMSExceptions) {
+      LPadInst = Builder.CreateLandingPad(
+                             llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
                              getOpaquePersonalityFn(CGM, personality), 0);
 
-  llvm::Value *LPadExn = Builder.CreateExtractValue(LPadInst, 0);
-  Builder.CreateStore(LPadExn, getExceptionSlot());
-  llvm::Value *LPadSel = Builder.CreateExtractValue(LPadInst, 1);
-  Builder.CreateStore(LPadSel, getEHSelectorSlot());
+    llvm::Value *LPadExn = Builder.CreateExtractValue(LPadInst, 0);
+    Builder.CreateStore(LPadExn, getExceptionSlot());
+    llvm::Value *LPadSel = Builder.CreateExtractValue(LPadInst, 1);
+    Builder.CreateStore(LPadSel, getEHSelectorSlot());
+  } else {
+      LPadInst = Builder.CreateLandingPad(VoidTy,
+                                 getOpaquePersonalityFn(CGM, personality), 0);
+  }
 
   // Save the exception pointer.  It's safe to use a single exception
   // pointer per function because EH cleanups can never have nested
@@ -1308,7 +1320,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   EHStack.popCatch();
 
   // The fall-through block.
-  llvm::BasicBlock *ContBB = createBasicBlock("try.cont");
+  llvm::BasicBlock *ContBB = createBasicBlock("try.cont", CurFn);
 
   // We just emitted the body of the try; jump to the continue block.
   if (HaveInsertPoint())
@@ -1320,6 +1332,13 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   if (IsFnTryBlock)
     doImplicitRethrow = isa<CXXDestructorDecl>(CurCodeDecl) ||
                         isa<CXXConstructorDecl>(CurCodeDecl);
+
+  llvm::Function *SEHRetFromCatch = 0;
+  llvm::BlockAddress *tryCont = 0; 
+  if (IsMSExceptions) {
+    SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_);
+    tryCont = llvm::BlockAddress::get(ContBB);
+  }
 
   // Perversely, we emit the handlers backwards precisely because we
   // want them to appear in source order.  In all of these cases, the
@@ -1364,11 +1383,17 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     CatchScope.ForceCleanup();
 
     // Branch out of the try.
-    if (HaveInsertPoint())
+    if (HaveInsertPoint()) {
+      // r4start
+      if (IsMSExceptions) {
+        Builder.CreateCall(SEHRetFromCatch, tryCont);
+      }
       Builder.CreateBr(ContBB);
+    }
   }
 
-  EmitBlock(ContBB);
+  EmitBranch(ContBB);
+  Builder.SetInsertPoint(ContBB);
 }
 
 namespace {
@@ -1640,18 +1665,22 @@ llvm::BasicBlock *CodeGenFunction::getEHResumeBlock() {
       break;
     case CHL_MandatoryCleanup: {
       // In mandatory-cleanup mode, we should use 'resume'.
+      // r4start
+      if (!IsMSExceptions) {
+        // Recreate the landingpad's return value for the 'resume' instruction.
+        llvm::Value *Exn = getExceptionFromSlot();
+        llvm::Value *Sel = getSelectorFromSlot();
 
-      // Recreate the landingpad's return value for the 'resume' instruction.
-      llvm::Value *Exn = getExceptionFromSlot();
-      llvm::Value *Sel = getSelectorFromSlot();
+        llvm::Type *LPadType = llvm::StructType::get(Exn->getType(),
+                                                     Sel->getType(), NULL);
+        llvm::Value *LPadVal = llvm::UndefValue::get(LPadType);
+        LPadVal = Builder.CreateInsertValue(LPadVal, Exn, 0, "lpad.val");
+        LPadVal = Builder.CreateInsertValue(LPadVal, Sel, 1, "lpad.val");
 
-      llvm::Type *LPadType = llvm::StructType::get(Exn->getType(),
-                                                   Sel->getType(), NULL);
-      llvm::Value *LPadVal = llvm::UndefValue::get(LPadType);
-      LPadVal = Builder.CreateInsertValue(LPadVal, Exn, 0, "lpad.val");
-      LPadVal = Builder.CreateInsertValue(LPadVal, Sel, 1, "lpad.val");
-
-      Builder.CreateResume(LPadVal);
+        Builder.CreateResume(LPadVal);
+      } else {
+        Builder.CreateResume(llvm::Constant::getNullValue(Int8PtrTy));
+      }
       Builder.restoreIP(SavedIP);
       return EHResumeBlock;
     }
