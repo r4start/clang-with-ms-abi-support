@@ -1322,8 +1322,18 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   EHStack.popCatch();
 
   // The fall-through block.
-  llvm::BasicBlock *ContBB = createBasicBlock("try.cont", CurFn);
+  llvm::BasicBlock *ContBB = 0;
 
+  llvm::Function *SEHRetFromCatch = 0;
+  llvm::BlockAddress *tryCont = 0; 
+  
+  if (!IsMSExceptions) {
+    ContBB = createBasicBlock("try.cont");
+  } else {
+    ContBB = createBasicBlock("try.cont", CurFn);
+    SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_);
+    tryCont = llvm::BlockAddress::get(ContBB);
+  }
   // We just emitted the body of the try; jump to the continue block.
   if (HaveInsertPoint())
     Builder.CreateBr(ContBB);
@@ -1334,13 +1344,6 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   if (IsFnTryBlock)
     doImplicitRethrow = isa<CXXDestructorDecl>(CurCodeDecl) ||
                         isa<CXXConstructorDecl>(CurCodeDecl);
-
-  llvm::Function *SEHRetFromCatch = 0;
-  llvm::BlockAddress *tryCont = 0; 
-  if (IsMSExceptions) {
-    SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_);
-    tryCont = llvm::BlockAddress::get(ContBB);
-  }
 
   // Perversely, we emit the handlers backwards precisely because we
   // want them to appear in source order.  In all of these cases, the
@@ -1394,8 +1397,12 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     }
   }
 
-  EmitBranch(ContBB);
-  Builder.SetInsertPoint(ContBB);
+  if (!IsMSExceptions) {
+    EmitBlock(ContBB);
+  } else {
+    EmitBranch(ContBB);
+    Builder.SetInsertPoint(ContBB);
+  }
 }
 
 namespace {
