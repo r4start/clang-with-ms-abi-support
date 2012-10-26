@@ -161,7 +161,7 @@ static llvm::BasicBlock *getLPadBlock(CodeGenFunction &CGF) {
                                                CGF.CGM.Int8PtrTy),
                 0);
   lPad->setCleanup(true);
-
+  CGF.Builder.CreateUnreachable();
   // Restore the old IR generation state.
   CGF.Builder.restoreIP(savedIP);
   return lpadBlock;
@@ -980,44 +980,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
   llvm::Constant *nullVal = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
 
-  llvm::BasicBlock *prevBlock = 0;
-
-  // If we don`t have catch handler then
-  // I think that we have invoke dest.
-  llvm::BasicBlock *h = EHState.LastCatchHandler;
-  if (!h) {
-    if (!EHState.CachedLPad &&
-        EHState.LandingPads.empty()) {
-      // Here we generate one fake block with conditional br to it
-      // from function body. It is necessary for unwind funclet reachability.
-      // We do this because in this case we don`t have catch handler or any
-      // invoke instr in function body. So we haven`t got any place where
-      // we can insert fake br to unwind funclet.
-
-      llvm::BasicBlock *curBB = Builder.GetInsertBlock();
-      llvm::Instruction *terminator = curBB->getTerminator()->clone();
-      curBB->getTerminator()->eraseFromParent();
-
-      llvm::BasicBlock *lastBB = 
-        llvm::BasicBlock::Create(CGM.getLLVMContext(), "", CurFn);
-      h = 
-        llvm::BasicBlock::Create(CGM.getLLVMContext(), "fake_block", CurFn);
-
-      llvm::Value *expr = 
-        llvm::ConstantInt::get(llvm::IntegerType::get(CGM.getLLVMContext(), 1),
-                               1);
-      Builder.CreateCondBr(expr, lastBB, h);
-      
-      Builder.SetInsertPoint(lastBB);
-      Builder.Insert(terminator);
-      
-      Builder.SetInsertPoint(h);
-      Builder.CreateUnreachable();
-    } else {
-      h = getMSInvokeDestImpl();
-    }
-  }
-
+  
   // We must skip first element, because it is initial state
   // and it is not valuable for unwind table.
   for (MSEHState::UnwindTableTy::iterator 
@@ -1052,19 +1015,6 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::BasicBlock *funclet = 
       llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletNameRef, CurFn);
 
-    if (h) {
-      // At first remove unreachable instruction from the end.
-      h->getTerminator()->eraseFromParent();
-      Builder.SetInsertPoint(h);
-      Builder.CreateBr(funclet);
-      h = 0;
-    }
-
-    if (prevBlock) {
-      Builder.CreateBr(funclet);
-    }
-    prevBlock = funclet;
-
     Builder.SetInsertPoint(funclet);
 
     llvm::CallInst *call = 
@@ -1077,12 +1027,6 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 
     entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
     fields.clear();
-  }
-
-  if (prevBlock) {
-    // last funclet jumps to ehhandler
-    EHState.EHHandler = getEHHandler(*this);
-    Builder.CreateBr(EHState.EHHandler);
   }
 
   Builder.SetInsertPoint(oldBB);
@@ -1391,29 +1335,6 @@ static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,
 }
 
 // r4start
-static void insertCatchRet(CodeGenFunction &CGF) {
-  llvm::FunctionType *fty = llvm::FunctionType::get(CGF.VoidTy, false);
-  llvm::InlineAsm *ia = llvm::InlineAsm::get(fty, "ret", "", false);
-
-  llvm::CallInst *result = CGF.Builder.CreateCall(ia);
-  result->addAttribute(~0, llvm::Attribute::NoUnwind);
-  result->addAttribute(~0, llvm::Attribute::IANSDialect);
-}
-
-// This is need to avoid deleting catch handler from function.
-// We generate a chain of br instructions from lpad to last of catch handlers.
-// BrFrom - previous handler or lpad.
-// BrTo - current catch handler.
-static void doHandlerReachable(CodeGen::CGBuilderTy &Builder,
-                               llvm::BasicBlock *&BrFrom,
-                               llvm::BasicBlock *BrTo) {
-  Builder.SetInsertPoint(BrFrom);
-  Builder.CreateBr(BrTo);
-  Builder.SetInsertPoint(BrTo);
-  BrFrom = BrTo;
-}
-
-// r4start
 void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   unsigned NumHandlers = S.getNumHandlers();
   
@@ -1442,6 +1363,13 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     EHState.AddCatchEntryInUnwindTable(index, restoringState);
 
   llvm::BasicBlock *brBlock = getMSInvokeDestImpl();
+  
+  llvm::BasicBlock *tryEnd = EHState.GenerateTryEndBlock(fd, msMangler);
+  llvm::BlockAddress *returnAddress = llvm::BlockAddress::get(tryEnd);
+
+  // llvm.seh.sav.ret.addr intrinsic
+  llvm::Function *saveRetAddrIntr = CGM.getIntrinsic(llvm::Intrinsic::seh_);
+  
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
     llvm::SmallString<256>  catchHandlerName;
@@ -1466,31 +1394,21 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
       Builder.Insert(store->clone());
     } else {
       Builder.Insert(store);
-      // We can not use entryBB as BrTo in doHandlerReachable,
-      // because handler block can have try-block and we will have 
-      // tryend block without terminator.
-      doHandlerReachable(Builder, brBlock, Builder.GetInsertBlock());
     }
 
-    insertCatchRet(*this);
-    
-    if (I) {
-      doHandlerReachable(Builder, brBlock, Builder.GetInsertBlock());
-    }
+    Builder.CreateCall(saveRetAddrIntr, returnAddress);
+    Builder.CreateUnreachable();
 
     QualType CaughtType = C->getCaughtType();
     GenerateCatchHandler(CaughtType, handlerTy,
                          llvm::BlockAddress::get(CurFn, entryBB));
   }
 
-  Builder.CreateUnreachable();
   EHState.LastCatchHandler = Builder.GetInsertBlock();
 
   EHState.LastEntries.pop_back();
 
   Builder.SetInsertPoint(oldBB);
-
-  llvm::BasicBlock *tryEnd = EHState.GenerateTryEndBlock(fd, msMangler);
   
   Builder.CreateBr(tryEnd);
   
@@ -1569,7 +1487,7 @@ void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
-  if (!EHState.EHHandler) {
+  if (!EHState.EHHandler && !EHState.GlobalUnwindTable.empty()) {
     EHState.EHHandler = getEHHandler(*this);
   }
 
