@@ -1414,7 +1414,9 @@ public:
   llvm::BasicBlock *getInvokeDest() {
     if (!EHStack.requiresLandingPad()) return 0;
     llvm::BasicBlock *LP = getInvokeDestImpl();
-    EHState.UpdateMSTryState(LP);
+    
+    if (IsMSExceptions)
+      EHState.UpdateMSTryState(LP);
     return LP;
   }
 
