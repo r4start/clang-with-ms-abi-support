@@ -737,13 +737,6 @@ llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
   if (!CGM.getLangOpts().Exceptions)
     return 0;
 
-  // r4start
-  #if 0
-  if (IsMSExceptions) {
-    return getMSInvokeDestImpl();
-  }
-  #endif
-
   assert(EHStack.requiresLandingPad());
   assert(!EHStack.empty());
 
@@ -1402,6 +1395,8 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   } else {
     EmitBranch(ContBB);
     Builder.SetInsertPoint(ContBB);
+
+    EHState.LocalUnwindTable.pop_back();
   }
 }
 

@@ -556,6 +556,12 @@ struct MsUnwindInfo {
   int TryNumber;
   int StoreIndex;
 
+  // This block is necessary for correct state store/restore.
+  llvm::BasicBlock *DestLpad;
+
+  // Basic block with unwinding code.
+  llvm::BasicBlock *Funclet;
+
   typedef std::list<RestoreOpInfo> RestoreList;
   RestoreList RestoreOps;
 
@@ -571,17 +577,7 @@ struct MsUnwindInfo {
   MsUnwindInfo(int State) 
     : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
       RestoreKind(RestoreOpInfo::Undef), Store(0), 
-      StoreInstTryLevel(-1) {}
-
-  MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
-                int StoreVal = -2,
-                RestoreOpInfo::RestoreOpKind RestoreOp = RestoreOpInfo::Undef,
-                llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
-                int TopLevelTryNumber = -1, int Index = -1)
-    : ToState(State), ThisPtr(This), ReleaseFunc(RF), StoreValue(StoreVal),
-      RestoreKind(RestoreOp), Store(StoreInstruction),
-      StoreInstTryLevel(StoreTryLevel), TryNumber(TopLevelTryNumber), 
-      StoreIndex(Index) {}
+      StoreInstTryLevel(-1), DestLpad(0), Funclet(0) {}
 };
 
 /// CodeGenFunction - This class organizes the per-function state that is used
@@ -1251,12 +1247,14 @@ private:
     /// This function opposite to SetMSTrystate
     /// does not change unwind table.
     /// It just generates store instruction and return it.
-    llvm::StoreInst *CreateStateStore(uint32_t State, bool IsInit = false);
+    llvm::StoreInst *CreateStateStore(uint32_t State);
     llvm::StoreInst *CreateStateStore(llvm::Value* State);
     llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
 
     void InitMSTryState();
-    void UpdateMSTryState(llvm::BasicBlock *LpadBlock);
+    void UpdateMSTryState(llvm::BasicBlock *LpadBlock,
+                          const Decl *FuncDecl = 0,
+                          llvm::Value *ThisPtr = 0);
 
     llvm::Instruction *
     AddCatchEntryInUnwindTable(size_t Index, llvm::Value *State);
@@ -1411,12 +1409,16 @@ public:
     return UnreachableBlock;
   }
 
-  llvm::BasicBlock *getInvokeDest() {
+  // r4start
+  // Additional arguments are necessary for correct generating 
+  // MS unwind info structure.
+  llvm::BasicBlock *getInvokeDest(const Decl *FuncDecl = 0,
+                                  llvm::Value *ThisPtr = 0) {
     if (!EHStack.requiresLandingPad()) return 0;
     llvm::BasicBlock *LP = getInvokeDestImpl();
     
     if (IsMSExceptions)
-      EHState.UpdateMSTryState(LP);
+      EHState.UpdateMSTryState(LP, FuncDecl, ThisPtr);
     return LP;
   }
 
