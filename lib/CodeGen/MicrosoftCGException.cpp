@@ -106,7 +106,7 @@ void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
     if (upperLevel == LocalUnwindTable.rend()) {
       backRef.ToState = -1;
     } else {
-      assert(upperLevel->empty() && 
+      assert(!upperLevel->empty() && 
               "Upper level table has not be not empty!");
       backRef.ToState = upperLevel->back()->StoreValue;
     }
