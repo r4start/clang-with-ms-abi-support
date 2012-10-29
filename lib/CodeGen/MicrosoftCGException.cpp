@@ -42,31 +42,68 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
   }
 }
 
+static llvm::Value *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
+  if (!Class->hasUserDeclaredDestructor()) {
+    return 0;
+  }
+  return CGM.GetAddrOfCXXDestructor(Class->getDestructor(), Dtor_Base);
+}
+
 // r4start
-void 
-CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock) {
+void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
+                                                  const Decl *FuncDecl, 
+                                                  llvm::Value *ThisPtr) {
   if (!LpadBlock || CachedLPad == LpadBlock ||
        LpadBlock == CGF.TerminateLandingPad) {
     return;
   }
   
-  uint32_t id = 0;
   CachedLPad = 0;
-
-  for (LPadStack::iterator I = LandingPads.begin(), E = LandingPads.end();
-       I != E; ++I, ++id) {
-    if (*I == LpadBlock) {
-      CachedLPad = LpadBlock;
-      break;
-    }
-  }
 
   if (!CachedLPad) {
     LandingPads.push_back(LpadBlock);
     CachedLPad = LpadBlock;
   }
 
-  SetMSTryState();
+  UnwindTableTy::iterator entry = 
+    std::find_if(GlobalUnwindTable.begin(), GlobalUnwindTable.end(),
+                 [this] (MsUnwindInfo &e) -> bool {
+                   return e.DestLpad == CachedLPad;
+                 });
+  
+  // This situation can be true in 2 cases:
+  //  1. New lpad dest & ctor call;
+  //  2. New lpad dest & dtor call(type doesn`t have declared ctor).
+  if (entry == GlobalUnwindTable.end()) {
+    SetMSTryState();
+    MsUnwindInfo &backRef = GlobalUnwindTable.back();
+    backRef.DestLpad = CachedLPad;
+    
+    if (ThisPtr) {
+      backRef.ThisPtr = ThisPtr;
+
+      const CXXRecordDecl *parent = cast<CXXMethodDecl>(FuncDecl)->getParent();
+      backRef.ReleaseFunc = getDtor(CGF.CGM, parent);
+      backRef.Funclet = CachedLPad;
+    }
+  
+    if (isa<CXXDestructorDecl>(FuncDecl)) {
+      // In this case we just need specify right ToState value.
+      // If current try is 1 level try, then ToState must be equal -1.
+      // In other case we just restore last state from upper level.
+      TryStates::reverse_iterator upperLevel = ++LocalUnwindTable.rbegin();
+      if (upperLevel == LocalUnwindTable.rend()) {
+        backRef.ToState = -1;
+      } else {
+        assert(upperLevel->empty() && 
+               "Upper level table has not be not empty!");
+        backRef.ToState = upperLevel->back()->StoreValue;
+      }
+    }
+  } else {
+    // This case true if it is a destructor call(type has declared ctor).
+    CreateStateStore(entry->ToState);
+  }
 }
 
 // r4start
@@ -90,8 +127,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
 }
 
 // r4start
-llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(uint32_t State,
-                                                              bool IsInit) {
+llvm::StoreInst *CodeGenFunction::MSEHState::CreateStateStore(uint32_t State) {
   llvm::StoreInst *store =  
     CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.Int32Ty, State),
                             MSTryState);
@@ -1024,6 +1060,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     }
 
     // creating funclet code
+    #if 0
     llvm::SmallString<256> funcletName;
     llvm::raw_svector_ostream stream(funcletName);
 
@@ -1045,10 +1082,11 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
     llvm::CallInst *call = 
       Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
     call->setCallingConv(llvm::CallingConv::X86_ThisCall);
-
+    Builder.CreateUnreachable();
+    #endif
     // creating unwind table entry
     fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
-    fields.push_back(llvm::BlockAddress::get(CurFn, funclet));
+    fields.push_back(llvm::BlockAddress::get(CurFn, I->Funclet));
 
     entries.push_back(llvm::ConstantStruct::get(entryTy, fields));
     fields.clear();
@@ -1278,17 +1316,20 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
 // r4start
 void CodeGenFunction::EmitEHInformation() {
+  #if 0
   if (!EHState.EHHandler) {
     return;
   }
   
   EHState.FinishLPad();
+  #endif
 
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
   if (!ehFuncInfo) {
     return;
   }
 
+  #if 0
   llvm::BasicBlock *old = Builder.GetInsertBlock();
 
   Builder.SetInsertPoint(EHState.EHHandler);
@@ -1302,6 +1343,7 @@ void CodeGenFunction::EmitEHInformation() {
 
   Builder.CreateUnreachable();
   Builder.SetInsertPoint(old);
+  #endif
 }
 
 // r4start
@@ -1344,19 +1386,6 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
   llvm::Constant *handler = 
     llvm::ConstantStruct::get(cast<llvm::StructType>(HandlerTy), fields);
   EHState.TryHandlers.push_back(handler);
-}
-
-// r4start
-static MsUnwindInfo CreateCatchRestore(llvm::StoreInst *Store, int Index,
-                                       int Value, int StoreTryLevel,
-                                       int TopTryNumber) {
-// MsUnwindInfo(int State, llvm::Value *This, llvm::Value *RF, 
-//              int StoreVal = -2, bool Used = false, 
-//              RestoreOpInfo::RestoreOpKind RestoreOp = RestoreOpInfo::Undef,
-//              llvm::StoreInst *StoreInstruction = 0, int StoreTryLevel = -1,
-//              int TopLevelTryNumber = -1, int Index = -1)
-  return MsUnwindInfo(-1, 0, 0, Value, RestoreOpInfo::CatchRestore,
-                      Store, StoreTryLevel, TopTryNumber, Index);
 }
 
 // r4start
@@ -1455,13 +1484,6 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   assert(!EHState.LandingPads.empty() && 
          "Try block have to have landing pad!");
   EHState.LandingPads.pop_back();
-}
-
-static llvm::Value *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
-  if (!Class->hasUserDeclaredDestructor()) {
-    return 0;
-  }
-  return CGM.GetAddrOfCXXDestructor(Class->getDestructor(), Dtor_Base);
 }
 
 #if 0
