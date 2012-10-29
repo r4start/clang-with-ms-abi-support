@@ -86,19 +86,17 @@ void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
       backRef.ReleaseFunc = getDtor(CGF.CGM, parent);
       backRef.Funclet = CachedLPad;
     }
-  
-    if (isa<CXXDestructorDecl>(FuncDecl)) {
-      // In this case we just need specify right ToState value.
-      // If current try is 1 level try, then ToState must be equal -1.
-      // In other case we just restore last state from upper level.
-      TryStates::reverse_iterator upperLevel = ++LocalUnwindTable.rbegin();
-      if (upperLevel == LocalUnwindTable.rend()) {
-        backRef.ToState = -1;
-      } else {
-        assert(upperLevel->empty() && 
-               "Upper level table has not be not empty!");
-        backRef.ToState = upperLevel->back()->StoreValue;
-      }
+    
+    // In this case we just need specify right ToState value.
+    // If current try is 1 level try, then ToState must be equal -1.
+    // In other case we just restore last state from upper level.
+    TryStates::reverse_iterator upperLevel = ++LocalUnwindTable.rbegin();
+    if (upperLevel == LocalUnwindTable.rend()) {
+      backRef.ToState = -1;
+    } else {
+      assert(upperLevel->empty() && 
+              "Upper level table has not be not empty!");
+      backRef.ToState = upperLevel->back()->StoreValue;
     }
   } else {
     // This case true if it is a destructor call(type has declared ctor).
