@@ -49,6 +49,20 @@ static llvm::Value *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
   return CGM.GetAddrOfCXXDestructor(Class->getDestructor(), Dtor_Base);
 }
 
+namespace {
+
+class LpadFinder {
+  llvm::BasicBlock *BlockToFind;
+public:
+  LpadFinder(llvm::BasicBlock *B) : BlockToFind(B) {}
+
+  bool operator() (const MsUnwindInfo &E) {
+    return E.DestLpad == BlockToFind;
+  }
+};
+
+}
+
 // r4start
 void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
                                                   const Decl *FuncDecl, 
@@ -67,9 +81,7 @@ void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
 
   UnwindTableTy::iterator entry = 
     std::find_if(GlobalUnwindTable.begin(), GlobalUnwindTable.end(),
-                 [this] (MsUnwindInfo &e) -> bool {
-                   return e.DestLpad == CachedLPad;
-                 });
+                 LpadFinder(CachedLPad));
   
   // This situation can be true in 2 cases:
   //  1. New lpad dest & ctor call;
