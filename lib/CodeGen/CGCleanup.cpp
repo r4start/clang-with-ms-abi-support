@@ -173,7 +173,8 @@ void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
   // r4start
   if (IsEHCleanup) {
     InnermostEHScope = stable_begin();
-    CGF.EHState.SetMSTryState();
+    if (CGF.IsMSExceptions)
+      CGF.EHState.SetMSTryState();
   }
   
   return Scope->getCleanupBuffer();
@@ -465,7 +466,8 @@ static void EmitCleanup(CodeGenFunction &CGF,
   Fn->Emit(CGF, flags);
 
   // r4start
-  CGF.EHState.CreateStateStore(Fn->toState);
+  if (CGF.IsMSExceptions)
+    CGF.EHState.CreateStateStore(Fn->toState);
 
   assert(CGF.HaveInsertPoint() && "cleanup ended with no insertion point?");
 
