@@ -1436,7 +1436,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   llvm::BlockAddress *returnAddress = llvm::BlockAddress::get(tryEnd);
 
   // llvm.seh.sav.ret.addr intrinsic
-  llvm::Function *saveRetAddrIntr = CGM.getIntrinsic(llvm::Intrinsic::seh_);
+  llvm::Function *saveRetAddrIntr = 
+    CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
   
   // In MS do it in straight way.
   for (unsigned I = 0; I != NumHandlers; ++I) {
