@@ -162,9 +162,13 @@ void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
                                 InnermostEHScope);
   if (IsNormalCleanup)
     InnermostNormalCleanup = stable_begin();
-  if (IsEHCleanup)
+  
+  // r4start
+  if (IsEHCleanup) {
     InnermostEHScope = stable_begin();
-
+    CGF.EHState.SetMSTryState();
+  }
+  
   return Scope->getCleanupBuffer();
 }
 
@@ -452,6 +456,10 @@ static void EmitCleanup(CodeGenFunction &CGF,
 
   // Ask the cleanup to emit itself.
   Fn->Emit(CGF, flags);
+
+  // r4start
+  CGF.EHState.CreateStateStore(Fn->toState);
+
   assert(CGF.HaveInsertPoint() && "cleanup ended with no insertion point?");
 
   // Emit the continuation block if there was an active flag.

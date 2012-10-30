@@ -39,7 +39,8 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     IndirectBranch(0), SwitchInsn(0), CaseRangeBlock(0), UnreachableBlock(0),
     CXXABIThisDecl(0), CXXABIThisValue(0), CXXThisValue(0), CXXVTTDecl(0),
     CXXVTTValue(0), OutermostConditional(0), TerminateLandingPad(0),
-    TerminateHandler(0), TrapBB(0), EHState(*this), IsMSExceptions(false) {
+    TerminateHandler(0), TrapBB(0), EHState(*this), IsMSExceptions(false),
+    EHStack(*this) {
 
   CatchUndefined = getContext().getLangOpts().CatchUndefined;
   if (!suppressNewContext)

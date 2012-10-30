@@ -136,6 +136,10 @@ enum CleanupKind {
   InactiveNormalAndEHCleanup = NormalAndEHCleanup | InactiveCleanup
 };
 
+// r4start
+class CodeGenFunction;
+//class CodeGenFunction::MSEHState;
+
 /// A stack of scopes which respond to exceptions, including cleanups
 /// and catch blocks.
 class EHScopeStack {
@@ -185,7 +189,15 @@ public:
   class Cleanup {
     // Anchor the construction vtable.
     virtual void anchor();
+
   public:
+    // r4start
+    int toState;
+    
+    // r4start
+    // -2 is default unknown state in MS SEH.
+    Cleanup() : toState(-2) {}
+
     /// Generation flags.
     class Flags {
       enum {
@@ -347,14 +359,19 @@ private:
   ///     bar();
   SmallVector<BranchFixup, 8> BranchFixups;
 
+  /// r4start
+  CodeGenFunction &CGF;
+
   char *allocate(size_t Size);
 
   void *pushCleanup(CleanupKind K, size_t DataSize);
 
 public:
-  EHScopeStack() : StartOfBuffer(0), EndOfBuffer(0), StartOfData(0),
-                   InnermostNormalCleanup(stable_end()),
-                   InnermostEHScope(stable_end()) {}
+  EHScopeStack(CodeGenFunction &CGF) 
+    : StartOfBuffer(0), EndOfBuffer(0), StartOfData(0),
+      InnermostNormalCleanup(stable_end()),
+      InnermostEHScope(stable_end()),
+      CGF(CGF) {}
   ~EHScopeStack() { delete[] StartOfBuffer; }
 
   // Variadic templates would make this not terrible.
@@ -396,6 +413,12 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2, A3 a3) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2, a3);
+
+    /// r4start
+    if (CGF.IsMSExceptions) {
+      Obj->toState = CGF.EHState.GlobalUnwindTable.back().ToState;
+    }
+
     (void) Obj;
   }
 
@@ -608,6 +631,100 @@ public:
     unsigned Index;
   };
 
+  /// r4start
+  class MSEHState {
+  public:
+    typedef std::list< MsUnwindInfo > UnwindTableTy;
+    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
+    typedef std::list< UnwindEntryRefList > TryStates;
+    typedef llvm::SmallVector<llvm::BasicBlock *, 4> LPadStack;
+  private:
+    /// MS C++ EH specific.
+    /// State of current try level.
+    llvm::Value *MSTryState;
+
+    CodeGenFunction &CGF;
+
+  public:
+    /// Indicates that current try is nested.
+    int TryLevel;
+
+    /// This field tracks count of tries.
+    int TryNumber;
+
+    int StoreIndex;
+
+    /// This counter increments each time when we mangle some eh symbol.
+    /// Also it passes to mangler.
+    int EHManglingCounter;
+
+    /// Unwind table necessary for correct unwinding.
+    /// It has 2 fields: action(what we must do in this state)
+    /// and in which state we must go after all work at this state.
+    
+    /// GlobalUnwindTable hold unwind table for current function.
+    UnwindTableTy GlobalUnwindTable;
+
+    /// LocalUnwindTable holds refs to
+    /// unwind entries in this try block.
+    TryStates LocalUnwindTable;
+    
+    UnwindEntryRefList LastEntries;
+
+    /// Try block table.
+    llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
+
+    /// Catch handlers for current try.
+    llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
+
+    /// LandingPads stores landing pad for current stack frame.
+    /// MS SEH doesn`t have landing pads, but we use lpads,
+    /// because we want use invoke instead of call + br.
+    /// Also landing pad contains br to first catch handler.
+    /// This is necessary, because optimization passes can delete this blocks.
+    LPadStack LandingPads;
+    llvm::BasicBlock *CachedLPad;
+
+    /// We want to add br to unwind funclets, make them reachable.
+    /// If function has funclets, then we will add br to the end of last catch.
+    llvm::BasicBlock *LastCatchHandler;
+
+    // Address of eh-handler block.
+    // Necessary for deferred block body generation.
+    llvm::BasicBlock *EHHandler;
+
+    llvm::Constant *ESTypeList;
+
+    MSEHState(CodeGenFunction &cgf) 
+     : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
+       ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
+       LastCatchHandler(0), EHHandler(0) {}
+
+    void SetMSTryState();
+
+    /// This function opposite to SetMSTrystate
+    /// does not change unwind table.
+    /// It just generates store instruction and return it.
+    llvm::StoreInst *CreateStateStore(uint32_t State);
+    llvm::StoreInst *CreateStateStore(llvm::Value* State);
+    llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
+
+    void InitMSTryState();
+    void UpdateMSTryState(llvm::BasicBlock *LpadBlock,
+                          const Decl *FuncDecl = 0,
+                          llvm::Value *ThisPtr = 0);
+
+    llvm::Instruction *
+    AddCatchEntryInUnwindTable(size_t Index, llvm::Value *State);
+
+    llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
+                                          MSMangleContextExtensions *Mangler);
+
+    void CreateLPad();
+    void FinishLPad();
+    bool IsInited() const { return MSTryState != 0; }
+  };
+
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
 
@@ -663,6 +780,12 @@ public:
 
   EHScopeStack EHStack;
 
+  /// r4start
+  bool IsMSExceptions;
+
+  /// r4start
+  MSEHState EHState;
+
   /// i32s containing the indexes of the cleanup destinations.
   llvm::AllocaInst *NormalCleanupDest;
 
@@ -686,9 +809,6 @@ public:
   llvm::BasicBlock *EmitLandingPad();
 
   llvm::BasicBlock *getInvokeDestImpl();
-
-  // r4start
-  //llvm::BasicBlock *getMSInvokeDestImpl();
 
   template <class T>
   typename DominatingValue<T>::saved_type saveValueInCond(T value) {
@@ -1169,106 +1289,6 @@ private:
   CGDebugInfo *DebugInfo;
   bool DisableDebugInfo;
 
-  /// r4start
-  bool IsMSExceptions;
-
-  /// r4start
-  class MSEHState {
-  public:
-    typedef std::list< MsUnwindInfo > UnwindTableTy;
-    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
-    typedef std::list< UnwindEntryRefList > TryStates;
-    typedef llvm::SmallVector<llvm::BasicBlock *, 4> LPadStack;
-  private:
-    /// MS C++ EH specific.
-    /// State of current try level.
-    llvm::Value *MSTryState;
-
-    CodeGenFunction &CGF;
-
-  public:
-    /// Indicates that current try is nested.
-    int TryLevel;
-
-    /// This field tracks count of tries.
-    int TryNumber;
-
-    int StoreIndex;
-
-    /// This counter increments each time when we mangle some eh symbol.
-    /// Also it passes to mangler.
-    int EHManglingCounter;
-
-    /// Unwind table necessary for correct unwinding.
-    /// It has 2 fields: action(what we must do in this state)
-    /// and in which state we must go after all work at this state.
-    
-    /// GlobalUnwindTable hold unwind table for current function.
-    UnwindTableTy GlobalUnwindTable;
-
-    /// LocalUnwindTable holds refs to
-    /// unwind entries in this try block.
-    TryStates LocalUnwindTable;
-    
-    UnwindEntryRefList LastEntries;
-
-    /// Try block table.
-    llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
-
-    /// Catch handlers for current try.
-    llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
-
-    /// LandingPads stores landing pad for current stack frame.
-    /// MS SEH doesn`t have landing pads, but we use lpads,
-    /// because we want use invoke instead of call + br.
-    /// Also landing pad contains br to first catch handler.
-    /// This is necessary, because optimization passes can delete this blocks.
-    LPadStack LandingPads;
-    llvm::BasicBlock *CachedLPad;
-
-    /// We want to add br to unwind funclets, make them reachable.
-    /// If function has funclets, then we will add br to the end of last catch.
-    llvm::BasicBlock *LastCatchHandler;
-
-    // Address of eh-handler block.
-    // Necessary for deferred block body generation.
-    llvm::BasicBlock *EHHandler;
-
-    llvm::Constant *ESTypeList;
-
-    MSEHState(CodeGenFunction &cgf) 
-     : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-       ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
-       LastCatchHandler(0), EHHandler(0) {}
-
-    void SetMSTryState();
-
-    /// This function opposite to SetMSTrystate
-    /// does not change unwind table.
-    /// It just generates store instruction and return it.
-    llvm::StoreInst *CreateStateStore(uint32_t State);
-    llvm::StoreInst *CreateStateStore(llvm::Value* State);
-    llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
-
-    void InitMSTryState();
-    void UpdateMSTryState(llvm::BasicBlock *LpadBlock,
-                          const Decl *FuncDecl = 0,
-                          llvm::Value *ThisPtr = 0);
-
-    llvm::Instruction *
-    AddCatchEntryInUnwindTable(size_t Index, llvm::Value *State);
-
-    llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
-                                          MSMangleContextExtensions *Mangler);
-
-    void CreateLPad();
-    void FinishLPad();
-    bool IsInited() const { return MSTryState != 0; }
-  };
-
-  /// r4start
-  MSEHState EHState;
-
   /// DidCallStackSave - Whether llvm.stacksave has been called. Used to avoid
   /// calling llvm.stacksave for multiple VLAs in the same scope.
   bool DidCallStackSave;
@@ -1406,11 +1426,14 @@ public:
   llvm::BasicBlock *getInvokeDest(const Decl *FuncDecl = 0,
                                   llvm::Value *ThisPtr = 0) {
     if (!EHStack.requiresLandingPad()) return 0;
+    #if 0
     llvm::BasicBlock *LP = getInvokeDestImpl();
     
     if (IsMSExceptions)
       EHState.UpdateMSTryState(LP, FuncDecl, ThisPtr);
     return LP;
+    #endif
+    return getInvokeDestImpl();
   }
 
   llvm::LLVMContext &getLLVMContext() { return CGM.getLLVMContext(); }
