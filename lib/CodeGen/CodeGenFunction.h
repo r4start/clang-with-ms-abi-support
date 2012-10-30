@@ -136,10 +136,6 @@ enum CleanupKind {
   InactiveNormalAndEHCleanup = NormalAndEHCleanup | InactiveCleanup
 };
 
-// r4start
-class CodeGenFunction;
-//class CodeGenFunction::MSEHState;
-
 /// A stack of scopes which respond to exceptions, including cleanups
 /// and catch blocks.
 class EHScopeStack {
