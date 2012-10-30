@@ -362,6 +362,8 @@ private:
 
   void *pushCleanup(CleanupKind K, size_t DataSize);
 
+  void memorizeState(Cleanup *Obj);
+
 public:
   EHScopeStack(CodeGenFunction &CGF) 
     : StartOfBuffer(0), EndOfBuffer(0), StartOfData(0),
@@ -409,12 +411,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2, A3 a3) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2, a3);
-
-    /// r4start
-    if (CGF.IsMSExceptions) {
-      Obj->toState = CGF.EHState.GlobalUnwindTable.back().ToState;
-    }
-
+    memorizeState(Obj);
     (void) Obj;
   }
 
