@@ -19,6 +19,8 @@
 
 #include "CodeGenFunction.h"
 #include "CGCleanup.h"
+// r4start
+#include "llvm/Intrinsics.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -466,9 +468,15 @@ static void EmitCleanup(CodeGenFunction &CGF,
   Fn->Emit(CGF, flags);
 
   // r4start
-  if (CGF.IsMSExceptions)
-    CGF.EHState.CreateStateStore(Fn->toState);
-
+  if (CGF.IsMSExceptions) {
+    if (flags.isForEHCleanup()) {
+      llvm::Function *retFromFunclet = 
+        CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_ret);
+      CGF.Builder.CreateCall(retFromFunclet);
+    } else {
+      CGF.EHState.CreateStateStore(Fn->toState);
+    }
+  }
   assert(CGF.HaveInsertPoint() && "cleanup ended with no insertion point?");
 
   // Emit the continuation block if there was an active flag.
@@ -828,8 +836,10 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
 
       // Check whether we can merge NormalEntry into a single predecessor.
       // This might invalidate (non-IR) pointers to NormalEntry.
-      llvm::BasicBlock *NewNormalEntry =
-        SimplifyCleanupEntry(*this, NormalEntry);
+      // DAEMON! Disable merging of cleanup and lpad blocks
+      if (!IsMSExceptions) {
+        llvm::BasicBlock *NewNormalEntry =
+          SimplifyCleanupEntry(*this, NormalEntry);
 
       // If it did invalidate those pointers, and NormalEntry was the same
       // as NormalExit, go back and patch up the fixups.
@@ -838,6 +848,7 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
                I < E; ++I)
           EHStack.getBranchFixup(I).OptimisticBranchBlock = NewNormalEntry;
     }
+  }
   }
 
   assert(EHStack.hasNormalCleanups() || EHStack.getNumBranchFixups() == 0);
@@ -859,7 +870,9 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
 
     Builder.restoreIP(SavedIP);
 
-    SimplifyCleanupEntry(*this, EHEntry);
+    // DAEMON! Disable merging of cleanup and lpad blocks
+    if (!IsMSExceptions)
+      SimplifyCleanupEntry(*this, EHEntry);
   }
 }
 

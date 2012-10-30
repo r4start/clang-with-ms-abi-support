@@ -707,8 +707,7 @@ public:
                           const Decl *FuncDecl = 0,
                           llvm::Value *ThisPtr = 0);
 
-    llvm::Instruction *
-    AddCatchEntryInUnwindTable(size_t Index, llvm::Value *State);
+    void AddCatchEntryInUnwindTable(int State);
 
     llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
                                           MSMangleContextExtensions *Mangler);
@@ -2919,8 +2918,8 @@ private:
   void GenerateTryBlockTableEntry();
 
   /// r4start
-  void GenerateCatchHandler(QualType &CaughtType, llvm::Type *HandlerTy,
-                              llvm::BlockAddress *HandlerAddress);
+  void GenerateCatchHandler(const QualType &CaughtType,
+                            llvm::BlockAddress *HandlerAddress);
 
   /// r4start
   llvm::GlobalValue *EmitTryBlockTable();

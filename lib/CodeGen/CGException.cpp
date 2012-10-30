@@ -1353,12 +1353,19 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // Catch the exception if this isn't a catch-all.
     const CXXCatchStmt *C = S.getHandler(I-1);
 
+    // r4start
+    if (IsMSExceptions) {
+      GenerateCatchHandler(C->getCaughtType(), 
+                           llvm::BlockAddress::get(CurFn, CatchBlock));
+    }
+
     // Enter a cleanup scope, including the catch variable and the
     // end-catch.
     RunCleanupsScope CatchScope(*this);
 
     // Initialize the catch variable and set up the cleanups.
-    BeginCatch(*this, C);
+    if (!IsMSExceptions)
+      BeginCatch(*this, C);
 
     // Perform the body of the catch.
     EmitStmt(C->getHandlerBlock());
@@ -1397,6 +1404,13 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     EmitBranch(ContBB);
     Builder.SetInsertPoint(ContBB);
 
+    // Catch handlers have entry in unwind table,
+    // so generate it.
+    EHState.AddCatchEntryInUnwindTable(
+      (*EHState.LocalUnwindTable.back().begin())->ToState);
+      
+    GenerateTryBlockTableEntry();
+
     EHState.LocalUnwindTable.pop_back();
 
     // After try-block state must be restored.
@@ -1406,7 +1420,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     } else {
       EHState.CreateStateStore(
         (*EHState.LocalUnwindTable.back().rbegin())->StoreValue);
-      }
+    }
   }
 }
 

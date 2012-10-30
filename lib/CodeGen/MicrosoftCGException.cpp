@@ -162,16 +162,10 @@ CodeGenFunction::MSEHState::CreateStateStoreWithoutEmit(llvm::Value *State) {
   return store;
 }
 
-llvm::Instruction *
-CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(size_t Index,
-                                                       llvm::Value *State) {
-  GlobalUnwindTable.push_back(Index);
-  GlobalUnwindTable.back().StoreValue = Index;
+void CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(int State) {
+  GlobalUnwindTable.push_back(State);
+  GlobalUnwindTable.back().StoreValue = State;
 
-  llvm::StoreInst *store = CreateStateStoreWithoutEmit(State);
-
-  GlobalUnwindTable.back().Store = store;
-  
   // TryNumber must be right because it necessary for GenerateTryBlockEntry.
   // If TryNumber is wrong then GenerateTryBlockEntry can not find this entry
   // in global unwind table.
@@ -190,7 +184,6 @@ CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(size_t Index,
   GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
 
   LastEntries.push_back(--GlobalUnwindTable.end());
-  return store;
 }
 
 llvm::BasicBlock *
@@ -753,8 +746,9 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
 //    // (i.e. code after the try block)
 //    void* addressOfHandler;
 //  };
-static llvm::Type *getHandlerType(CodeGenModule &CGM) {
-  if (llvm::Type *handlerTy = CGM.getModule().getTypeByName("handler.type")) {
+static llvm::StructType *getHandlerType(CodeGenModule &CGM) {
+  if (llvm::StructType *handlerTy = 
+          CGM.getModule().getTypeByName("handler.type")) {
     return handlerTy;
   }
   SmallVector<llvm::Type *, 4> fields;
@@ -768,7 +762,8 @@ static llvm::Type *getHandlerType(CodeGenModule &CGM) {
 
   fields.push_back(CGM.VoidPtrTy);
 
-  return llvm::StructType::create(CGM.getLLVMContext(), fields, "handler.type");
+  return llvm::StructType::create(CGM.getLLVMContext(), 
+                                 fields, "handler.type");
 }
 
 // r4start
@@ -1133,7 +1128,7 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
 
   MSEHState::UnwindTableTy::reverse_iterator lastEntry = 
     EHState.GlobalUnwindTable.rbegin();
-  
+ 
   while (lastEntry != EHState.GlobalUnwindTable.rend()) {
     if (lastEntry->RestoreKind == RestoreOpInfo::CatchRestore &&
         lastEntry->StoreInstTryLevel == firstState->StoreInstTryLevel &&
@@ -1145,7 +1140,7 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   
   assert (lastEntry != EHState.GlobalUnwindTable.rend() &&
           "Can not find last entry for this try block!");
-
+ 
   llvm::Constant *catchHigh = 
     llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
 
@@ -1363,8 +1358,7 @@ void CodeGenFunction::EmitEHInformation() {
 }
 
 // r4start
-void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
-                                           llvm::Type *HandlerTy,
+void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
                                            llvm::BlockAddress *HandlerAddress) {
   // 0x01: const, 0x02: volatile, 0x08: reference
   int handlerAdjectives = 0;
@@ -1380,8 +1374,10 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
     handlerAdjectives |= 8;
   }
 
-  CaughtType = CaughtType.getNonReferenceType().getUnqualifiedType();
-  llvm::Constant *TypeDescriptor = CGM.GetAddrOfMSTypeDescriptor(CaughtType);
+  QualType nonQualifiedType = 
+    CaughtType.getNonReferenceType().getUnqualifiedType();
+  llvm::Constant *TypeDescriptor = 
+    CGM.GetAddrOfMSTypeDescriptor(nonQualifiedType);
 
   llvm::SmallVector<llvm::Constant *, 4> fields;
 
@@ -1400,7 +1396,7 @@ void CodeGenFunction::GenerateCatchHandler(QualType &CaughtType,
   fields.push_back(llvm::ConstantExpr::getBitCast(HandlerAddress, VoidPtrTy));
 
   llvm::Constant *handler = 
-    llvm::ConstantStruct::get(cast<llvm::StructType>(HandlerTy), fields);
+    llvm::ConstantStruct::get(getHandlerType(CGM), fields);
   EHState.TryHandlers.push_back(handler);
 }
 
@@ -1429,8 +1425,8 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
   }
 
   restoringState = llvm::ConstantInt::get(Int32Ty, index);
-  llvm::Instruction *store = 
-    EHState.AddCatchEntryInUnwindTable(index, restoringState);
+  llvm::Instruction *store = 0;
+  //  EHState.AddCatchEntryInUnwindTable(index, restoringState);
   
   llvm::BasicBlock *tryEnd = EHState.GenerateTryEndBlock(fd, msMangler);
   llvm::BlockAddress *returnAddress = llvm::BlockAddress::get(tryEnd);
@@ -1469,7 +1465,7 @@ void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
     Builder.CreateUnreachable();
 
     QualType CaughtType = C->getCaughtType();
-    GenerateCatchHandler(CaughtType, handlerTy,
+    GenerateCatchHandler(CaughtType,
                          llvm::BlockAddress::get(CurFn, entryBB));
   }
 
