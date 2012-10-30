@@ -622,6 +622,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   // Generate id in start of try block.
   if (IsMSExceptions) {
     EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
+    EHState.SetMSTryState();
     #if 0
     if (!EHState.IsInited()) {
       EHState.InitMSTryState();
@@ -1397,6 +1398,15 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     Builder.SetInsertPoint(ContBB);
 
     EHState.LocalUnwindTable.pop_back();
+
+    // After try-block state must be restored.
+    if (EHState.LocalUnwindTable.empty()) {
+      // Exit from top level try-block.
+      EHState.CreateStateStore(-1);
+    } else {
+      EHState.CreateStateStore(
+        (*EHState.LocalUnwindTable.back().rbegin())->StoreValue);
+      }
   }
 }
 
