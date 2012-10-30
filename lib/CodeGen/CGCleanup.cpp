@@ -145,6 +145,13 @@ EHScopeStack::stable_iterator EHScopeStack::getInnermostActiveEHScope() const {
   return stable_end();
 }
 
+// r4start
+void EHScopeStack::memorizeState(Cleanup *Obj) {
+  /// r4start
+  if (CGF.IsMSExceptions) {
+    Obj->toState = CGF.EHState.GlobalUnwindTable.back().ToState;
+  }
+}
 
 void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
   assert(((Size % sizeof(void*)) == 0) && "cleanup type is misaligned");
