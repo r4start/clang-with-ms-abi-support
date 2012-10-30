@@ -2239,13 +2239,15 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   llvm::BasicBlock *InvokeDest = 0;
   if (!(Attrs.getFnAttributes() & llvm::Attribute::NoUnwind)) {
+    #if 0
     // r4start
     if (IsMSExceptions && 
         (isa<CXXDestructorDecl>(TargetDecl) || 
          isa<CXXConstructorDecl>(TargetDecl)))
       InvokeDest = getInvokeDest(TargetDecl, Args[0]);
     else
-      InvokeDest = getInvokeDest();
+    #endif
+    InvokeDest = getInvokeDest();
   }
 
   llvm::CallSite CS;

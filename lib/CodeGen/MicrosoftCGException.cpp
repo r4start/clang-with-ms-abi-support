@@ -118,6 +118,12 @@ void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
 
 // r4start
 void CodeGenFunction::MSEHState::SetMSTryState() {
+  InitMSTryState();
+
+  if (LocalUnwindTable.empty()) {
+    LocalUnwindTable.push_back(UnwindEntryRefList());
+  }
+
   size_t state = GlobalUnwindTable.size();
   if (!state) {
     GlobalUnwindTable.push_back(-1);
