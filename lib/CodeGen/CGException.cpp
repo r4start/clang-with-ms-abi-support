@@ -1323,7 +1323,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     ContBB = createBasicBlock("try.cont");
   } else {
     ContBB = createBasicBlock("try.cont", CurFn);
-    SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_);
+    SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
     tryCont = llvm::BlockAddress::get(ContBB);
   }
   // We just emitted the body of the try; jump to the continue block.
