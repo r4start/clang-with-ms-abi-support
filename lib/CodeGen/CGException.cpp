@@ -160,6 +160,9 @@ namespace {
     static const EHPersonality NeXT_ObjC;
     static const EHPersonality GNU_CPlusPlus;
     static const EHPersonality GNU_CPlusPlus_SJLJ;
+
+    // r4start
+    static const EHPersonality MS_CPlusPlus;
   };
 }
 
@@ -173,6 +176,9 @@ const EHPersonality
 EHPersonality::GNU_ObjC = {"__gnu_objc_personality_v0", "objc_exception_throw"};
 const EHPersonality
 EHPersonality::GNU_ObjCXX = { "__gnustep_objcxx_personality_v0", 0 };
+// r4start
+const EHPersonality 
+EHPersonality::MS_CPlusPlus = { "__ms_fake_personality", 0 };
 
 static const EHPersonality &getCPersonality(const LangOptions &L) {
   if (L.SjLjExceptions)
@@ -196,7 +202,10 @@ static const EHPersonality &getObjCPersonality(const LangOptions &L) {
 }
 
 static const EHPersonality &getCXXPersonality(const LangOptions &L) {
-  if (L.SjLjExceptions)
+  // r4start
+  if (L.MicrosoftMode)
+    return EHPersonality::MS_CPlusPlus;
+  else if (L.SjLjExceptions)
     return EHPersonality::GNU_CPlusPlus_SJLJ;
   else
     return EHPersonality::GNU_CPlusPlus;
@@ -846,7 +855,7 @@ llvm::BasicBlock *CodeGenFunction::EmitLandingPad() {
     llvm::Value *LPadSel = Builder.CreateExtractValue(LPadInst, 1);
     Builder.CreateStore(LPadSel, getEHSelectorSlot());
   } else {
-      LPadInst = Builder.CreateLandingPad(VoidTy,
+      LPadInst = Builder.CreateLandingPad(Int32Ty,
                                  getOpaquePersonalityFn(CGM, personality), 0);
   }
 
@@ -951,8 +960,16 @@ llvm::BasicBlock *CodeGenFunction::EmitLandingPad() {
          "landingpad instruction has no clauses!");
 
   // Tell the backend how to generate the landing pad.
-  Builder.CreateBr(getEHDispatchBlock(EHStack.getInnermostEHScope()));
-
+  // r4start
+  if (!IsMSExceptions) {
+    Builder.CreateBr(getEHDispatchBlock(EHStack.getInnermostEHScope()));
+  } else {
+    llvm::SwitchInst *SI = 
+      Builder.CreateSwitch(LPadInst, 
+            getEHDispatchBlock(EHStack.getInnermostEHScope()));
+    SI->addCase(llvm::ConstantInt::get(Int32Ty, -2), EHState.EHHandler);
+  }
+  
   // Restore the old IR generation state.
   Builder.restoreIP(savedIP);
 
