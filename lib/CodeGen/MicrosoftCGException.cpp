@@ -740,10 +740,19 @@ void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
   llvm::BasicBlock *normalDest = 
     llvm::BasicBlock::Create(CGM.getLLVMContext(), "", CurFn);
   
-  llvm::InvokeInst *invoke = 
-    Builder.CreateInvoke(getMSThrowFn(*this, ThrowInfo->getType()),
-                         normalDest, getInvokeDest(), Params);
-  invoke->setCallingConv(llvm::CallingConv::X86_StdCall);
+  llvm::BasicBlock *invokeDest = getInvokeDest();
+
+  if (invokeDest) {
+    llvm::InvokeInst *invoke = 
+      Builder.CreateInvoke(getMSThrowFn(*this, ThrowInfo->getType()),
+                           normalDest, invokeDest, Params);
+    invoke->setCallingConv(llvm::CallingConv::X86_StdCall);
+  } else {
+    llvm::CallInst *call = 
+      Builder.CreateCall(getMSThrowFn(*this, ThrowInfo->getType()), Params);
+    call->setCallingConv(llvm::CallingConv::X86_StdCall);
+    Builder.CreateUnreachable();
+  }
   
   Builder.SetInsertPoint(normalDest);
 }

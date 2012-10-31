@@ -413,10 +413,8 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
 }
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
-  bool isMSABI = 
-    CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
-
-  if (isMSABI) {
+  // r4start
+  if (IsMSExceptions) {
     EmitMSCXXThrowExpr(E);
     return;
   }
@@ -456,13 +454,8 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
 
   // Now throw the exception.
   // r4start
-  llvm::Constant *TypeInfo;
-
-  if (!isMSABI) {
-    TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
-  } else {
-    TypeInfo = CGM.GetAddrOfMSTypeDescriptor(ThrowType);
-  }
+  llvm::Constant *TypeInfo = 
+    CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
 
   // The address of the destructor.  If the exception type has a
   // trivial destructor (or isn't a record), we just pass null.
@@ -477,26 +470,17 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   }
   if (!Dtor) Dtor = llvm::Constant::getNullValue(Int8PtrTy);
 
-  if (isMSABI) {
-    // TODO: change parameters!
-    llvm::Value *A[] = { Dtor, TypeInfo };
-
-   /* llvm::InvokeInst *ThrowCall = 
-      Builder.CreateInvoke(getMSThrowFn(*this), getUnreachableBlock(),
-                           getInvokeDest(), A);*/
+  if (getInvokeDest()) {
+    llvm::InvokeInst *ThrowCall =
+      Builder.CreateInvoke3(getThrowFn(*this),
+                            getUnreachableBlock(), getInvokeDest(),
+                            ExceptionPtr, TypeInfo, Dtor);
+    ThrowCall->setDoesNotReturn();
   } else {
-    if (getInvokeDest()) {
-      llvm::InvokeInst *ThrowCall =
-        Builder.CreateInvoke3(getThrowFn(*this),
-                              getUnreachableBlock(), getInvokeDest(),
-                              ExceptionPtr, TypeInfo, Dtor);
-      ThrowCall->setDoesNotReturn();
-    } else {
-      llvm::CallInst *ThrowCall =
-        Builder.CreateCall3(getThrowFn(*this), ExceptionPtr, TypeInfo, Dtor);
-      ThrowCall->setDoesNotReturn();
-      Builder.CreateUnreachable();
-    }
+    llvm::CallInst *ThrowCall =
+      Builder.CreateCall3(getThrowFn(*this), ExceptionPtr, TypeInfo, Dtor);
+    ThrowCall->setDoesNotReturn();
+    Builder.CreateUnreachable();
   }
   // throw is an expression, and the expression emitters expect us
   // to leave ourselves at a valid insertion point.
