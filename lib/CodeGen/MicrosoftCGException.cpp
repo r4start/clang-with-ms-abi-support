@@ -26,6 +26,24 @@ using namespace clang;
 using namespace CodeGen;
 
 // r4start
+static llvm::BasicBlock *getEHHandler(CodeGenFunction &CGF) {
+  const FunctionDecl *func = cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
+  assert(func && "EH handler can be generated only for function or method!");
+
+  llvm::SmallString<256> nameBuffer;
+  llvm::raw_svector_ostream nameStream(nameBuffer);
+
+  CGF.CGM.getCXXABI().getMangleContext().getMsExtensions()->
+    mangleEHHandlerFunction(func, nameStream);
+
+  nameStream.flush();
+  StringRef mangledName(nameBuffer);
+
+  return llvm::BasicBlock::Create(CGF.CGM.getLLVMContext(),
+                                  mangledName, CGF.CurFn);
+}
+
+// r4start
 void CodeGenFunction::MSEHState::InitMSTryState() {
   if (!MSTryState) {
     llvm::Function *frameAddr = 
@@ -39,6 +57,7 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
       CGF.Builder.CreateBitCast(MSTryState,
            llvm::IntegerType::get(CGF.CGM.getLLVMContext(), 32)->getPointerTo(),
            "try.id");
+    EHHandler = getEHHandler(CGF);
   }
 }
 
@@ -946,24 +965,6 @@ static llvm::StructType *generateEHFuncInfoType(CodeGenModule &CGM) {
 }
 
 // r4start
-static llvm::BasicBlock *getEHHandler(CodeGenFunction &CGF) {
-  const FunctionDecl *func = cast_or_null<FunctionDecl>(CGF.CurFuncDecl);
-  assert(func && "EH handler can be generated only for function or method!");
-
-  llvm::SmallString<256> nameBuffer;
-  llvm::raw_svector_ostream nameStream(nameBuffer);
-
-  CGF.CGM.getCXXABI().getMangleContext().getMsExtensions()->
-    mangleEHHandlerFunction(func, nameStream);
-
-  nameStream.flush();
-  StringRef mangledName(nameBuffer);
-
-  return llvm::BasicBlock::Create(CGF.CGM.getLLVMContext(),
-                                  mangledName, CGF.CurFn);
-}
-
-// r4start
 void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
   assert(FuncProto && "ESList builder needs function protype!");
 
@@ -1327,20 +1328,16 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
 
 // r4start
 void CodeGenFunction::EmitEHInformation() {
-  #if 0
   if (!EHState.EHHandler) {
     return;
   }
   
-  EHState.FinishLPad();
-  #endif
 
   llvm::GlobalValue *ehFuncInfo = EmitMSFuncInfo();
   if (!ehFuncInfo) {
     return;
   }
 
-  #if 0
   llvm::BasicBlock *old = Builder.GetInsertBlock();
 
   Builder.SetInsertPoint(EHState.EHHandler);
@@ -1354,7 +1351,6 @@ void CodeGenFunction::EmitEHInformation() {
 
   Builder.CreateUnreachable();
   Builder.SetInsertPoint(old);
-  #endif
 }
 
 // r4start
