@@ -1230,6 +1230,11 @@ static void emitMSCatchDispatchBlock(CodeGenFunction &CGF,
     si->addCase(llvm::ConstantInt::get(CGF.Int32Ty, i),
                 catchScope.getHandler(i).Block);
   }
+
+  // This is necessary because we need cleanup objects before try-block
+  // if we can not handle exception.
+  si->addCase(llvm::ConstantInt::get(CGF.Int32Ty, -1),
+              CGF.getEHDispatchBlock(catchScope.getEnclosingEHScope()));
 }
 
 /// Emit the structure of the dispatch block for the given catch scope.
