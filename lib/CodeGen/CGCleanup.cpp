@@ -148,9 +148,9 @@ EHScopeStack::stable_iterator EHScopeStack::getInnermostActiveEHScope() const {
 }
 
 // r4start
-void EHScopeStack::memorizeState(Cleanup *Obj) {
+void EHScopeStack::memorizeState(CleanupKind K, Cleanup *Obj) {
   /// r4start
-  if (CGF.IsMSExceptions) {
+  if (CGF.IsMSExceptions && (K & EHCleanup)) {
     Obj->toState = CGF.EHState.GlobalUnwindTable.back().ToState;
   }
 }

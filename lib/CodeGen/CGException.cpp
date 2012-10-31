@@ -159,9 +159,6 @@ namespace {
     static const EHPersonality NeXT_ObjC;
     static const EHPersonality GNU_CPlusPlus;
     static const EHPersonality GNU_CPlusPlus_SJLJ;
-
-    // r4start
-    static const EHPersonality MS_CPlusPlus;
   };
 }
 
@@ -175,9 +172,6 @@ const EHPersonality
 EHPersonality::GNU_ObjC = {"__gnu_objc_personality_v0", "objc_exception_throw"};
 const EHPersonality
 EHPersonality::GNU_ObjCXX = { "__gnustep_objcxx_personality_v0", 0 };
-// r4start
-const EHPersonality 
-EHPersonality::MS_CPlusPlus = { "__ms_fake_personality", 0 };
 
 static const EHPersonality &getCPersonality(const LangOptions &L) {
   if (L.SjLjExceptions)
@@ -201,10 +195,7 @@ static const EHPersonality &getObjCPersonality(const LangOptions &L) {
 }
 
 static const EHPersonality &getCXXPersonality(const LangOptions &L) {
-  // r4start
-  if (L.MicrosoftMode)
-    return EHPersonality::MS_CPlusPlus;
-  else if (L.SjLjExceptions)
+  if (L.SjLjExceptions)
     return EHPersonality::GNU_CPlusPlus_SJLJ;
   else
     return EHPersonality::GNU_CPlusPlus;
@@ -1226,6 +1217,19 @@ static void BeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
   CGF.EmitAutoVarCleanups(var);
 }
 
+// r4start
+static void emitMSCatchDispatchBlock(CodeGenFunction &CGF,
+                                     EHCatchScope &catchScope,
+                                     llvm::BasicBlock *dispatchBlock) {
+  llvm::SwitchInst *si = 
+    CGF.Builder.CreateSwitch(CGF.Builder.CreateLoad(CGF.EHState.MSTryState),
+                             CGF.EHState.EHHandler);
+  for (unsigned i = 0, e = catchScope.getNumHandlers(); i !=e; ++i) {
+    si->addCase(llvm::ConstantInt::get(CGF.Int32Ty, i),
+                catchScope.getHandler(i).Block);
+  }
+}
+
 /// Emit the structure of the dispatch block for the given catch scope.
 /// It is an invariant that the dispatch block already exists.
 static void emitCatchDispatchBlock(CodeGenFunction &CGF,
@@ -1243,6 +1247,13 @@ static void emitCatchDispatchBlock(CodeGenFunction &CGF,
 
   CGBuilderTy::InsertPoint savedIP = CGF.Builder.saveIP();
   CGF.EmitBlockAfterUses(dispatchBlock);
+
+  // r4start
+  if (CGF.IsMSExceptions) {
+    emitMSCatchDispatchBlock(CGF, catchScope, dispatchBlock);
+    CGF.Builder.restoreIP(savedIP);
+    return;
+  }
 
   // Select the right handler.
   llvm::Value *llvm_eh_typeid_for =
@@ -1639,16 +1650,22 @@ llvm::BasicBlock *CodeGenFunction::getTerminateLandingPad() {
   TerminateLandingPad = createBasicBlock("terminate.lpad");
   Builder.SetInsertPoint(TerminateLandingPad);
 
-  // Tell the backend that this is a landing pad.
   const EHPersonality &Personality = EHPersonality::get(CGM.getLangOpts());
-  llvm::LandingPadInst *LPadInst =
-    Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
-                             getOpaquePersonalityFn(CGM, Personality), 0);
-  LPadInst->addClause(getCatchAllValue(*this));
+  // r4start
+  if (!IsMSExceptions) {
+    // Tell the backend that this is a landing pad.
+    llvm::LandingPadInst *LPadInst =
+      Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
+                               getOpaquePersonalityFn(CGM, Personality), 0);
+    LPadInst->addClause(getCatchAllValue(*this));
 
-  llvm::CallInst *TerminateCall = Builder.CreateCall(getTerminateFn(*this));
-  TerminateCall->setDoesNotReturn();
-  TerminateCall->setDoesNotThrow();
+    llvm::CallInst *TerminateCall = Builder.CreateCall(getTerminateFn(*this));
+    TerminateCall->setDoesNotReturn();
+    TerminateCall->setDoesNotThrow(); 
+  } else {
+    Builder.CreateLandingPad(VoidTy,
+                getOpaquePersonalityFn(CGM, Personality), 0)->setCleanup(true);
+  }
   Builder.CreateUnreachable();
 
   // Restore the saved insertion state.
