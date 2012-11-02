@@ -1409,6 +1409,9 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     if (HaveInsertPoint()) {
       // r4start
       if (IsMSExceptions) {
+        // restore state.
+        EHState.CreateStateStore(
+          (*EHState.LocalUnwindTable.back().begin())->ToState);
         Builder.CreateCall(SEHRetFromCatch, tryCont);
       }
       Builder.CreateBr(ContBB);

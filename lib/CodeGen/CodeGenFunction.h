@@ -136,6 +136,8 @@ enum CleanupKind {
   InactiveNormalAndEHCleanup = NormalAndEHCleanup | InactiveCleanup
 };
 
+struct MsUnwindInfo;
+
 /// A stack of scopes which respond to exceptions, including cleanups
 /// and catch blocks.
 class EHScopeStack {
@@ -188,11 +190,11 @@ public:
 
   public:
     // r4start
-    int toState;
+    MsUnwindInfo *toState;
     
     // r4start
     // -2 is default unknown state in MS SEH.
-    Cleanup() : toState(-2) {}
+    Cleanup() : toState(0) {}
 
     /// Generation flags.
     class Flags {

@@ -151,7 +151,7 @@ EHScopeStack::stable_iterator EHScopeStack::getInnermostActiveEHScope() const {
 void EHScopeStack::memorizeState(CleanupKind K, Cleanup *Obj) {
   /// r4start
   if (CGF.IsMSExceptions && (K & EHCleanup)) {
-    Obj->toState = CGF.EHState.GlobalUnwindTable.back().ToState;
+    Obj->toState = &CGF.EHState.GlobalUnwindTable.back();
   }
 }
 
@@ -464,6 +464,8 @@ static void EmitCleanup(CodeGenFunction &CGF,
     CGF.EmitBlock(CleanupBB);
   }
 
+  llvm::BasicBlock *funcletBlock = CGF.Builder.GetInsertBlock();
+
   // Ask the cleanup to emit itself.
   Fn->Emit(CGF, flags);
 
@@ -473,8 +475,9 @@ static void EmitCleanup(CodeGenFunction &CGF,
       llvm::Function *retFromFunclet = 
         CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_ret);
       CGF.Builder.CreateCall(retFromFunclet);
+      Fn->toState->Funclet = funcletBlock;
     } else {
-      CGF.EHState.CreateStateStore(Fn->toState);
+      CGF.EHState.CreateStateStore(Fn->toState->ToState);
     }
   }
   assert(CGF.HaveInsertPoint() && "cleanup ended with no insertion point?");

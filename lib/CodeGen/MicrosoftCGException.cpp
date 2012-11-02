@@ -1068,7 +1068,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   for (MSEHState::UnwindTableTy::iterator 
        I = EHState.GlobalUnwindTable.begin(),
        E = EHState.GlobalUnwindTable.end(); I != E; ++I) {
-    if (!I->ReleaseFunc) {
+    if (!I->Funclet) {
       // creating unwind table entry
       fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
 
@@ -1080,31 +1080,6 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
       continue;
     }
 
-    // creating funclet code
-    #if 0
-    llvm::SmallString<256> funcletName;
-    llvm::raw_svector_ostream stream(funcletName);
-
-    CGM.getCXXABI().getMangleContext().
-      getMsExtensions()->mangleEHUnwindFunclet(funcDecl,
-                                                EHState.EHManglingCounter,
-                                                stream);
-
-    EHState.EHManglingCounter++;
-
-    stream.flush();
-    StringRef funcletNameRef(funcletName);
-
-    llvm::BasicBlock *funclet = 
-      llvm::BasicBlock::Create(CGM.getLLVMContext(), funcletNameRef, CurFn);
-
-    Builder.SetInsertPoint(funclet);
-
-    llvm::CallInst *call = 
-      Builder.CreateCall(I->ReleaseFunc, I->ThisPtr);
-    call->setCallingConv(llvm::CallingConv::X86_ThisCall);
-    Builder.CreateUnreachable();
-    #endif
     // creating unwind table entry
     fields.push_back(llvm::ConstantInt::get(Int32Ty, I->ToState));
     fields.push_back(llvm::BlockAddress::get(CurFn, I->Funclet));
