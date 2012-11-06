@@ -1655,7 +1655,7 @@ llvm::BasicBlock *CodeGenFunction::getTerminateLandingPad() {
     TerminateCall->setDoesNotReturn();
     TerminateCall->setDoesNotThrow(); 
   } else {
-    Builder.CreateLandingPad(VoidTy,
+    Builder.CreateLandingPad(Int32Ty,
                 getOpaquePersonalityFn(CGM, Personality), 0)->setCleanup(true);
   }
   Builder.CreateUnreachable();

@@ -381,6 +381,7 @@ public:
   void pushCleanup(CleanupKind Kind) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T();
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -389,6 +390,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -397,6 +399,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -405,6 +408,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -422,6 +426,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2, A3 a3, A4 a4) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2, a3, a4);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -695,6 +700,8 @@ public:
        ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
        LastCatchHandler(0), EHHandler(0) {}
 
+    ~MSEHState() {}
+    
     void SetMSTryState();
 
     /// This function opposite to SetMSTrystate
