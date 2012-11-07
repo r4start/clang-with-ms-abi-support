@@ -631,7 +631,7 @@ static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM,
   llvm::Constant *cta = llvm::ConstantStruct::get(ctaType, init);
 
   return
-    new llvm::GlobalVariable(CGM.getModule(), cta->getType(), true,
+    new llvm::GlobalVariable(CGM.getModule(), cta->getType(), false,
                              llvm::GlobalValue::ExternalLinkage,
                              cta, mangledName);
 }
