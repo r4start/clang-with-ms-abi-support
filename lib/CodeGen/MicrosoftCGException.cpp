@@ -467,7 +467,7 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
   catchableEntry.push_back(ctorAddr);
 
   llvm::Constant *init = llvm::ConstantStruct::get(catchableTy, catchableEntry);
-  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
                                   llvm::GlobalValue::ExternalLinkage, 
                                   init, mangledName);
 }
@@ -705,7 +705,7 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
   llvm::Constant *throwInfoInit = 
     generateThrowInfoInit(CGF, CatchType, throwInfoTy);
 
-  return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, true,
+  return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, false,
                                   llvm::GlobalValue::ExternalLinkage,
                                   throwInfoInit, throwInfo);
 }
@@ -999,7 +999,7 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
       llvm::ConstantStruct::get(esListStructTy, fields);
 
     EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
-                                                  init->getType(), true,
+                                                  init->getType(), false,
                                   llvm::GlobalValue::InternalLinkage, init, "");
     return;
   }
@@ -1020,7 +1020,7 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
     llvm::ConstantArray::get(arrTy, expectedExceptionsHandlers);
   
   llvm::GlobalValue *handlers = 
-    new llvm::GlobalVariable(CGM.getModule(), exceptionArray->getType(), true,
+    new llvm::GlobalVariable(CGM.getModule(), exceptionArray->getType(), false,
                         llvm::GlobalValue::InternalLinkage, exceptionArray, "");
 
   llvm::Constant *idxs[] = { 
@@ -1034,7 +1034,7 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
     llvm::ConstantStruct::get(cast<llvm::StructType>(esListTy), fields);
   
   EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
-                                                init->getType(), true,
+                                                init->getType(), false,
                                   llvm::GlobalValue::InternalLinkage, init, "");
 }
 
@@ -1093,7 +1093,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   llvm::ArrayType *tableTy = llvm::ArrayType::get(entryTy, entries.size());
   llvm::Constant *init = llvm::ConstantArray::get(tableTy, entries);
 
-  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
                                   llvm::GlobalValue::InternalLinkage, init,
                                   mangledUnwindTableName);
 }
@@ -1166,7 +1166,7 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   StringRef mangledName(tableName);
 
   llvm::GlobalVariable *globalHandlers = 
-    new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), true,
+    new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), false,
                              llvm::GlobalValue::InternalLinkage, handlersArray,
                              mangledName);
 
@@ -1204,7 +1204,7 @@ llvm::GlobalValue *CodeGenFunction::EmitTryBlockTable() {
   llvm::Constant *init = 
     llvm::ConstantArray::get(tableTy, EHState.TryBlockTableEntries);
 
-  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
                                   llvm::GlobalValue::InternalLinkage, init,
                                   mangledTryBlockTableName);
 }
@@ -1306,7 +1306,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   out.flush();
   StringRef ehName(structName);
 
-  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), true,
+  return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
                               llvm::GlobalValue::InternalLinkage, init, ehName);
 }
 
