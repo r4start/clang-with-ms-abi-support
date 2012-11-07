@@ -1010,6 +1010,92 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
 }
 
 // r4start
+void CodeGenFunction::MSEHState::InitOffsetInCatchHandlers() {
+  llvm::BasicBlock *currentIP = CGF.Builder.GetInsertBlock();
+  llvm::BasicBlock *sehInitBlock = 
+    llvm::BasicBlock::Create(CGF.CGM.getLLVMContext(), "seh.init.block",
+                             CGF.CurFn);
+  llvm::BasicBlock *entryBlock =  &CGF.CurFn->getEntryBlock();
+
+  CGF.Builder.SetInsertPoint(entryBlock);
+  
+  for (llvm::BasicBlock::iterator I = entryBlock->begin(),
+       E = entryBlock->end(); I != E; ++I) {
+    if (dyn_cast<llvm::AllocaInst>(I)) {
+      continue;
+    }
+
+    llvm::BasicBlock *afterSEHInit = 
+      entryBlock->splitBasicBlock(I, "after.seh.init");
+    entryBlock->getTerminator()->eraseFromParent();
+    CGF.Builder.CreateBr(sehInitBlock);
+    entryBlock = afterSEHInit;
+    break;
+  }
+
+  CGF.Builder.SetInsertPoint(sehInitBlock);
+
+  llvm::Function *frameAddr = 
+      CGF.CGM.getIntrinsic(llvm::Intrinsic::frameaddress);
+  llvm::Value *ebp = 
+    CGF.Builder.CreateCall(frameAddr, 
+                           llvm::ConstantInt::get(CGF.Int32Ty, 0));
+  ebp = CGF.Builder.CreatePtrToInt(ebp, CGF.Int32Ty);
+  
+  llvm::Constant *zero = llvm::ConstantInt::get(CGF.Int32Ty, 0);
+  llvm::Constant *fieldIdx = llvm::ConstantInt::get(CGF.Int32Ty, 2);
+
+  for (HandlersArray::iterator I = CatchHandlers.begin(), 
+       E = CatchHandlers.end(); I != E; ++I) {
+    if (!I->ExceptionObject)
+      continue;
+
+    llvm::Value *objAddr = CGF.GetAddrOfLocalVar(I->ExceptionObject);
+    objAddr = CGF.Builder.CreatePtrToInt(objAddr, CGF.Int32Ty);
+    objAddr = CGF.Builder.CreateSub(objAddr, ebp);
+
+    llvm::Value *idxs[] = {
+      zero,
+      llvm::ConstantInt::get(CGF.Int32Ty, I->Index),
+      fieldIdx
+    };
+
+    llvm::Value *ebpBasedOffsetField = 
+      CGF.Builder.CreateGEP(I->Handlers, idxs);
+    ebpBasedOffsetField = 
+      CGF.Builder.CreateBitCast(ebpBasedOffsetField, 
+                                CGF.Int32Ty->getPointerTo());
+    CGF.Builder.CreateStore(objAddr, ebpBasedOffsetField);
+  }
+
+  sehInitBlock->moveBefore(entryBlock);
+  
+  CGF.Builder.CreateBr(entryBlock);
+  CGF.Builder.SetInsertPoint(currentIP);
+}
+
+namespace {
+
+struct StartOfNewCatchHandlers {
+  typedef CodeGenFunction::MSEHState::CatchHandler CatchHandler;
+  bool operator() (const CatchHandler &Handler) {
+    return Handler.Handlers == 0;
+  }
+};
+
+struct InitNewCatchHandlersHandler {
+  typedef CodeGenFunction::MSEHState::CatchHandler CatchHandler;
+  llvm::GlobalVariable *GV;
+  InitNewCatchHandlersHandler(llvm::GlobalVariable *G) : GV(G) {}
+
+  void operator() (CatchHandler &Handler) {
+    Handler.Handlers = GV;
+  }
+};
+
+}
+
+// r4start
 void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
 
@@ -1058,10 +1144,6 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Constant *handlersArray = 
                llvm::ConstantArray::get(arrayOfHandlersTy, EHState.TryHandlers);
 
-  // After all we must clear all entries,
-  // because it can be nested try.
-  EHState.TryHandlers.clear();
-
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
 
@@ -1081,6 +1163,17 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
                              llvm::GlobalValue::InternalLinkage, handlersArray,
                              mangledName);
 
+  MSEHState::HandlersArray::iterator
+    newHandlers = std::find_if(EHState.CatchHandlers.begin(),
+                               EHState.CatchHandlers.end(),
+                               StartOfNewCatchHandlers());
+
+  assert(newHandlers != EHState.CatchHandlers.end() &&
+         "Try block must have catch handlers!");
+
+  std::for_each(newHandlers, EHState.CatchHandlers.end(),
+                InitNewCatchHandlersHandler(globalHandlers));
+
   llvm::Constant *addrOfGlobalhandlers = 
     llvm::ConstantExpr::getBitCast(globalHandlers, 
                                    getHandlerType(CGM)->getPointerTo());
@@ -1090,6 +1183,10 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Constant *init = llvm::ConstantStruct::get(entryTy, fields);
   
   EHState.TryBlockTableEntries.push_back(init);
+  
+  // After all we must clear all entries,
+  // because it can be nested try.
+  EHState.TryHandlers.clear();
 }
 
 // r4start
@@ -1246,11 +1343,14 @@ void CodeGenFunction::EmitEHInformation() {
 
   Builder.CreateUnreachable();
   Builder.SetInsertPoint(old);
+
+  EHState.InitOffsetInCatchHandlers();
 }
 
 // r4start
 void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
-                                           llvm::BlockAddress *HandlerAddress) {
+                                           llvm::BlockAddress *HandlerAddress,
+                                           int HandlerIdx) {
   // 0x01: const, 0x02: volatile, 0x08: reference
   int handlerAdjectives = 0;
   if (CaughtType.isConstQualified()) {
@@ -1289,4 +1389,6 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
   llvm::Constant *handler = 
     llvm::ConstantStruct::get(getHandlerType(CGM), fields);
   EHState.TryHandlers.push_back(handler);
+  
+  EHState.CatchHandlers.push_back(HandlerIdx);
 }

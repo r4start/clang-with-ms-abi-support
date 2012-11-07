@@ -439,6 +439,13 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   PrologueCleanupDepth = EHStack.stable_begin();
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);
 
+  // r4start
+  // Necessary for correct inserting
+  // SEH structures initialization.
+  if (IsMSExceptions) {
+    EHState.FunctioPrologueEndPoint = Builder.GetInsertPoint();
+  }
+
   if (D && isa<CXXMethodDecl>(D) && cast<CXXMethodDecl>(D)->isInstance()) {
     CGM.getCXXABI().EmitInstanceFunctionProlog(*this);
     const CXXMethodDecl *MD = cast<CXXMethodDecl>(D);

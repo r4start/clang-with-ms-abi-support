@@ -1187,12 +1187,13 @@ static void BeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
 
 // r4start
 static void MSBeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
-  VarDecl *CatchParam = S->getExceptionDecl();
-  if (!CatchParam)
+  VarDecl *catchParam = S->getExceptionDecl();
+  if (!catchParam)
     return;
   
   // Emit the local.
-  CodeGenFunction::AutoVarEmission var = CGF.EmitAutoVarAlloca(*CatchParam);
+  CodeGenFunction::AutoVarEmission var = CGF.EmitAutoVarAlloca(*catchParam);
+  CGF.EHState.CatchHandlers.back().ExceptionObject = catchParam;
 }
 
 // r4start
@@ -1365,7 +1366,8 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // r4start
     if (IsMSExceptions) {
       GenerateCatchHandler(C->getCaughtType(), 
-                           llvm::BlockAddress::get(CurFn, CatchBlock));
+                           llvm::BlockAddress::get(CurFn, CatchBlock),
+                           NumHandlers - I);
     }
 
     // Enter a cleanup scope, including the catch variable and the
