@@ -635,10 +635,22 @@ public:
   class MSEHState {
     CodeGenFunction &CGF;
   public:
+    struct CatchHandler {
+      int Index;
+      const VarDecl *ExceptionObject;
+      llvm::GlobalVariable *Handlers;
+
+      CatchHandler() : Index(-2), ExceptionObject(0), Handlers(0) {}
+      CatchHandler(llvm::GlobalVariable *CatchesTable) 
+       : Index(-2), ExceptionObject(0), Handlers(CatchesTable) {}
+      CatchHandler(int Idx) : Index(Idx), ExceptionObject(0), Handlers(0) {}
+    };
+
     typedef std::list< MsUnwindInfo > UnwindTableTy;
     typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
     typedef std::list< UnwindEntryRefList > TryStates;
-  
+    typedef llvm::SmallVector<CatchHandler, 4> HandlersArray;
+
     /// MS C++ EH specific.
     /// State of current try level.
     llvm::Value *MSTryState;
@@ -671,10 +683,13 @@ public:
 
     /// Catch handlers for current try.
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
+    HandlersArray CatchHandlers;
 
     // Address of eh-handler block.
     // Necessary for deferred block body generation.
     llvm::BasicBlock *EHHandler;
+
+    llvm::BasicBlock::iterator FunctioPrologueEndPoint;
 
     llvm::Constant *ESTypeList;
 
@@ -702,6 +717,8 @@ public:
                                           MSMangleContextExtensions *Mangler);
 
     bool IsInited() const { return MSTryState != 0; }
+
+    void InitOffsetInCatchHandlers();
   };
 
   CodeGenModule &CGM;  // Per-module state.
@@ -2827,9 +2844,6 @@ private:
   void EmitESTypeList(const FunctionProtoType *FuncProto);
 
   /// r4start
-  /// void UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This = 0);
-
-  /// r4start
   llvm::GlobalValue *EmitUnwindTable();
 
   /// r4start
@@ -2837,7 +2851,8 @@ private:
 
   /// r4start
   void GenerateCatchHandler(const QualType &CaughtType,
-                            llvm::BlockAddress *HandlerAddress);
+                            llvm::BlockAddress *HandlerAddress,
+                            int HandlerIdx);
 
   /// r4start
   llvm::GlobalValue *EmitTryBlockTable();
