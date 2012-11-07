@@ -83,59 +83,6 @@ public:
 }
 
 // r4start
-void CodeGenFunction::MSEHState::UpdateMSTryState(llvm::BasicBlock *LpadBlock,
-                                                  const Decl *FuncDecl, 
-                                                  llvm::Value *ThisPtr) {
-  if (!LpadBlock || CachedLPad == LpadBlock ||
-       LpadBlock == CGF.TerminateLandingPad) {
-    return;
-  }
-  
-  CachedLPad = 0;
-
-  if (!CachedLPad) {
-    LandingPads.push_back(LpadBlock);
-    CachedLPad = LpadBlock;
-  }
-
-  UnwindTableTy::iterator entry = 
-    std::find_if(GlobalUnwindTable.begin(), GlobalUnwindTable.end(),
-                 LpadFinder(CachedLPad));
-  
-  // This situation can be true in 2 cases:
-  //  1. New lpad dest & ctor call;
-  //  2. New lpad dest & dtor call(type doesn`t have declared ctor).
-  if (entry == GlobalUnwindTable.end()) {
-    SetMSTryState();
-    MsUnwindInfo &backRef = GlobalUnwindTable.back();
-    backRef.DestLpad = CachedLPad;
-    
-    if (ThisPtr) {
-      backRef.ThisPtr = ThisPtr;
-
-      const CXXRecordDecl *parent = cast<CXXMethodDecl>(FuncDecl)->getParent();
-      backRef.ReleaseFunc = getDtor(CGF.CGM, parent);
-      backRef.Funclet = CachedLPad;
-    }
-    
-    // In this case we just need specify right ToState value.
-    // If current try is 1 level try, then ToState must be equal -1.
-    // In other case we just restore last state from upper level.
-    TryStates::reverse_iterator upperLevel = ++LocalUnwindTable.rbegin();
-    if (upperLevel == LocalUnwindTable.rend()) {
-      backRef.ToState = -1;
-    } else {
-      assert(!upperLevel->empty() && 
-              "Upper level table has not be not empty!");
-      backRef.ToState = upperLevel->back()->StoreValue;
-    }
-  } else {
-    // This case true if it is a destructor call(type has declared ctor).
-    CreateStateStore(entry->ToState);
-  }
-}
-
-// r4start
 void CodeGenFunction::MSEHState::SetMSTryState() {
   InitMSTryState();
 
@@ -188,10 +135,7 @@ void CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(int State) {
   // TryNumber must be right because it necessary for GenerateTryBlockEntry.
   // If TryNumber is wrong then GenerateTryBlockEntry can not find this entry
   // in global unwind table.
-  if (!LastEntries.empty()) {
-    GlobalUnwindTable.back().TryNumber = 
-      LastEntries.back()->TryNumber + 1;
-  } else if (!LocalUnwindTable.back().empty()) {
+  if (!LocalUnwindTable.back().empty()) {
     GlobalUnwindTable.back().TryNumber = 
       (*(LocalUnwindTable.back().begin()))->TryNumber;
   } else {
@@ -201,8 +145,6 @@ void CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(int State) {
   GlobalUnwindTable.back().StoreInstTryLevel = TryLevel;
   GlobalUnwindTable.back().StoreIndex = StoreIndex++;
   GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
-
-  LastEntries.push_back(--GlobalUnwindTable.end());
 }
 
 llvm::BasicBlock *
@@ -254,37 +196,6 @@ static llvm::BasicBlock *getLPadBlock(CodeGenFunction &CGF) {
   // Restore the old IR generation state.
   CGF.Builder.restoreIP(savedIP);
   return lpadBlock;
-}
-
-// r4start
-void CodeGenFunction::MSEHState::CreateLPad() {
-  CachedLPad = getLPadBlock(CGF);
-  LandingPads.push_back(CachedLPad);
-}
-
-// r4start
-void CodeGenFunction::MSEHState::FinishLPad() {
-  if(LandingPads.empty()) {
-    return;
-  }
-
-  // TODO: Remove it!
-  llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
-  for (LPadStack::iterator I = LandingPads.begin(), E = LandingPads.end();
-       I != E; ++I) {
-    if (!(*I)->getTerminator()) {
-      CGF.Builder.SetInsertPoint(*I);
-      CGF.Builder.CreateUnreachable();
-    }
-  }
-  CGF.Builder.SetInsertPoint(oldBB);
-
-  #if 0
-  llvm::BasicBlock *oldBB = CGF.Builder.GetInsertBlock();
-  CGF.Builder.SetInsertPoint(LandingPads.back());
-  CGF.Builder.CreateUnreachable();
-  CGF.Builder.SetInsertPoint(oldBB);
-  #endif
 }
 
 // r4start
@@ -1379,167 +1290,3 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
     llvm::ConstantStruct::get(getHandlerType(CGM), fields);
   EHState.TryHandlers.push_back(handler);
 }
-
-// r4start
-void CodeGenFunction::ExitMSCXXTryStmt(const CXXTryStmt &S) {
-  unsigned NumHandlers = S.getNumHandlers();
-  
-  EHStack.popCatch();
-  
-  const FunctionDecl *fd = cast_or_null<FunctionDecl>(CurFuncDecl);
-  assert(fd && "Something goes wrong!");
-
-  MSMangleContextExtensions *msMangler = 
-    CGM.getCXXABI().getMangleContext().getMsExtensions();
-  assert(msMangler && "ExitMSCXXTryStmt must be called only for MS C++ ABI!");
-  
-  llvm::BasicBlock *oldBB = Builder.GetInsertBlock();
-  
-  llvm::Type *handlerTy = getHandlerType(CGM);
-
-  llvm::Value *restoringState = 0;
-  size_t index = -1;
-  if (!EHState.LastEntries.empty()) {
-    MSEHState::UnwindTableTy::iterator last = EHState.LastEntries.back();
-    index = std::distance(EHState.GlobalUnwindTable.begin(), last); 
-  }
-
-  restoringState = llvm::ConstantInt::get(Int32Ty, index);
-  llvm::Instruction *store = 0;
-  //  EHState.AddCatchEntryInUnwindTable(index, restoringState);
-  
-  llvm::BasicBlock *tryEnd = EHState.GenerateTryEndBlock(fd, msMangler);
-  llvm::BlockAddress *returnAddress = llvm::BlockAddress::get(tryEnd);
-
-  // llvm.seh.sav.ret.addr intrinsic
-  llvm::Function *saveRetAddrIntr = 
-    CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
-  
-  // In MS do it in straight way.
-  for (unsigned I = 0; I != NumHandlers; ++I) {
-    llvm::SmallString<256>  catchHandlerName;
-    llvm::raw_svector_ostream stream(catchHandlerName);
-
-    msMangler->mangleEHCatchFunction(fd, EHState.EHManglingCounter, stream);
-    EHState.EHManglingCounter++;
-
-    stream.flush();
-    StringRef mangledCatchName(catchHandlerName);
-
-    const CXXCatchStmt *C = S.getHandler(I);
-    llvm::BasicBlock *entryBB = 
-      llvm::BasicBlock::Create(CGM.getLLVMContext(),
-                               mangledCatchName,
-                               CurFn);
-    Builder.SetInsertPoint(entryBB);
-
-    EmitStmt(C->getHandlerBlock());
-
-    if (I) {
-      Builder.Insert(store->clone());
-    } else {
-      Builder.Insert(store);
-    }
-
-    Builder.CreateCall(saveRetAddrIntr, returnAddress);
-    Builder.CreateUnreachable();
-
-    QualType CaughtType = C->getCaughtType();
-    GenerateCatchHandler(CaughtType,
-                         llvm::BlockAddress::get(CurFn, entryBB));
-  }
-
-  EHState.LastCatchHandler = Builder.GetInsertBlock();
-
-  EHState.LastEntries.pop_back();
-
-  Builder.SetInsertPoint(oldBB);
-  
-  Builder.CreateBr(tryEnd);
-  
-  Builder.SetInsertPoint(tryEnd);
-
-  EHState.TryLevel--;
-
-  // Restore state after exiting from try block.
-  EHState.CreateStateStore(restoringState);
-
-  GenerateTryBlockTableEntry();
-
-  if (!EHState.LastEntries.empty()) {
-    EHState.LastEntries.pop_back();
-  }
-
-  EHState.LocalUnwindTable.pop_back();
-
-  EHState.CachedLPad = 0;
-  
-  assert(!EHState.LandingPads.empty() && 
-         "Try block have to have landing pad!");
-  EHState.LandingPads.pop_back();
-}
-
-#if 0
-// r4start
-void CodeGenFunction::UpdateEHInfo(const Decl *TargetDecl, llvm::Value *This) {
-  // Function call or we not in try stmt.
-  if (!This) {
-    return;
-  }
-
-  if (EHState.LocalUnwindTable.empty()) {
-    EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
-  }
-  
-  Decl::Kind kind;
-  const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(TargetDecl);
-      
-  if (MD) {
-    kind = MD->getKind();
-    if (kind == Decl::CXXConstructor) {
-      const CXXRecordDecl *parent = MD->getParent();
-      llvm::Value *dtor = getDtor(CGM, parent);
-      EHState.SetMSTryState();
-      EHState.GlobalUnwindTable.back().ThisPtr = This;
-      EHState.GlobalUnwindTable.back().ReleaseFunc = dtor;
-    } else if (kind == Decl::CXXDestructor && 
-               !EHState.LocalUnwindTable.back().empty()) {
-      llvm::Value *restoringVal = 0;
-      // TODO: get rid of call size().
-      if (EHState.LocalUnwindTable.back().size() > 1) {
-        restoringVal = 
-          (*(++EHState.LocalUnwindTable.back().rbegin()))->Store->
-                                                                 getOperand(0);
-      } else {
-        restoringVal = llvm::ConstantInt::get(Int32Ty, -1);
-      }
-      EHState.CreateStateStore(restoringVal);
-      
-      // Here we must check that last state is for ctor.
-      // This check necessary, because we can delete
-      // entry try-block state. 
-      if (EHState.LocalUnwindTable.back().back()->ThisPtr) {
-        EHState.LocalUnwindTable.back().pop_back();
-      }
-    }
-  }
-}
-
-llvm::BasicBlock *CodeGenFunction::getMSInvokeDestImpl() {
-  if (!EHState.EHHandler && !EHState.GlobalUnwindTable.empty()) {
-    EHState.EHHandler = getEHHandler(*this);
-  }
-
-  if (EHState.CachedLPad) {
-    return EHState.CachedLPad;
-  }
-
-  if (!EHState.LandingPads.empty()) {
-    EHState.CachedLPad = EHState.LandingPads.back();
-    return EHState.CachedLPad;
-  }
-
-  EHState.CreateLPad();
-  return EHState.CachedLPad;
-}
-#endif
