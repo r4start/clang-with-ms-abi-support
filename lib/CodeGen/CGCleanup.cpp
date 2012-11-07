@@ -175,8 +175,9 @@ void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
   // r4start
   if (IsEHCleanup) {
     InnermostEHScope = stable_begin();
-    if (CGF.IsMSExceptions)
+    if (CGF.IsMSExceptions) {
       CGF.EHState.SetMSTryState();
+    }
   }
   
   return Scope->getCleanupBuffer();
