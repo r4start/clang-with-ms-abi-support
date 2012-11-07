@@ -967,6 +967,10 @@ namespace {
     bool MightThrow;
 
     void Emit(CodeGenFunction &CGF, Flags flags) {
+      // r4start
+      if (CGF.IsMSExceptions)
+        return;
+
       if (!MightThrow) {
         CGF.Builder.CreateCall(getEndCatchFn(CGF))->setDoesNotThrow();
         return;
@@ -1202,6 +1206,16 @@ static void BeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
 }
 
 // r4start
+static void MSBeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
+  VarDecl *CatchParam = S->getExceptionDecl();
+  if (!CatchParam)
+    return;
+  
+  // Emit the local.
+  CodeGenFunction::AutoVarEmission var = CGF.EmitAutoVarAlloca(*CatchParam);
+}
+
+// r4start
 static void emitMSCatchDispatchBlock(CodeGenFunction &CGF,
                                      EHCatchScope &catchScope,
                                      llvm::BasicBlock *dispatchBlock) {
@@ -1381,6 +1395,8 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // Initialize the catch variable and set up the cleanups.
     if (!IsMSExceptions)
       BeginCatch(*this, C);
+    else
+      MSBeginCatch(*this, C);
 
     // Perform the body of the catch.
     EmitStmt(C->getHandlerBlock());
