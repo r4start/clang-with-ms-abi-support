@@ -633,15 +633,12 @@ public:
 
   /// r4start
   class MSEHState {
+    CodeGenFunction &CGF;
   public:
     typedef std::list< MsUnwindInfo > UnwindTableTy;
     typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
     typedef std::list< UnwindEntryRefList > TryStates;
-    typedef llvm::SmallVector<llvm::BasicBlock *, 4> LPadStack;
-  private:
-    CodeGenFunction &CGF;
-
-  public:
+  
     /// MS C++ EH specific.
     /// State of current try level.
     llvm::Value *MSTryState;
@@ -668,26 +665,12 @@ public:
     /// LocalUnwindTable holds refs to
     /// unwind entries in this try block.
     TryStates LocalUnwindTable;
-    
-    UnwindEntryRefList LastEntries;
 
     /// Try block table.
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
 
     /// Catch handlers for current try.
     llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
-
-    /// LandingPads stores landing pad for current stack frame.
-    /// MS SEH doesn`t have landing pads, but we use lpads,
-    /// because we want use invoke instead of call + br.
-    /// Also landing pad contains br to first catch handler.
-    /// This is necessary, because optimization passes can delete this blocks.
-    LPadStack LandingPads;
-    llvm::BasicBlock *CachedLPad;
-
-    /// We want to add br to unwind funclets, make them reachable.
-    /// If function has funclets, then we will add br to the end of last catch.
-    llvm::BasicBlock *LastCatchHandler;
 
     // Address of eh-handler block.
     // Necessary for deferred block body generation.
@@ -697,8 +680,8 @@ public:
 
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
-       ESTypeList(0), StoreIndex(0), TryNumber(0), CachedLPad(0), 
-       LastCatchHandler(0), EHHandler(0) {}
+       ESTypeList(0), StoreIndex(0), TryNumber(0), 
+       EHHandler(0) {}
 
     ~MSEHState() {}
     
@@ -712,17 +695,12 @@ public:
     llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
 
     void InitMSTryState();
-    void UpdateMSTryState(llvm::BasicBlock *LpadBlock,
-                          const Decl *FuncDecl = 0,
-                          llvm::Value *ThisPtr = 0);
 
     void AddCatchEntryInUnwindTable(int State);
 
     llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
                                           MSMangleContextExtensions *Mangler);
 
-    void CreateLPad();
-    void FinishLPad();
     bool IsInited() const { return MSTryState != 0; }
   };
 
@@ -1421,19 +1399,9 @@ public:
     return UnreachableBlock;
   }
 
-  // r4start
-  // Additional arguments are necessary for correct generating 
-  // MS unwind info structure.
   llvm::BasicBlock *getInvokeDest(const Decl *FuncDecl = 0,
                                   llvm::Value *ThisPtr = 0) {
     if (!EHStack.requiresLandingPad()) return 0;
-    #if 0
-    llvm::BasicBlock *LP = getInvokeDestImpl();
-    
-    if (IsMSExceptions)
-      EHState.UpdateMSTryState(LP, FuncDecl, ThisPtr);
-    return LP;
-    #endif
     return getInvokeDestImpl();
   }
 
@@ -2228,9 +2196,6 @@ public:
   llvm::Constant *getUnwindResumeOrRethrowFn();
   void EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
   void ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock = false);
-
-  /// r4start
-  void ExitMSCXXTryStmt(const CXXTryStmt &S);
 
   void EmitCXXTryStmt(const CXXTryStmt &S);
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S);

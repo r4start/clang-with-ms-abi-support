@@ -588,13 +588,7 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
-
-  /*if (IsMSExceptions) {
-    ExitMSCXXTryStmt(S);
-  } else {
-  */
-    ExitCXXTryStmt(S); 
-  //}
+  ExitCXXTryStmt(S); 
 }
 
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
@@ -605,22 +599,6 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   if (IsMSExceptions) {
     EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
     EHState.SetMSTryState();
-    #if 0
-    if (!EHState.IsInited()) {
-      EHState.InitMSTryState();
-    }
-
-    if (EHState.TryLevel) {
-      EHState.LastEntries.push_back(--EHState.GlobalUnwindTable.end());
-    }
-
-    ++EHState.TryNumber;
-    ++EHState.TryLevel;
-
-    EHState.SetMSTryState();
-
-    EHState.CreateLPad();
-    #endif
   } 
   
   for (unsigned I = 0; I != NumHandlers; ++I) {
