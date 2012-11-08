@@ -349,7 +349,7 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
       }
 
       ctorAddr = CGM.GetAddrOfCXXConstructor(copyCtorDecl,
-                         Ctor_Base);
+                                             Ctor_Base);
       ctorAddr = llvm::ConstantExpr::getBitCast(ctorAddr,
                                          catchableTy->getStructElementType(4));
     } else {
@@ -379,7 +379,7 @@ static llvm::Constant *getCatchable(CodeGenModule &CGM,
 
   llvm::Constant *init = llvm::ConstantStruct::get(catchableTy, catchableEntry);
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
-                                  llvm::GlobalValue::ExternalLinkage, 
+                                  llvm::GlobalValue::WeakAnyLinkage, 
                                   init, mangledName);
 }
 
@@ -526,6 +526,7 @@ static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM,
     llvm::ArrayType::get(catchableTy, numberOfBases);
 
   llvm::Constant *arr = llvm::ConstantArray::get(arrTy, init);
+
   llvm::Constant *number = llvm::ConstantInt::get(CGM.Int32Ty, numberOfBases);
   
   CTATypes fieldTypes;
@@ -543,7 +544,7 @@ static llvm::Constant *generateCatchableArrayInit(CodeGenModule &CGM,
 
   return
     new llvm::GlobalVariable(CGM.getModule(), cta->getType(), false,
-                             llvm::GlobalValue::ExternalLinkage,
+                             llvm::GlobalValue::WeakAnyLinkage,
                              cta, mangledName);
 }
 
@@ -617,7 +618,7 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
     generateThrowInfoInit(CGF, CatchType, throwInfoTy);
 
   return new llvm::GlobalVariable(CGF.CGM.getModule(), throwInfoTy, false,
-                                  llvm::GlobalValue::ExternalLinkage,
+                                  llvm::GlobalValue::WeakAnyLinkage,
                                   throwInfoInit, throwInfo);
 }
 
@@ -911,7 +912,7 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
 
     EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
                                                   init->getType(), false,
-                                  llvm::GlobalValue::InternalLinkage, init, "");
+                                  llvm::GlobalValue::WeakAnyLinkage, init, "");
     return;
   }
 
@@ -932,7 +933,7 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
   
   llvm::GlobalValue *handlers = 
     new llvm::GlobalVariable(CGM.getModule(), exceptionArray->getType(), false,
-                        llvm::GlobalValue::InternalLinkage, exceptionArray, "");
+                        llvm::GlobalValue::WeakAnyLinkage, exceptionArray, "");
 
   llvm::Constant *idxs[] = { 
     llvm::ConstantInt::get(Int32Ty, 0),
@@ -946,7 +947,7 @@ void CodeGenFunction::EmitESTypeList(const FunctionProtoType *FuncProto) {
   
   EHState.ESTypeList = new llvm::GlobalVariable(CGM.getModule(), 
                                                 init->getType(), false,
-                                  llvm::GlobalValue::InternalLinkage, init, "");
+                                  llvm::GlobalValue::WeakAnyLinkage, init, "");
 }
 
 // r4start
@@ -1005,7 +1006,7 @@ llvm::GlobalValue *CodeGenFunction::EmitUnwindTable() {
   llvm::Constant *init = llvm::ConstantArray::get(tableTy, entries);
 
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
-                                  llvm::GlobalValue::InternalLinkage, init,
+                                  llvm::GlobalValue::WeakAnyLinkage, init,
                                   mangledUnwindTableName);
 }
 
@@ -1160,7 +1161,7 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
 
   llvm::GlobalVariable *globalHandlers = 
     new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), false,
-                             llvm::GlobalValue::InternalLinkage, handlersArray,
+                             llvm::GlobalValue::WeakAnyLinkage, handlersArray,
                              mangledName);
 
   MSEHState::HandlersArray::iterator
@@ -1213,7 +1214,7 @@ llvm::GlobalValue *CodeGenFunction::EmitTryBlockTable() {
     llvm::ConstantArray::get(tableTy, EHState.TryBlockTableEntries);
 
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
-                                  llvm::GlobalValue::InternalLinkage, init,
+                                  llvm::GlobalValue::WeakAnyLinkage, init,
                                   mangledTryBlockTableName);
 }
 
@@ -1315,7 +1316,7 @@ llvm::GlobalValue *CodeGenFunction::EmitMSFuncInfo() {
   StringRef ehName(structName);
 
   return new llvm::GlobalVariable(CGM.getModule(), init->getType(), false,
-                              llvm::GlobalValue::InternalLinkage, init, ehName);
+                              llvm::GlobalValue::WeakAnyLinkage, init, ehName);
 }
 
 // r4start
@@ -1380,7 +1381,6 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
     CGM.GetDescriptorPtrType(Int8PtrTy)));
 
   // dispatch obj
-  // TODO: generate right epb offset!
   fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
 
   // address of handler
