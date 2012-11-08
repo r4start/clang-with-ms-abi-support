@@ -61,7 +61,7 @@ void CodeGenFunction::MSEHState::InitMSTryState() {
   }
 }
 
-static llvm::Value *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
+static llvm::GlobalValue *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class) {
   if (!Class->hasUserDeclaredDestructor()) {
     return 0;
   }
@@ -555,8 +555,7 @@ static llvm::Constant *generateThrowInfoInit(CodeGenFunction &CGF,
   const CXXRecordDecl *throwTypeDecl = ThrowTy->getAsCXXRecordDecl();
   llvm::GlobalValue *dtorPtr = 0;
   if (throwTypeDecl) {
-    if (const CXXDestructorDecl *dtorDecl = throwTypeDecl->getDestructor())
-      dtorPtr = CGF.CGM.GetAddrOfCXXDestructor(dtorDecl, Dtor_Base);
+      dtorPtr = getDtor(CGF.CGM, throwTypeDecl);
   }
   
   llvm::SmallVector<llvm::Constant *, 4> initVals;
