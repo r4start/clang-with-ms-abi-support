@@ -1351,24 +1351,38 @@ void CodeGenFunction::EmitEHInformation() {
 void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
                                            llvm::BlockAddress *HandlerAddress,
                                            int HandlerIdx) {
-  // 0x01: const, 0x02: volatile, 0x08: reference
+  // 0x01: const, 0x02: volatile, 0x08: reference, 0x40 ellipsis
   int handlerAdjectives = 0;
-  if (CaughtType.isConstQualified()) {
-    handlerAdjectives |= 1;
-  }
+  QualType nonQualifiedType;
+  llvm::Constant *typeDescriptor;
 
-  if (CaughtType.isVolatileQualified()) {
-    handlerAdjectives |= 2;
-  }
+  if (CaughtType.getAsOpaquePtr()) {
+    if (CaughtType.isConstQualified()) {
+      handlerAdjectives |= 1;
+    }
 
-  if (CaughtType->isReferenceType()) {
-    handlerAdjectives |= 8;
-  }
+    if (CaughtType.isVolatileQualified()) {
+      handlerAdjectives |= 2;
+    }
 
-  QualType nonQualifiedType = 
+    if (CaughtType->isReferenceType()) {
+      handlerAdjectives |= 8;
+    }
+
+  nonQualifiedType  = 
     CaughtType.getNonReferenceType().getUnqualifiedType();
-  llvm::Constant *TypeDescriptor = 
+  typeDescriptor = 
     CGM.GetAddrOfMSTypeDescriptor(nonQualifiedType);
+  typeDescriptor = llvm::ConstantExpr::getBitCast(typeDescriptor,
+                                          CGM.GetDescriptorPtrType(Int8PtrTy));
+  } else {
+    // case for catch (...)
+    handlerAdjectives = 0x40;
+
+    llvm::PointerType *descrTy = 
+      cast<llvm::PointerType>(CGM.GetDescriptorPtrType(Int8PtrTy));
+    typeDescriptor = llvm::ConstantPointerNull::get(descrTy);
+  }
 
   llvm::SmallVector<llvm::Constant *, 4> fields;
 
@@ -1376,8 +1390,7 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
   fields.push_back(llvm::ConstantInt::get(Int32Ty, handlerAdjectives));
 
   // pTypeDescr
-  fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescriptor,
-    CGM.GetDescriptorPtrType(Int8PtrTy)));
+  fields.push_back(typeDescriptor);
 
   // dispatch obj
   fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));

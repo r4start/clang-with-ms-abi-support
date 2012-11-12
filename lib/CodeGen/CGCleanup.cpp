@@ -155,6 +155,7 @@ void EHScopeStack::memorizeState(CleanupKind K, Cleanup *Obj) {
   }
 }
 
+// r4start
 void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
   assert(((Size % sizeof(void*)) == 0) && "cleanup type is misaligned");
   char *Buffer = allocate(EHCleanupScope::getSizeForCleanupSize(Size));
