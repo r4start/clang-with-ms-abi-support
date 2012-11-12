@@ -623,28 +623,33 @@ static llvm::GlobalVariable *getOrGenerateThrowInfo(CodeGenFunction &CGF,
 
 // r4start
 void CodeGenFunction::EmitMSCXXThrowExpr(const CXXThrowExpr *E) {
-  if (!E->getSubExpr()) {
-    assert(false && "I do not know how ms do throw without sub expression!");
-    return;
+  llvm::Value *CXXThrowExParam = 0;
+  llvm::Value *ThrowInfo = 0;
+
+  if (E->getSubExpr()) {
+    QualType ThrowType = E->getSubExpr()->getType();
+
+    uint64_t ThrowTypeSize = 
+      getContext().getTypeSizeInChars(ThrowType).getQuantity();
+
+    llvm::Type *throwTy = CGM.getTypes().ConvertType(ThrowType);
+
+    llvm::AllocaInst *ThrowObj = Builder.CreateAlloca(throwTy, 0,
+                                                      "throw.object");
+
+    // If need emits ctor call.
+    EmitAnyExprToMem(E->getSubExpr(), ThrowObj,
+                     E->getSubExpr()->getType().getQualifiers(), true);
+
+    CXXThrowExParam = Builder.CreateBitCast(ThrowObj, CGM.Int8PtrTy);
+
+    ThrowInfo = getOrGenerateThrowInfo(*this, ThrowType);
+  } else {
+    // rethrow
+    ThrowInfo = 
+      llvm::ConstantPointerNull::get(getThrowInfoType(CGM)->getPointerTo());
+    CXXThrowExParam = llvm::ConstantPointerNull::get(Int8PtrTy);
   }
-
-  QualType ThrowType = E->getSubExpr()->getType();
-
-  uint64_t ThrowTypeSize = 
-    getContext().getTypeSizeInChars(ThrowType).getQuantity();
-
-  llvm::Type *throwTy = CGM.getTypes().ConvertType(ThrowType);
-
-  llvm::AllocaInst *ThrowObj = Builder.CreateAlloca(throwTy, 0,
-                                                    "throw.object");
-
-  // If need emits ctor call.
-  EmitAnyExprToMem(E->getSubExpr(), ThrowObj,
-                   E->getSubExpr()->getType().getQualifiers(), true);
-
-  llvm::Value *CXXThrowExParam = Builder.CreateBitCast(ThrowObj, CGM.Int8PtrTy);
-
-  llvm::GlobalVariable *ThrowInfo = getOrGenerateThrowInfo(*this, ThrowType);
 
   llvm::Value *Params[] = { CXXThrowExParam, ThrowInfo };
                         
@@ -1351,24 +1356,38 @@ void CodeGenFunction::EmitEHInformation() {
 void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
                                            llvm::BlockAddress *HandlerAddress,
                                            int HandlerIdx) {
-  // 0x01: const, 0x02: volatile, 0x08: reference
+  // 0x01: const, 0x02: volatile, 0x08: reference, 0x40 ellipsis
   int handlerAdjectives = 0;
-  if (CaughtType.isConstQualified()) {
-    handlerAdjectives |= 1;
-  }
+  QualType nonQualifiedType;
+  llvm::Constant *typeDescriptor;
 
-  if (CaughtType.isVolatileQualified()) {
-    handlerAdjectives |= 2;
-  }
+  if (CaughtType.getAsOpaquePtr()) {
+    if (CaughtType.isConstQualified()) {
+      handlerAdjectives |= 1;
+    }
 
-  if (CaughtType->isReferenceType()) {
-    handlerAdjectives |= 8;
-  }
+    if (CaughtType.isVolatileQualified()) {
+      handlerAdjectives |= 2;
+    }
 
-  QualType nonQualifiedType = 
+    if (CaughtType->isReferenceType()) {
+      handlerAdjectives |= 8;
+    }
+
+  nonQualifiedType  = 
     CaughtType.getNonReferenceType().getUnqualifiedType();
-  llvm::Constant *TypeDescriptor = 
+  typeDescriptor = 
     CGM.GetAddrOfMSTypeDescriptor(nonQualifiedType);
+  typeDescriptor = llvm::ConstantExpr::getBitCast(typeDescriptor,
+                                          CGM.GetDescriptorPtrType(Int8PtrTy));
+  } else {
+    // case for catch (...)
+    handlerAdjectives = 0x40;
+
+    llvm::PointerType *descrTy = 
+      cast<llvm::PointerType>(CGM.GetDescriptorPtrType(Int8PtrTy));
+    typeDescriptor = llvm::ConstantPointerNull::get(descrTy);
+  }
 
   llvm::SmallVector<llvm::Constant *, 4> fields;
 
@@ -1376,8 +1395,7 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
   fields.push_back(llvm::ConstantInt::get(Int32Ty, handlerAdjectives));
 
   // pTypeDescr
-  fields.push_back(llvm::ConstantExpr::getBitCast(TypeDescriptor,
-    CGM.GetDescriptorPtrType(Int8PtrTy)));
+  fields.push_back(typeDescriptor);
 
   // dispatch obj
   fields.push_back(llvm::ConstantInt::get(Int32Ty, 0));
