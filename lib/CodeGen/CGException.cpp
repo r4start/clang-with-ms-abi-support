@@ -600,6 +600,7 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   // Generate id in start of try block.
   if (IsMSExceptions) {
     EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
+    EHState.TryHandlers.push_back(llvm::SmallVector<llvm::Constant *, 4>());
     EHState.SetMSTryState();
   } 
   

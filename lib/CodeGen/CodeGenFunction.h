@@ -635,21 +635,27 @@ public:
   class MSEHState {
     CodeGenFunction &CGF;
   public:
+    typedef std::list< MsUnwindInfo > UnwindTableTy;
+    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
+    typedef std::list< UnwindEntryRefList > TryStates;
+
     struct CatchHandler {
       int Index;
       const VarDecl *ExceptionObject;
       llvm::GlobalVariable *Handlers;
+      UnwindTableTy::iterator ParentTry;
 
-      CatchHandler() : Index(-2), ExceptionObject(0), Handlers(0) {}
+      CatchHandler() 
+       : Index(-2), ExceptionObject(0), Handlers(0) {}
       CatchHandler(llvm::GlobalVariable *CatchesTable) 
        : Index(-2), ExceptionObject(0), Handlers(CatchesTable) {}
-      CatchHandler(int Idx) : Index(Idx), ExceptionObject(0), Handlers(0) {}
+      CatchHandler(int Idx, UnwindTableTy::iterator Parent) 
+       : Index(Idx), ExceptionObject(0), Handlers(0), ParentTry(Parent) {}
     };
 
-    typedef std::list< MsUnwindInfo > UnwindTableTy;
-    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
-    typedef std::list< UnwindEntryRefList > TryStates;
     typedef llvm::SmallVector<CatchHandler, 4> HandlersArray;
+    typedef std::list< llvm::SmallVector<llvm::Constant *, 4> > 
+                                                  CatchHandlersList;
 
     /// MS C++ EH specific.
     /// State of current try level.
@@ -682,7 +688,7 @@ public:
     llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
 
     /// Catch handlers for current try.
-    llvm::SmallVector<llvm::Constant *, 4> TryHandlers;
+    CatchHandlersList TryHandlers;
     HandlersArray CatchHandlers;
 
     // Address of eh-handler block.
