@@ -1083,9 +1083,17 @@ namespace {
 
 struct StartOfNewCatchHandlers {
   typedef CodeGenFunction::MSEHState::CatchHandler CatchHandler;
+  typedef CodeGenFunction::MSEHState::UnwindTableTy::iterator TryEntry;
+
+  StartOfNewCatchHandlers(TryEntry Parent) : InnermostTry(Parent) {}
+
   bool operator() (const CatchHandler &Handler) {
-    return Handler.Handlers == 0;
+    return Handler.Handlers == 0 &&
+           Handler.ParentTry == InnermostTry;
   }
+
+  private:
+    TryEntry InnermostTry;
 };
 
 struct InitNewCatchHandlersHandler {
@@ -1102,7 +1110,7 @@ struct InitNewCatchHandlersHandler {
 
 // r4start
 void CodeGenFunction::GenerateTryBlockTableEntry() {
-  llvm::Type *handlerTy = (*EHState.TryHandlers.begin())->getType();
+  llvm::Type *handlerTy = (*EHState.TryHandlers.back().begin())->getType();
 
   llvm::SmallVector<llvm::Constant *, 5> fields;
 
@@ -1142,12 +1150,14 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   fields.push_back(tryHigh);
   fields.push_back(catchHigh);
 
-  fields.push_back(llvm::ConstantInt::get(Int32Ty, EHState.TryHandlers.size()));
+  fields.push_back(llvm::ConstantInt::get(Int32Ty,
+                                          EHState.TryHandlers.back().size()));
 
   llvm::ArrayType *arrayOfHandlersTy = 
-    llvm::ArrayType::get(handlerTy, EHState.TryHandlers.size());
+    llvm::ArrayType::get(handlerTy, EHState.TryHandlers.back().size());
   llvm::Constant *handlersArray = 
-               llvm::ConstantArray::get(arrayOfHandlersTy, EHState.TryHandlers);
+               llvm::ConstantArray::get(arrayOfHandlersTy,
+                                        EHState.TryHandlers.back());
 
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
@@ -1171,12 +1181,21 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   MSEHState::HandlersArray::iterator
     newHandlers = std::find_if(EHState.CatchHandlers.begin(),
                                EHState.CatchHandlers.end(),
-                               StartOfNewCatchHandlers());
+                               StartOfNewCatchHandlers(firstState));
 
   assert(newHandlers != EHState.CatchHandlers.end() &&
          "Try block must have catch handlers!");
 
-  std::for_each(newHandlers, EHState.CatchHandlers.end(),
+  MSEHState::HandlersArray::reverse_iterator
+    endOfNewHandlers = std::find_if(EHState.CatchHandlers.rbegin(),
+                                    EHState.CatchHandlers.rend(),
+                                    StartOfNewCatchHandlers(firstState));
+  
+  assert(endOfNewHandlers != EHState.CatchHandlers.rend() &&
+         "Can not find last of catch handlers for current try!");
+
+  std::for_each(endOfNewHandlers,
+                MSEHState::HandlersArray::reverse_iterator(newHandlers),
                 InitNewCatchHandlersHandler(globalHandlers));
 
   llvm::Constant *addrOfGlobalhandlers = 
@@ -1191,7 +1210,7 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   
   // After all we must clear all entries,
   // because it can be nested try.
-  EHState.TryHandlers.clear();
+  EHState.TryHandlers.pop_back();
 }
 
 // r4start
@@ -1405,7 +1424,9 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
 
   llvm::Constant *handler = 
     llvm::ConstantStruct::get(getHandlerType(CGM), fields);
-  EHState.TryHandlers.push_back(handler);
+  EHState.TryHandlers.back().push_back(handler);
   
-  EHState.CatchHandlers.push_back(HandlerIdx);
+  EHState.CatchHandlers.push_back(
+    MSEHState::CatchHandler(HandlerIdx, 
+                            *EHState.LocalUnwindTable.back().begin()));
 }
