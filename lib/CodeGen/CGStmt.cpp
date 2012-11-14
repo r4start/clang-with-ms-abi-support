@@ -187,6 +187,18 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S) {
   return true;
 }
 
+/// r4start
+/// Check whether block contains try-block.
+static bool hasTryBlock(const Stmt &S) {
+  for (Stmt::const_child_iterator I = S.child_begin(), E = S.child_end();
+       I != E; ++I) {
+    if (dyn_cast<CXXTryStmt>(*I)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// EmitCompoundStmt - Emit a compound statement {..} node.  If GetLast is true,
 /// this captures the expression result of the last sub-statement and returns it
 /// (for use by the statement expression extension).
@@ -197,6 +209,13 @@ RValue CodeGenFunction::EmitCompoundStmt(const CompoundStmt &S, bool GetLast,
 
   // Keep track of the current cleanup stack depth, including debug scopes.
   LexicalScope Scope(*this, S.getSourceRange());
+
+  // r4start
+  // MS introduce save esp instruction at scope start.
+  // This operation necessary only if block contains try-block.
+  if (IsMSExceptions && hasTryBlock(S)) {
+    EHState.SaveStackPointer();
+  }
 
   for (CompoundStmt::const_body_iterator I = S.body_begin(),
        E = S.body_end()-GetLast; I != E; ++I)
