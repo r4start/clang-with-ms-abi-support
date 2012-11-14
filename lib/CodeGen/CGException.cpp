@@ -1338,6 +1338,11 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     ContBB = createBasicBlock("try.cont", CurFn);
     SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
     tryCont = llvm::BlockAddress::get(ContBB);
+
+    // Catch handlers have entry in unwind table,
+    // so generate it.
+    EHState.AddCatchEntryInUnwindTable(
+      (*EHState.LocalUnwindTable.back().begin())->ToState);
   }
   // We just emitted the body of the try; jump to the continue block.
   if (HaveInsertPoint())
@@ -1420,11 +1425,6 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   } else {
     EmitBranch(ContBB);
     Builder.SetInsertPoint(ContBB);
-
-    // Catch handlers have entry in unwind table,
-    // so generate it.
-    EHState.AddCatchEntryInUnwindTable(
-      (*EHState.LocalUnwindTable.back().begin())->ToState);
       
     GenerateTryBlockTableEntry();
 

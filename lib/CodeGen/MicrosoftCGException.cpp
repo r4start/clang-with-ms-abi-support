@@ -80,7 +80,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   if (!state) {
     GlobalUnwindTable.push_back(-1);
   } else {
-    GlobalUnwindTable.push_back(GlobalUnwindTable.back().StoreValue);
+    GlobalUnwindTable.push_back(state - 1);
   }
 
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
