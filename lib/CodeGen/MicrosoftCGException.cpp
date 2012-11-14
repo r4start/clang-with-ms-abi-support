@@ -68,20 +68,6 @@ static llvm::GlobalValue *getDtor(CodeGenModule &CGM, const CXXRecordDecl *Class
   return CGM.GetAddrOfCXXDestructor(Class->getDestructor(), Dtor_Base);
 }
 
-namespace {
-
-class LpadFinder {
-  llvm::BasicBlock *BlockToFind;
-public:
-  LpadFinder(llvm::BasicBlock *B) : BlockToFind(B) {}
-
-  bool operator() (const MsUnwindInfo &E) {
-    return E.DestLpad == BlockToFind;
-  }
-};
-
-}
-
 // r4start
 void CodeGenFunction::MSEHState::SetMSTryState() {
   InitMSTryState();
@@ -145,6 +131,18 @@ void CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(int State) {
   GlobalUnwindTable.back().StoreInstTryLevel = TryLevel;
   GlobalUnwindTable.back().StoreIndex = StoreIndex++;
   GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
+}
+
+void CodeGenFunction::MSEHState::SaveStackPointer() {
+  if (GlobalUnwindTable.empty()) {
+    return;
+  }
+
+  if (!SaveSPIntrinsic) {
+    SaveSPIntrinsic = CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_esp_save);
+  }
+
+  CGF.Builder.CreateCall(SaveSPIntrinsic);
 }
 
 llvm::BasicBlock *
@@ -1033,6 +1031,7 @@ void CodeGenFunction::MSEHState::InitOffsetInCatchHandlers() {
     llvm::BasicBlock *afterSEHInit = 
       entryBlock->splitBasicBlock(I, "after.seh.init");
     entryBlock->getTerminator()->eraseFromParent();
+    SaveStackPointer();
     CGF.Builder.CreateBr(sehInitBlock);
     entryBlock = afterSEHInit;
     break;
@@ -1074,7 +1073,7 @@ void CodeGenFunction::MSEHState::InitOffsetInCatchHandlers() {
   }
 
   sehInitBlock->moveBefore(entryBlock);
-  
+
   CGF.Builder.CreateBr(entryBlock);
   CGF.Builder.SetInsertPoint(currentIP);
 }

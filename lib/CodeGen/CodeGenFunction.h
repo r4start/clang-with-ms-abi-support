@@ -634,6 +634,9 @@ public:
   /// r4start
   class MSEHState {
     CodeGenFunction &CGF;
+
+    llvm::Function *SaveSPIntrinsic;
+
   public:
     typedef std::list< MsUnwindInfo > UnwindTableTy;
     typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
@@ -702,7 +705,7 @@ public:
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
        ESTypeList(0), StoreIndex(0), TryNumber(0), 
-       EHHandler(0) {}
+       EHHandler(0), SaveSPIntrinsic(0) {}
 
     ~MSEHState() {}
     
@@ -725,6 +728,8 @@ public:
     bool IsInited() const { return MSTryState != 0; }
 
     void InitOffsetInCatchHandlers();
+
+    void SaveStackPointer();
   };
 
   CodeGenModule &CGM;  // Per-module state.
