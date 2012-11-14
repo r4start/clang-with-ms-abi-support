@@ -77,11 +77,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   }
 
   size_t state = GlobalUnwindTable.size();
-  if (!state) {
-    GlobalUnwindTable.push_back(-1);
-  } else {
-    GlobalUnwindTable.push_back(state - 1);
-  }
+  GlobalUnwindTable.push_back(state - 1);
 
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
   
@@ -1133,19 +1129,29 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   }
   
   assert (lastEntry != EHState.GlobalUnwindTable.rend() &&
-          "Can not find last entry for this try block!");
- 
+          "Can not find catch entry for this try block!");
+  
   llvm::Constant *catchHigh = 
     llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
 
-  ++lastEntry;
-  
-  assert (lastEntry != EHState.GlobalUnwindTable.rend() &&
-          "Can not find catch entry for this try block!");
+  MSEHState::UnwindTableTy::iterator lastState = firstState;
 
+  while (lastState != EHState.GlobalUnwindTable.end()) {
+    if (lastState->RestoreKind == RestoreOpInfo::CatchRestore &&
+        lastState->StoreInstTryLevel == firstState->StoreInstTryLevel &&
+        lastState->TryNumber == firstState->TryNumber) {
+      break;
+    }
+    ++lastState;
+  }
+
+  assert (lastState != EHState.GlobalUnwindTable.end() &&
+          "Can not find last entry for this try block!");
+  int highVal = std::distance(firstState, lastState);
+  highVal = highVal == 1 ? firstState->StoreValue : highVal;
   llvm::Constant *tryHigh = 
-    llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
-  
+    llvm::ConstantInt::get(Int32Ty, highVal);
+
   fields.push_back(tryHigh);
   fields.push_back(catchHigh);
 
