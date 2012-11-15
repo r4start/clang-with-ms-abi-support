@@ -639,7 +639,10 @@ public:
 
   public:
     typedef std::list< MsUnwindInfo > UnwindTableTy;
-    typedef std::list< UnwindTableTy::iterator > UnwindEntryRefList;
+    typedef UnwindTableTy::iterator UnwindEntryPtr;
+    typedef UnwindTableTy::reverse_iterator UnwindEntryReversePtr;
+
+    typedef std::list< UnwindEntryPtr > UnwindEntryRefList;
     typedef std::list< UnwindEntryRefList > TryStates;
 
     struct CatchHandler {
@@ -727,10 +730,15 @@ public:
 
     bool IsInited() const { return MSTryState != 0; }
 
+    void InitNewCatchHandlers(llvm::GlobalVariable *HandlersArray);
     void InitOffsetInCatchHandlers();
 
     void SaveStackPointer();
   };
+
+  /// r4start
+  typedef MSEHState::UnwindTableTy::iterator UnwindEntryPtr;
+  typedef MSEHState::UnwindTableTy::reverse_iterator UnwindEntryReversePtr;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
