@@ -77,7 +77,16 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   }
 
   size_t state = GlobalUnwindTable.size();
-  GlobalUnwindTable.push_back(state - 1);
+  if (!state) {
+    GlobalUnwindTable.push_back(-1);
+  } else {
+    auto prevTable = (++LocalUnwindTable.rbegin());
+    if (prevTable == LocalUnwindTable.rend()) {
+      GlobalUnwindTable.push_back(-1);
+    } else {
+      GlobalUnwindTable.push_back(prevTable->back()->StoreValue);
+    }
+  }
 
   MsUnwindInfo &backRef = GlobalUnwindTable.back();
   
