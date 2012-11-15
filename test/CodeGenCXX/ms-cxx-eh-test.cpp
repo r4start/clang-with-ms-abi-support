@@ -130,33 +130,26 @@ int test1() {
 
 int test2() {
   try {
-    A a, b;
     s();
     try {
-      B f, g;
       s();
     } catch (B &) {}
-  } catch (A &) {
   } catch (int &) {}
   return 0;
 }
 
 int test3() {
   try {
-    A a, b;
     s();
-  } catch (A &) {
   } catch (int &) {
   }
   try {
-    B h, gh;
     s();
-  } catch (B &) {
   } catch (int &) {
   }
   return 0;
 }
-
+/*
 int test4() {
   try {
     C fl;
@@ -176,7 +169,7 @@ int test4() {
   } catch (C&) {}
   return 0;
 }
-/*
+
 int test5() {
   C ad;
   try {
