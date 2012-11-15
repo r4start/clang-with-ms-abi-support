@@ -3,11 +3,21 @@
 
 //////////////////////////////////////////////Test 1//////////////////////////////////////////////
 
-// : @"\01__catchsym$test1@@YAHXZ$2" = internal constant [1 x %handler.type] [%handler.type { i32 8, %type.descriptor* bitcast ({ i8**, i32, [8 x i8] }* @"\01??_R0?AUA@@@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test1@@YAHXZ", %"\01__catch$test1@@YAHXZ$0") }]
+// CHECK: @"\01__CT??_R0H@84" = weak global %catchable.type { i32 1, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), %pmd.type { i32 0, i32 -1, i32 0 }, i32 4, void ()* null }
 
-// : @"\01__tryblocktable$test1@@YAHXZ" = internal constant [1 x %tryblock.map.entry] [%tryblock.map.entry { i32 0, i32 2, i32 3, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test1@@YAHXZ$2", i32 0, i32 0) }]
+// CHECK: @"\01__CTA1H" = weak global { i32, [1 x %catchable.type*] } { i32 1, [1 x %catchable.type*] [%catchable.type* @"\01__CT??_R0H@84"] }
 
-// : @"\01__unwindtable$test1@@YAHXZ" = internal constant [4 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 0, i8* blockaddress(@"\01?test1@@YAHXZ", %"\01__unwindfunclet$test1@@YAHXZ$3") }, %unwind.map.entry { i32 1, i8* blockaddress(@"\01?test1@@YAHXZ", %"\01__unwindfunclet$test1@@YAHXZ$4") }, %unwind.map.entry { i32 -1, i8* null }]
+// CHECK: @"\01__TI1H" = weak global %throw.info.type { i32 0, void ()* null, i32 ()* null, %catchable.array.type* bitcast ({ i32, [1 x %catchable.type*] }* @"\01__CTA1H" to %catchable.array.type*) }
+
+// CHECK: @"\01??_R0?AUA@@@8" = weak constant { i8**, i32, [8 x i8] } { i8** @"\01??_7type_info@@6B@", i32 0, [8 x i8] c".?AUA@@\00" }
+
+// CHECK: @"\01__catchsym$test1@@YAHXZ$0" = weak global [1 x %handler.type] [%handler.type { i32 8, %type.descriptor* bitcast ({ i8**, i32, [8 x i8] }* @"\01??_R0?AUA@@@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test1@@YAHXZ", %catch) }]
+
+// CHECK: @"\01__tryblocktable$test1@@YAHXZ" = weak global [1 x %tryblock.map.entry] [%tryblock.map.entry { i32 0, i32 3, i32 3, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test1@@YAHXZ$0", i32 0, i32 0) }]
+
+// CHECK: @"\01__unwindtable$test1@@YAHXZ" = weak global [4 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 0, i8* blockaddress(@"\01?test1@@YAHXZ", %ehcleanup) }, %unwind.map.entry { i32 1, i8* null }, %unwind.map.entry { i32 -1, i8* null }]
+
+// CHECK: @"\01__ehfuncinfo$test1@@YAHXZ" = weak global %ehfuncinfo { i32 429065506, i32 4, %unwind.map.entry* getelementptr inbounds ([4 x %unwind.map.entry]* @"\01__unwindtable$test1@@YAHXZ", i32 0, i32 0), i32 1, %tryblock.map.entry* getelementptr inbounds ([1 x %tryblock.map.entry]* @"\01__tryblocktable$test1@@YAHXZ", i32 0, i32 0), i32 0, i8* null, %estypelist* null, i32 1 }
 
 //////////////////////////////////////////////Test 2//////////////////////////////////////////////
 
@@ -72,26 +82,30 @@
 
 //////////////////////////////////////////////Test 10/////////////////////////////////////////////
 
-// CHECK: @"\01??_7type_info@@6B@" = external global i8*
-// CHECK: @"\01??_R0H@8" = weak constant { i8**, i32, [3 x i8] } { i8** @"\01??_7type_info@@6B@", i32 0, [3 x i8] c".H\00" }
 // CHECK: @"\01__CT??_R0H@84" = weak global %catchable.type { i32 1, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), %pmd.type { i32 0, i32 -1, i32 0 }, i32 4, void ()* null }
 // CHECK: @"\01__CTA1H" = weak global { i32, [1 x %catchable.type*] } { i32 1, [1 x %catchable.type*] [%catchable.type* @"\01__CT??_R0H@84"] }
+
 // CHECK: @"\01__TI1H" = weak global %throw.info.type { i32 0, void ()* null, i32 ()* null, %catchable.array.type* bitcast ({ i32, [1 x %catchable.type*] }* @"\01__CTA1H" to %catchable.array.type*) }
+
 // CHECK: @"\01__catchsym$test10@@YAHXZ$0" = weak global [1 x %handler.type] [%handler.type { i32 0, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test10@@YAHXZ", %catch) }]
+
 // CHECK: @"\01__catchsym$test10@@YAHXZ$1" = weak global [1 x %handler.type] [%handler.type { i32 0, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test10@@YAHXZ", %catch10) }]
+
 // CHECK: @"\01__catchsym$test10@@YAHXZ$2" = weak global [1 x %handler.type] [%handler.type { i32 8, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test10@@YAHXZ", %catch5) }]
+
 // CHECK: @"\01__tryblocktable$test10@@YAHXZ" = weak global [3 x %tryblock.map.entry] [%tryblock.map.entry { i32 1, i32 1, i32 2, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test10@@YAHXZ$0", i32 0, i32 0) }, %tryblock.map.entry { i32 4, i32 4, i32 5, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test10@@YAHXZ$1", i32 0, i32 0) }, %tryblock.map.entry { i32 0, i32 2, i32 5, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test10@@YAHXZ$2", i32 0, i32 0) }]
+
 // CHECK: @"\01__unwindtable$test10@@YAHXZ" = weak global [6 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry zeroinitializer, %unwind.map.entry zeroinitializer, %unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 3, i8* null }, %unwind.map.entry { i32 3, i8* null }]
+
 // CHECK: @"\01__ehfuncinfo$test10@@YAHXZ" = weak global %ehfuncinfo { i32 429065506, i32 6, %unwind.map.entry* getelementptr inbounds ([6 x %unwind.map.entry]* @"\01__unwindtable$test10@@YAHXZ", i32 0, i32 0), i32 3, %tryblock.map.entry* getelementptr inbounds ([3 x %tryblock.map.entry]* @"\01__tryblocktable$test10@@YAHXZ", i32 0, i32 0), i32 0, i8* null, %estypelist* null, i32 1 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
-/*
-struct A {
- A() { }
- ~A() {
- }
-};
 
+struct A {
+ A(){}
+ ~A(){}
+};
+/*
 struct B {
  B() { }
  ~B() { }
@@ -107,14 +121,14 @@ struct D{
 };
 */
 void s() { throw 1; }
-/*
+
 int test1() {
   try {
     A a, b;
   } catch (A &) {}
   return 0;
 }
-
+/*
 int test2() {
   try {
     A a, b;
