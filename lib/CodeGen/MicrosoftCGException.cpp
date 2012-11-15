@@ -1152,7 +1152,8 @@ static int getTryHigh(CodeGenFunction::UnwindEntryPtr FirstState,
   while (LastState != End) {
     if (LastState->RestoreKind == RestoreOpInfo::CatchRestore &&
         LastState->StoreInstTryLevel == FirstState->StoreInstTryLevel &&
-        LastState->TryNumber == FirstState->TryNumber) {
+        LastState->TryNumber == FirstState->TryNumber &&
+        LastState->ToState == FirstState->ToState) {
       break;
     }
     ++LastState;
@@ -1161,7 +1162,7 @@ static int getTryHigh(CodeGenFunction::UnwindEntryPtr FirstState,
   assert (LastState != End &&
           "Can not find last entry for this try block!");
   int highVal = std::distance(FirstState, LastState);
-  return highVal == 1 ? FirstState->StoreValue : highVal;
+  return highVal == 1 ? FirstState->StoreValue : highVal - 1;
 }
 
 // r4start

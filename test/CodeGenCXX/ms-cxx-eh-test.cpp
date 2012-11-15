@@ -109,12 +109,12 @@ struct B {
  B() { }
  ~B() { }
 };
-/*
+
 struct C {
  C() { }
  ~C() { }
 };
-
+/*
 struct D{
   ~D(){}
 };
@@ -156,23 +156,27 @@ int test3() {
   }
   return 0;
 }
-/*
+
 int test4() {
   try {
     C fl;
     try {
       A a, b;
       s();
-    } catch (A &) {}
+    } catch (A &) {
+    } catch (int &) {
+    }
     C gl;
     try {
       B h, gh;
       s();
-    } catch (B &) {}
+    } catch (B &) {
+    } catch (int &) {
+    }
   } catch (C&) {}
   return 0;
 }
-
+/*
 int test5() {
   C ad;
   try {
