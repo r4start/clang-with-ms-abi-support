@@ -1103,54 +1103,95 @@ struct InitNewCatchHandlersHandler {
 
 }
 
+void CodeGenFunction::MSEHState::InitNewCatchHandlers(
+                                         llvm::GlobalVariable *HandlersArray) {
+  UnwindEntryPtr firstState = 
+    *LocalUnwindTable.back().begin();
+  
+  HandlersArray::iterator
+    newHandlers = std::find_if(CatchHandlers.begin(),
+                               CatchHandlers.end(),
+                               StartOfNewCatchHandlers(firstState));
+
+  assert(newHandlers != CatchHandlers.end() &&
+         "Try block must have catch handlers!");
+
+  HandlersArray::reverse_iterator
+    endOfNewHandlers = std::find_if(CatchHandlers.rbegin(),
+                                    CatchHandlers.rend(),
+                                    StartOfNewCatchHandlers(firstState));
+  
+  assert(endOfNewHandlers != CatchHandlers.rend() &&
+         "Can not find last of catch handlers for current try!");
+
+  std::for_each(endOfNewHandlers,
+                HandlersArray::reverse_iterator(newHandlers),
+                InitNewCatchHandlersHandler(HandlersArray));
+}
+
+static int getCatchHigh(CodeGenFunction::UnwindEntryPtr FirstState,
+                        CodeGenFunction::UnwindEntryReversePtr LastState,
+                        CodeGenFunction::UnwindEntryReversePtr End) {
+  while (LastState != End) {
+    if (LastState->RestoreKind == RestoreOpInfo::CatchRestore &&
+        LastState->StoreInstTryLevel == FirstState->StoreInstTryLevel &&
+        LastState->TryNumber == FirstState->TryNumber) {
+      break;
+    }
+    ++LastState;
+  }
+  
+  assert (LastState != End &&
+          "Can not find catch entry for this try block!");
+  return LastState->StoreIndex;
+}
+
+static int getTryHigh(CodeGenFunction::UnwindEntryPtr FirstState,
+                      CodeGenFunction::UnwindEntryPtr LastState,
+                      CodeGenFunction::UnwindEntryPtr End) {
+  while (LastState != End) {
+    if (LastState->RestoreKind == RestoreOpInfo::CatchRestore &&
+        LastState->StoreInstTryLevel == FirstState->StoreInstTryLevel &&
+        LastState->TryNumber == FirstState->TryNumber) {
+      break;
+    }
+    ++LastState;
+  }
+
+  assert (LastState != End &&
+          "Can not find last entry for this try block!");
+  int highVal = std::distance(FirstState, LastState);
+  return highVal == 1 ? FirstState->StoreValue : highVal;
+}
+
 // r4start
 void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::Type *handlerTy = (*EHState.TryHandlers.back().begin())->getType();
 
   llvm::SmallVector<llvm::Constant *, 5> fields;
 
-  MSEHState::UnwindTableTy::iterator firstState = 
+  UnwindEntryPtr firstState = 
     *EHState.LocalUnwindTable.back().begin();
   
   llvm::Constant *tryLow = 
     cast<llvm::Constant>(firstState->Store->getOperand(0));
   fields.push_back(tryLow);
 
-  MSEHState::UnwindTableTy::reverse_iterator lastEntry = 
+  UnwindEntryReversePtr lastEntry = 
     EHState.GlobalUnwindTable.rbegin();
- 
-  while (lastEntry != EHState.GlobalUnwindTable.rend()) {
-    if (lastEntry->RestoreKind == RestoreOpInfo::CatchRestore &&
-        lastEntry->StoreInstTryLevel == firstState->StoreInstTryLevel &&
-        lastEntry->TryNumber == firstState->TryNumber) {
-      break;
-    }
-    ++lastEntry;
-  }
-  
-  assert (lastEntry != EHState.GlobalUnwindTable.rend() &&
-          "Can not find catch entry for this try block!");
-  
+
+  int val = 
+    getCatchHigh(firstState, lastEntry, EHState.GlobalUnwindTable.rend());
+
   llvm::Constant *catchHigh = 
-    llvm::ConstantInt::get(Int32Ty, lastEntry->StoreIndex);
+    llvm::ConstantInt::get(Int32Ty, val);
 
-  MSEHState::UnwindTableTy::iterator lastState = firstState;
+  UnwindEntryPtr lastState = firstState;
 
-  while (lastState != EHState.GlobalUnwindTable.end()) {
-    if (lastState->RestoreKind == RestoreOpInfo::CatchRestore &&
-        lastState->StoreInstTryLevel == firstState->StoreInstTryLevel &&
-        lastState->TryNumber == firstState->TryNumber) {
-      break;
-    }
-    ++lastState;
-  }
+  val = getTryHigh(firstState, lastState, EHState.GlobalUnwindTable.end());
 
-  assert (lastState != EHState.GlobalUnwindTable.end() &&
-          "Can not find last entry for this try block!");
-  int highVal = std::distance(firstState, lastState);
-  highVal = highVal == 1 ? firstState->StoreValue : highVal;
   llvm::Constant *tryHigh = 
-    llvm::ConstantInt::get(Int32Ty, highVal);
+    llvm::ConstantInt::get(Int32Ty, val);
 
   fields.push_back(tryHigh);
   fields.push_back(catchHigh);
@@ -1167,8 +1208,7 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
   llvm::SmallString<256> tableName;
   llvm::raw_svector_ostream stream(tableName);
 
-  const FunctionDecl *funcDecl = cast_or_null<FunctionDecl>(CurFuncDecl);
-  assert(funcDecl && "Unwind table is generating only for functions!");
+  const FunctionDecl *funcDecl = cast<FunctionDecl>(CurFuncDecl);
 
   CGM.getCXXABI().getMangleContext().
     getMsExtensions()->mangleEHCatchHandlersArray(funcDecl, 
@@ -1182,26 +1222,8 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
     new llvm::GlobalVariable(CGM.getModule(), handlersArray->getType(), false,
                              llvm::GlobalValue::WeakAnyLinkage, handlersArray,
                              mangledName);
-
-  MSEHState::HandlersArray::iterator
-    newHandlers = std::find_if(EHState.CatchHandlers.begin(),
-                               EHState.CatchHandlers.end(),
-                               StartOfNewCatchHandlers(firstState));
-
-  assert(newHandlers != EHState.CatchHandlers.end() &&
-         "Try block must have catch handlers!");
-
-  MSEHState::HandlersArray::reverse_iterator
-    endOfNewHandlers = std::find_if(EHState.CatchHandlers.rbegin(),
-                                    EHState.CatchHandlers.rend(),
-                                    StartOfNewCatchHandlers(firstState));
   
-  assert(endOfNewHandlers != EHState.CatchHandlers.rend() &&
-         "Can not find last of catch handlers for current try!");
-
-  std::for_each(endOfNewHandlers,
-                MSEHState::HandlersArray::reverse_iterator(newHandlers),
-                InitNewCatchHandlersHandler(globalHandlers));
+  EHState.InitNewCatchHandlers(globalHandlers);
 
   llvm::Constant *addrOfGlobalhandlers = 
     llvm::ConstantExpr::getBitCast(globalHandlers, 
