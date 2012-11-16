@@ -84,7 +84,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
     if (prevTable == LocalUnwindTable.rend()) {
       GlobalUnwindTable.push_back(-1);
     } else {
-      GlobalUnwindTable.push_back(prevTable->back()->StoreValue);
+      GlobalUnwindTable.push_back(prevTable->back()->StoreIndex);
     }
   }
 
@@ -136,6 +136,10 @@ void CodeGenFunction::MSEHState::AddCatchEntryInUnwindTable(int State) {
   GlobalUnwindTable.back().StoreInstTryLevel = TryLevel;
   GlobalUnwindTable.back().StoreIndex = StoreIndex++;
   GlobalUnwindTable.back().RestoreKind = RestoreOpInfo::CatchRestore;
+
+  // Local table for catch scope.
+  LocalUnwindTable.push_back(UnwindEntryRefList());
+  LocalUnwindTable.back().push_back(--GlobalUnwindTable.end());
 }
 
 void CodeGenFunction::MSEHState::SaveStackPointer() {
@@ -1463,7 +1467,9 @@ void CodeGenFunction::GenerateCatchHandler(const QualType &CaughtType,
     llvm::ConstantStruct::get(getHandlerType(CGM), fields);
   EHState.TryHandlers.back().push_back(handler);
   
+  // Previous table is catch scope table,
+  // but we need try scope table.
   EHState.CatchHandlers.push_back(
     MSEHState::CatchHandler(HandlerIdx, 
-                            *EHState.LocalUnwindTable.back().begin()));
+                         (*(*(++EHState.LocalUnwindTable.rbegin())).begin())));
 }
