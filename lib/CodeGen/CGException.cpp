@@ -1339,6 +1339,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
 
     // Catch handlers have entry in unwind table,
     // so generate it.
+    // Also push new local table for catch scope.
     EHState.AddCatchEntryInUnwindTable(
       (*EHState.LocalUnwindTable.back().begin())->ToState);
   }
@@ -1411,7 +1412,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
       if (IsMSExceptions) {
         // restore state.
         EHState.CreateStateStore(
-          (*EHState.LocalUnwindTable.back().begin())->ToState);
+          (*(*(++EHState.LocalUnwindTable.rbegin())).begin())->ToState);
         Builder.CreateCall(SEHRetFromCatch, tryCont);
       }
       Builder.CreateBr(ContBB);
@@ -1424,8 +1425,12 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     EmitBranch(ContBB);
     Builder.SetInsertPoint(ContBB);
       
+    // Popup catch local table.
+    EHState.LocalUnwindTable.pop_back();
+
     GenerateTryBlockTableEntry();
 
+    // Popup try local table.
     EHState.LocalUnwindTable.pop_back();
 
     // After try-block state must be restored.
