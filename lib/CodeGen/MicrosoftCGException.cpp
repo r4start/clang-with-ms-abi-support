@@ -80,7 +80,7 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   if (!state) {
     GlobalUnwindTable.push_back(-1);
   } else {
-    auto prevTable = (++LocalUnwindTable.rbegin());
+    TryStates::reverse_iterator prevTable = (++LocalUnwindTable.rbegin());
     if (prevTable == LocalUnwindTable.rend()) {
       GlobalUnwindTable.push_back(-1);
     } else {
