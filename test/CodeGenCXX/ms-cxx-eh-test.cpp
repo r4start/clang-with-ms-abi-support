@@ -9,8 +9,6 @@
 
 // CHECK: @"\01__TI1H" = weak global %throw.info.type { i32 0, void ()* null, i32 ()* null, %catchable.array.type* bitcast ({ i32, [1 x %catchable.type*] }* @"\01__CTA1H" to %catchable.array.type*) }
 
-// CHECK: @"\01??_R0?AUA@@@8" = weak constant { i8**, i32, [8 x i8] } { i8** @"\01??_7type_info@@6B@", i32 0, [8 x i8] c".?AUA@@\00" }
-
 // CHECK: @"\01__catchsym$test1@@YAHXZ$0" = weak global [1 x %handler.type] [%handler.type { i32 8, %type.descriptor* bitcast ({ i8**, i32, [8 x i8] }* @"\01??_R0?AUA@@@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test1@@YAHXZ", %catch) }]
 
 // CHECK: @"\01__tryblocktable$test1@@YAHXZ" = weak global [1 x %tryblock.map.entry] [%tryblock.map.entry { i32 0, i32 3, i32 3, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test1@@YAHXZ$0", i32 0, i32 0) }]
