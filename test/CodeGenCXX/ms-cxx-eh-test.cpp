@@ -99,6 +99,15 @@
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
+//////////////////////////////////////////////Test 11/////////////////////////////////////////////
+
+// CHECK: @"\01__catchsym$test11@@YAHXZ$0" = weak global [1 x %handler.type] [%handler.type { i32 8, %type.descriptor* bitcast ({ i8**, i32, [3 x i8] }* @"\01??_R0H@8" to %type.descriptor*), i32 0, i8* blockaddress(@"\01?test11@@YAHXZ", %catch) }]
+// CHECK: @"\01__tryblocktable$test11@@YAHXZ" = weak global [1 x %tryblock.map.entry] [%tryblock.map.entry { i32 0, i32 1, i32 2, i32 1, %handler.type* getelementptr inbounds ([1 x %handler.type]* @"\01__catchsym$test11@@YAHXZ$0", i32 0, i32 0) }]
+// CHECK: @"\01__unwindtable$test11@@YAHXZ" = weak global [3 x %unwind.map.entry] [%unwind.map.entry { i32 -1, i8* null }, %unwind.map.entry { i32 0, i8* blockaddress(@"\01?test11@@YAHXZ", %ehcleanup) }, %unwind.map.entry { i32 -1, i8* null }]
+// CHECK: @"\01__ehfuncinfo$test11@@YAHXZ" = weak global %ehfuncinfo { i32 429065506, i32 3, %unwind.map.entry* getelementptr inbounds ([3 x %unwind.map.entry]* @"\01__unwindtable$test11@@YAHXZ", i32 0, i32 0), i32 1, %tryblock.map.entry* getelementptr inbounds ([1 x %tryblock.map.entry]* @"\01__tryblocktable$test11@@YAHXZ", i32 0, i32 0), i32 0, i8* null, %estypelist* null, i32 1 }
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
 struct A {
   A(){}
   ~A(){}
@@ -249,6 +258,15 @@ int test10() {
       s();
     } catch (int u) {
     }
+  }
+  return 0;
+}
+
+int test11() {
+  try {
+    A a;
+    s();
+  } catch (int &ex) {
   }
   return 0;
 }

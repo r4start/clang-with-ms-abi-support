@@ -79,7 +79,16 @@ void CodeGenFunction::MSEHState::SetMSTryState() {
   size_t state = GlobalUnwindTable.size();
   if (!state) {
     GlobalUnwindTable.push_back(-1);
+  } else if (LocalUnwindTable.back().front()->RestoreKind != 
+                                      RestoreOpInfo::CatchRestore) {
+    // We are not in catch handler.
+    if (LocalUnwindTable.back().empty()) {
+      GlobalUnwindTable.push_back(-1);
+    } else {
+      GlobalUnwindTable.push_back(LocalUnwindTable.back().back()->StoreIndex);
+    }
   } else {
+    // Case for catch handler.
     TryStates::reverse_iterator prevTable = (++LocalUnwindTable.rbegin());
     if (prevTable == LocalUnwindTable.rend()) {
       GlobalUnwindTable.push_back(-1);
