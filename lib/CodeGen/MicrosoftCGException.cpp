@@ -1165,13 +1165,12 @@ static int getCatchHigh(CodeGenFunction::UnwindEntryPtr FirstState,
   return LastState->StoreIndex;
 }
 
-static int getTryHigh(CodeGenFunction::UnwindEntryPtr FirstState,
-                      CodeGenFunction::UnwindEntryPtr LastState,
-                      CodeGenFunction::UnwindEntryPtr End) {
+static CodeGenFunction::UnwindEntryPtr 
+getTryHigh(CodeGenFunction::UnwindEntryPtr FirstState,
+           CodeGenFunction::UnwindEntryPtr LastState,
+           CodeGenFunction::UnwindEntryPtr End) {
   while (LastState != End) {
     if (LastState->RestoreKind == RestoreOpInfo::CatchRestore &&
-        LastState->StoreInstTryLevel == FirstState->StoreInstTryLevel &&
-        LastState->TryNumber == FirstState->TryNumber &&
         LastState->ToState == FirstState->ToState) {
       break;
     }
@@ -1180,8 +1179,9 @@ static int getTryHigh(CodeGenFunction::UnwindEntryPtr FirstState,
 
   assert (LastState != End &&
           "Can not find last entry for this try block!");
-  int highVal = std::distance(FirstState, LastState);
-  return highVal == 1 ? FirstState->StoreValue : highVal - 1;
+  //int highVal = std::distance(FirstState, LastState);
+  //return highVal == 1 ? FirstState->StoreValue : highVal - 1;
+  return LastState;
 }
 
 // r4start
@@ -1208,10 +1208,13 @@ void CodeGenFunction::GenerateTryBlockTableEntry() {
 
   UnwindEntryPtr lastState = firstState;
 
-  val = getTryHigh(firstState, lastState, EHState.GlobalUnwindTable.end());
+  lastState = 
+    getTryHigh(firstState, lastState, EHState.GlobalUnwindTable.end());
+  val = std::distance(EHState.GlobalUnwindTable.begin(),
+                      lastState);
 
   llvm::Constant *tryHigh = 
-    llvm::ConstantInt::get(Int32Ty, val);
+    llvm::ConstantInt::get(Int32Ty, val - 1);
 
   fields.push_back(tryHigh);
   fields.push_back(catchHigh);
