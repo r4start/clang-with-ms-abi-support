@@ -160,6 +160,35 @@ void CodeGenFunction::MSEHState::SaveStackPointer() {
   CGF.Builder.CreateCall(SaveSPIntrinsic);
 }
 
+void CodeGenFunction::MSEHState::ReturnFromCatch(llvm::BasicBlock *ContBB) {
+  assert(ContBB);
+
+  if (!RetFromCatchIntrinsic) {
+    RetFromCatchIntrinsic = 
+      CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
+  }
+
+  if (LocalUnwindTable.empty())
+    return;
+
+  llvm::Instruction *term = CGF.Builder.GetInsertBlock()->getTerminator();
+  if (term) {
+    auto temp = term->clone();
+    term->eraseFromParent();
+    term = temp;
+  }
+
+  CreateStateStore(
+          (*(*(++LocalUnwindTable.rbegin())).begin())->ToState);
+
+  CGF.Builder.CreateCall(RetFromCatchIntrinsic, 
+                         llvm::BlockAddress::get(CGF.CurFn, ContBB));
+
+  if (term) {
+    CGF.Builder.Insert(term);
+  }
+}
+
 llvm::BasicBlock *
 CodeGenFunction::MSEHState::GenerateTryEndBlock(const FunctionDecl *FD, 
                                           MSMangleContextExtensions *Mangler) {
