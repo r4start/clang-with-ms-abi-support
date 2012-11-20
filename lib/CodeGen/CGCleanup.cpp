@@ -928,6 +928,10 @@ void CodeGenFunction::EmitBranchThroughCleanup(JumpDest Dest) {
   // scope, we don't need to worry about fixups.
   if (TopCleanup == EHStack.stable_end() ||
       TopCleanup.encloses(Dest.getScopeDepth())) { // works for invalid
+    // r4start
+    if (IsMSExceptions) {
+      EHState.ReturnFromCatch(Dest.getBlock());
+    }
     Builder.ClearInsertionPoint();
     return;
   }

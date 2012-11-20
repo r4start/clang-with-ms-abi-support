@@ -1327,16 +1327,10 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   // The fall-through block.
   llvm::BasicBlock *ContBB = 0;
 
-  llvm::Function *SEHRetFromCatch = 0;
-  llvm::BlockAddress *tryCont = 0; 
-  
   if (!IsMSExceptions) {
     ContBB = createBasicBlock("try.cont");
   } else {
     ContBB = createBasicBlock("try.cont", CurFn);
-    SEHRetFromCatch = CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
-    tryCont = llvm::BlockAddress::get(ContBB);
-
     // Catch handlers have entry in unwind table,
     // so generate it.
     // Also push new local table for catch scope.
@@ -1411,9 +1405,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
       // r4start
       if (IsMSExceptions) {
         // restore state.
-        EHState.CreateStateStore(
-          (*(*(++EHState.LocalUnwindTable.rbegin())).begin())->ToState);
-        Builder.CreateCall(SEHRetFromCatch, tryCont);
+        EHState.ReturnFromCatch(ContBB);
       }
       Builder.CreateBr(ContBB);
     }

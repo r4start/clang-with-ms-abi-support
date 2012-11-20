@@ -637,6 +637,8 @@ public:
 
     llvm::Function *SaveSPIntrinsic;
 
+    llvm::Function *RetFromCatchIntrinsic;
+
   public:
     typedef std::list< MsUnwindInfo > UnwindTableTy;
     typedef UnwindTableTy::iterator UnwindEntryPtr;
@@ -708,7 +710,7 @@ public:
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
        ESTypeList(0), StoreIndex(0), TryNumber(0), 
-       EHHandler(0), SaveSPIntrinsic(0) {}
+       EHHandler(0), SaveSPIntrinsic(0), RetFromCatchIntrinsic(0) {}
 
     ~MSEHState() {}
     
@@ -734,6 +736,8 @@ public:
     void InitOffsetInCatchHandlers();
 
     void SaveStackPointer();
+
+    void ReturnFromCatch(llvm::BasicBlock *ContBB);
   };
 
   /// r4start
