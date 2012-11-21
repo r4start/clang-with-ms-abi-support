@@ -173,7 +173,7 @@ void CodeGenFunction::MSEHState::ReturnFromCatch(llvm::BasicBlock *ContBB) {
 
   llvm::Instruction *term = CGF.Builder.GetInsertBlock()->getTerminator();
   if (term) {
-    auto temp = term->clone();
+    llvm::Instruction *temp = term->clone();
     term->eraseFromParent();
     term = temp;
   }
@@ -181,12 +181,32 @@ void CodeGenFunction::MSEHState::ReturnFromCatch(llvm::BasicBlock *ContBB) {
   CreateStateStore(
           (*(*(++LocalUnwindTable.rbegin())).begin())->ToState);
 
+  FreeReservedStack();
+
   CGF.Builder.CreateCall(RetFromCatchIntrinsic, 
                          llvm::BlockAddress::get(CGF.CurFn, ContBB));
 
   if (term) {
     CGF.Builder.Insert(term);
   }
+}
+
+void CodeGenFunction::MSEHState::ReserveStack() {
+  if (!ReserveStackIntrinsic) {
+    ReserveStackIntrinsic = 
+      CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_reserve_stack);
+  }
+
+  CGF.Builder.CreateCall(ReserveStackIntrinsic);
+
+}
+
+void CodeGenFunction::MSEHState::FreeReservedStack() {
+  if (!FreeStackIntrinsic) {
+    FreeStackIntrinsic = 
+      CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_free_reserved_stack);
+  }
+  CGF.Builder.CreateCall(FreeStackIntrinsic);
 }
 
 llvm::BasicBlock *
