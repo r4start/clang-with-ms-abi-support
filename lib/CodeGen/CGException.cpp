@@ -1187,12 +1187,15 @@ static void BeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
 // r4start
 static void MSBeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
   VarDecl *catchParam = S->getExceptionDecl();
-  if (!catchParam)
+  if (!catchParam) {
+    CGF.EHState.ReserveStack();
     return;
+  }
   
   // Emit the local.
   CodeGenFunction::AutoVarEmission var = CGF.EmitAutoVarAlloca(*catchParam);
   CGF.EHState.CatchHandlers.back().ExceptionObject = catchParam;
+  CGF.EHState.ReserveStack();
 }
 
 // r4start

@@ -636,8 +636,9 @@ public:
     CodeGenFunction &CGF;
 
     llvm::Function *SaveSPIntrinsic;
-
     llvm::Function *RetFromCatchIntrinsic;
+    llvm::Function *ReserveStackIntrinsic;
+    llvm::Function *FreeStackIntrinsic;
 
   public:
     typedef std::list< MsUnwindInfo > UnwindTableTy;
@@ -710,7 +711,8 @@ public:
     MSEHState(CodeGenFunction &cgf) 
      : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
        ESTypeList(0), StoreIndex(0), TryNumber(0), 
-       EHHandler(0), SaveSPIntrinsic(0), RetFromCatchIntrinsic(0) {}
+       EHHandler(0), SaveSPIntrinsic(0), RetFromCatchIntrinsic(0),
+       ReserveStackIntrinsic(0), FreeStackIntrinsic(0) {}
 
     ~MSEHState() {}
     
@@ -736,8 +738,9 @@ public:
     void InitOffsetInCatchHandlers();
 
     void SaveStackPointer();
-
     void ReturnFromCatch(llvm::BasicBlock *ContBB);
+    void ReserveStack();
+    void FreeReservedStack();
   };
 
   /// r4start
