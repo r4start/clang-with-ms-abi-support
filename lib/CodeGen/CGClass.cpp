@@ -1690,7 +1690,7 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
     }
 
     const VBTableContext::VBTableEntry vbEntry = 
-      vbContext.getEntryFromVBTable(ClassDecl, ClassDecl, vbaseOffset->first);
+      vbContext.getEntryFromPrimaryVBTable(ClassDecl, vbaseOffset->first);
 
     llvm::Value *thisPtr = LoadCXXThis();
     thisPtr = Builder.CreateBitCast(thisPtr, CGM.Int8PtrTy, "vtordisp.this");
