@@ -294,7 +294,7 @@ VBTableContext::getEntryFromPrimaryVBTable(const CXXRecordDecl *RD,
   const CXXRecordDecl *layoutClass = RD;
   if (!VBTables[RD].count(layoutClass)) {
     // Must find primary vbtable.
-    auto I = PrimaryTables.begin();
+    PrimaryTablesVector::iterator I = PrimaryTables.begin();
     while (I != PrimaryTables.end()) {
       if (I->Class == RD)
         break;
