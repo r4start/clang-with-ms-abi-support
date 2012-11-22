@@ -1,19 +1,25 @@
-// RUN: %clang_cc1 -fno-rtti -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i386-pc-win32 | FileCheck %s
+// RUN: %clang_cc1 -fno-rtti -fms-extensions -fblocks -emit-llvm %s -o - -cxx-abi microsoft -triple=i686-pc-win32 | FileCheck %s
 
 // r4start
 // Test for vb-table layout.
 
 // FIXME: Fix vb-table name mangling with namespaces.
-// CHECK: @"\01??_8DD@test5@@7BvBB@1@@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 12, i32 16]
+
 // CHECK: @"\01??_8DD@test5@@7BB@1@@" = weak unnamed_addr constant [3 x i32] [i32 -8, i32 20, i32 24]
-// CHECK: @"\01??_8D@test5@@7BvBB@1@@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 12, i32 16]
+// CHECK-NEXT: @"\01??_8DD@test5@@7BvBB@1@@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 12, i32 16]
+
 // CHECK: @"\01??_8D@test5@@7BB@1@@" = weak unnamed_addr constant [3 x i32] [i32 -8, i32 20, i32 24]
+// CHECK-NEXT: @"\01??_8D@test5@@7BvBB@1@@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 12, i32 16]
+
 // CHECK: @"\01??_8vBB@test5@@7B@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 8, i32 12]
-// CHECK: @"\01??_8B@test5@@7B@" = weak unnamed_addr constant [2 x i32] [i32 -8, i32 8]
+// CHECK-NEXT: @"\01??_8B@test5@@7B@" = weak unnamed_addr constant [2 x i32] [i32 -8, i32 8]
 
 // CHECK: @"\01??_8s@test4@@7B@" = weak unnamed_addr constant [3 x i32] [i32 0, i32 8, i32 16]
+
 // CHECK: @"\01??_8s@test3@@7B@" = weak unnamed_addr constant [2 x i32] [i32 0, i32 8]
+
 // CHECK: @"\01??_8third@test2@@7B@" = weak unnamed_addr constant [2 x i32] [i32 -8, i32 8]
+
 // CHECK: @"\01??_8third@test1@@7B@" = weak unnamed_addr constant [2 x i32] [i32 -4, i32 4]
 
 namespace test1 {
@@ -146,6 +152,7 @@ struct D : public BBBB, public B, public vBB
   void dfunc()
   {}
 };
+
 struct DD : public BBBB, public D
 {
   void ddfunc()
