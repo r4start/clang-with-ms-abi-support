@@ -16,15 +16,21 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/VBTableBuilder.h"
 
+#include <vector>
+
 using namespace clang;
 
 namespace {
+
+typedef llvm::SmallSet<const CXXRecordDecl *, 8> ClassesContainerTy;
 
 class VBTableBuilder {
   VBTableContext::BaseVBTableTy VBTable;
 
   const CXXRecordDecl *MostDerived;
   const CXXRecordDecl *LayoutClass;
+
+  bool IsTablePrimary;
 
   ASTContext &Ctx;
 
@@ -34,7 +40,8 @@ class VBTableBuilder {
 
 public:
   VBTableBuilder(ASTContext &C, const CXXRecordDecl *MostDerived,
-                 const CXXRecordDecl *LayoutClass);
+                 const CXXRecordDecl *LayoutClass, 
+                 bool IsPrimary = false);
 
   const VBTableContext::BaseVBTableTy &getVBTable() const {
     return VBTable;
@@ -44,8 +51,10 @@ public:
 }
 
 VBTableBuilder::VBTableBuilder(ASTContext &C, const CXXRecordDecl *MostDerived,
-                               const CXXRecordDecl *LayoutClass)
-  : Ctx(C), MostDerived(MostDerived), LayoutClass(LayoutClass){
+                               const CXXRecordDecl *LayoutClass, 
+                               bool IsPrimary)
+  : Ctx(C), MostDerived(MostDerived), LayoutClass(LayoutClass), 
+    IsTablePrimary(IsPrimary) {
   Layout();
 }
 
@@ -114,10 +123,18 @@ static uint32_t GetVBTableOffset(ASTContext &C, const CXXRecordDecl *RD,
 }
 
 void VBTableBuilder::LayoutSingleVBTable() {
-  uint32_t Offset = GetVBTableOffset(Ctx, MostDerived, 0);
+  uint32_t offset = GetVBTableOffset(Ctx, MostDerived, 0);
 
-  VBTable.insert(std::make_pair(VBTableContext::VBTableEntry(0, -Offset),
-                                MostDerived));
+  uint32_t offsetInHolder;
+  if (MostDerived == LayoutClass) {
+    offsetInHolder = offset;
+  } else {
+    offsetInHolder = GetVBTableOffset(Ctx, LayoutClass, 0);
+  }
+
+  VBTable.insert(std::make_pair(
+                              VBTableContext::VBTableEntry(0, -offsetInHolder),
+                              MostDerived));
 
   const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(MostDerived);
 
@@ -129,7 +146,7 @@ void VBTableBuilder::LayoutSingleVBTable() {
     int32_t BaseOffset = Layout.getVBaseClassOffset(VBase).getQuantity();
 
     VBTable.insert(std::make_pair(
-                      VBTableContext::VBTableEntry(idx, BaseOffset - Offset),
+                      VBTableContext::VBTableEntry(idx, BaseOffset - offset),
                       VBase));
   }
 }
@@ -159,24 +176,23 @@ void VBTableBuilder::LayoutForMultiplyVBTables() {
 }
 
 void VBTableBuilder::Layout() {
-  if (MostDerived == LayoutClass)
+  if (MostDerived == LayoutClass || IsTablePrimary)
     LayoutSingleVBTable();
   else
     LayoutForMultiplyVBTables();
 }
 
 void VBTableContext::ComputeVBTable(const CXXRecordDecl *RD,
-                                    const CXXRecordDecl *Base) {
+                                    const CXXRecordDecl *Base,
+                                    bool IsPrimaryTable) {
   if (VBTables.count(RD))
     if (VBTables[RD].count(Base))
       return;
-  VBTableBuilder Builder(RD->getASTContext(), RD, Base);
+  VBTableBuilder Builder(RD->getASTContext(), RD, Base, IsPrimaryTable);
   
   VBTables.insert(std::make_pair(RD, VBTableTy()));
   VBTables[RD].insert(std::make_pair(Base, Builder.getVBTable()));
 }
-
-typedef llvm::SmallSet<const CXXRecordDecl *, 8> ClassesContainerTy;
 
 static void TraverseBases(ASTContext &Ctx, const CXXRecordDecl *Class,
                           ClassesContainerTy &DefferredClasses) {
@@ -194,6 +210,34 @@ static void TraverseBases(ASTContext &Ctx, const CXXRecordDecl *Class,
     DefferredClasses.insert(Class);
 }
 
+static const CXXRecordDecl *
+getSharedVBTableHolder(ASTContext &Ctx, const CXXRecordDecl *Class,
+                       ClassesContainerTy &DefferredClasses) {
+  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(Class);
+  if (Layout.getVBPtrOffset().getQuantity() != -1) {
+    return 0;
+  }
+
+  const CXXRecordDecl *sharedHolder = 0;
+  CharUnits offset;
+  CharUnits holderOffset;
+
+  for (ClassesContainerTy::iterator i = DefferredClasses.begin(), 
+       e = DefferredClasses.end(); i != e; ++i) {
+    if (Class->isVirtuallyDerivedFrom(*i)) {
+      continue;
+    }
+
+    offset = GetClassOffset(Ctx, Class, *i);
+    if (!sharedHolder || offset < holderOffset) {
+      sharedHolder = *i;
+      holderOffset = offset;
+    }
+  }
+
+  return sharedHolder;
+}
+
 void VBTableContext::ComputeVBTables(const CXXRecordDecl *RD) {
   assert(RD->getNumVBases() && "Class must have virtual bases");
   if (VBTables.count(RD))
@@ -202,12 +246,17 @@ void VBTableContext::ComputeVBTables(const CXXRecordDecl *RD) {
   ClassesContainerTy ClassWithVBTables;
   TraverseBases(RD->getASTContext(), RD, ClassWithVBTables);
 
+  const CXXRecordDecl *sharedVBTableHolder = 
+    getSharedVBTableHolder(RD->getASTContext(), RD, ClassWithVBTables);
+
   for (ClassesContainerTy::iterator I = ClassWithVBTables.begin(), 
        E = ClassWithVBTables.end(); I != E; ++I) {
     const CXXRecordDecl *Class = *I;
 
     if (Class == RD)
       ComputeVBTable(Class, Class);
+    else if (Class == sharedVBTableHolder)
+      ComputeVBTable(RD, Class, true);
     else
       ComputeVBTable(RD, Class);
   }
@@ -218,7 +267,7 @@ VBTableContext::getEntryFromVBTable(const CXXRecordDecl *RD,
                                     const CXXRecordDecl *LayoutClass,
                                     const CXXRecordDecl *Base) {
   assert(RD->getNumVBases() && "Class must have virtual bases!");
-  ComputeVBTable(RD, LayoutClass);
+  ComputeVBTables(RD);
   const BaseVBTableTy &Table = VBTables[RD][LayoutClass];
 
   for (BaseVBTableTy::const_iterator I = Table.begin(),

@@ -52,7 +52,9 @@ public:
 
 private:
 
-  void ComputeVBTable(const CXXRecordDecl *RD, const CXXRecordDecl *Base);
+  void ComputeVBTable(const CXXRecordDecl *RD, 
+                      const CXXRecordDecl *Base,
+                      bool IsPrimaryTable = false);
   void ComputeVBTables(const CXXRecordDecl *RD);
 
 public:
