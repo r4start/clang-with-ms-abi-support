@@ -249,6 +249,10 @@ void VBTableContext::ComputeVBTables(const CXXRecordDecl *RD) {
   const CXXRecordDecl *sharedVBTableHolder = 
     getSharedVBTableHolder(RD->getASTContext(), RD, ClassWithVBTables);
 
+  if (sharedVBTableHolder) {
+    PrimaryTables.push_back(PrimaryVBTableHolder(RD, sharedVBTableHolder));
+  }
+
   for (ClassesContainerTy::iterator I = ClassWithVBTables.begin(), 
        E = ClassWithVBTables.end(); I != E; ++I) {
     const CXXRecordDecl *Class = *I;
@@ -267,8 +271,39 @@ VBTableContext::getEntryFromVBTable(const CXXRecordDecl *RD,
                                     const CXXRecordDecl *LayoutClass,
                                     const CXXRecordDecl *Base) {
   assert(RD->getNumVBases() && "Class must have virtual bases!");
+  assert((RD != LayoutClass) &&
+         "You should use getEntryFromPrimaryVBTable!");
   ComputeVBTables(RD);
   const BaseVBTableTy &Table = VBTables[RD][LayoutClass];
+
+  for (BaseVBTableTy::const_iterator I = Table.begin(),
+       E = Table.end(); I != E; ++I) {
+    if (I->second == Base)
+      return I->first;
+  }
+
+  llvm_unreachable("Can not find entry for base in vbtable!");
+}
+
+const VBTableContext::VBTableEntry &
+VBTableContext::getEntryFromPrimaryVBTable(const CXXRecordDecl *RD,
+                                           const CXXRecordDecl *Base) {
+  assert(RD->getNumVBases() && "Class must have virtual bases!");
+  ComputeVBTables(RD);
+
+  const CXXRecordDecl *layoutClass = RD;
+  if (!VBTables[RD].count(layoutClass)) {
+    // Must find primary vbtable.
+    auto I = PrimaryTables.begin();
+    while (I != PrimaryTables.end()) {
+      if (I->Class == RD)
+        break;
+    }
+    assert(I != PrimaryTables.end());
+    layoutClass = I->Holder;
+  }
+
+  const BaseVBTableTy &Table = VBTables[RD][layoutClass];
 
   for (BaseVBTableTy::const_iterator I = Table.begin(),
        E = Table.end(); I != E; ++I) {
