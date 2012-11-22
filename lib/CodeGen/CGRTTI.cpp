@@ -1830,7 +1830,8 @@ llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
 llvm::Constant *
 CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
                                          QualType BaseTy) {
-
+  if (!getContext().getLangOpts().RTTI)
+    return llvm::Constant::getNullValue(Int8PtrTy);
   return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
 }
 
