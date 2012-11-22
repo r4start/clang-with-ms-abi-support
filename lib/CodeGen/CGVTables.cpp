@@ -163,9 +163,9 @@ static llvm::Value *PerformTypeAdjustmentMS(CodeGenFunction &CGF,
     VBTableContext &VBTableCtx = CGF.CGM.getVBTableContext();
 
     const VBTableContext::VBTableEntry &Entry = 
-      VBTableCtx.getEntryFromVBTable(MostDerived, MostDerived, MD->getParent());
+      VBTableCtx.getEntryFromPrimaryVBTable(MostDerived, MD->getParent());
     const VBTableContext::VBTableEntry &FirstEntry = 
-      VBTableCtx.getEntryFromVBTable(MostDerived, MostDerived, MostDerived);
+      VBTableCtx.getEntryFromPrimaryVBTable(MostDerived, MostDerived);
       
     llvm::Value *VBPtr = 
       CGF.Builder.CreateConstGEP1_32(V, FirstEntry.offset, "vbptr.ptr");

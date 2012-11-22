@@ -43,6 +43,8 @@ public:
   typedef std::map<VBTableEntry, const CXXRecordDecl *, VBTableEntry> BaseVBTableTy;
   typedef llvm::DenseMap<const CXXRecordDecl *, BaseVBTableTy > VBTableTy;
 
+private:
+
   /// We have such table:
   /// (1)Vbtable holder
   /// (2)Base class
@@ -50,10 +52,21 @@ public:
   /// (4)Base class offset from vbtable position.
   llvm::DenseMap<const CXXRecordDecl *, VBTableTy > VBTables;
 
-private:
-
-  void ComputeVBTable(const CXXRecordDecl *RD, const CXXRecordDecl *Base);
+  void ComputeVBTable(const CXXRecordDecl *RD, 
+                      const CXXRecordDecl *Base,
+                      bool IsPrimaryTable = false);
   void ComputeVBTables(const CXXRecordDecl *RD);
+
+  struct PrimaryVBTableHolder {
+    const CXXRecordDecl *Class;
+    const CXXRecordDecl *Holder;
+
+    PrimaryVBTableHolder(const CXXRecordDecl *C, const CXXRecordDecl *H)
+     : Class(C), Holder(H) {}
+  };
+
+  typedef llvm::SmallVector<PrimaryVBTableHolder, 8> PrimaryTablesVector;
+  PrimaryTablesVector PrimaryTables; 
 
 public:
 
@@ -71,6 +84,9 @@ public:
   const VBTableEntry &getEntryFromVBTable(const CXXRecordDecl *RD,
                                           const CXXRecordDecl *LayoutClass,
                                           const CXXRecordDecl *Base);
+  
+  const VBTableEntry &getEntryFromPrimaryVBTable(const CXXRecordDecl *RD, 
+                                                 const CXXRecordDecl *Base);
 };
 
 }

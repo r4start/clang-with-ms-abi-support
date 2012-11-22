@@ -849,12 +849,12 @@ RTTIBuilder::GetVBaseDisplacement(const CXXRecordDecl *RD,
 
   if (RD->isVirtuallyDerivedFrom(Base)) {
     const VBTableContext::VBTableEntry &RDEntry = 
-      CGM.getVBTableContext().getEntryFromVBTable(RD, RD, RD);
+      CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, RD);
 
     result.offset = -RDEntry.offset;
 
     const VBTableContext::VBTableEntry &BaseEntry = 
-      CGM.getVBTableContext().getEntryFromVBTable(RD, RD, Base);
+      CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, Base);
 
     // Maybe not 4 but Int size.
     result.index = BaseEntry.index * 4;
@@ -877,12 +877,12 @@ RTTIBuilder::GetVBaseDisplacement(const CXXRecordDecl *RD,
     return result;
 
   const VBTableContext::VBTableEntry &RDEntry = 
-    CGM.getVBTableContext().getEntryFromVBTable(RD, RD, RD);
+    CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, RD);
 
   result.offset = -RDEntry.offset;
 
   const VBTableContext::VBTableEntry &BaseEntry = 
-    CGM.getVBTableContext().getEntryFromVBTable(RD, RD, VirtBase);
+    CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, VirtBase);
 
   // Maybe not 4 but Int size.
   result.index = BaseEntry.index * 4;
@@ -1825,6 +1825,8 @@ llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
 llvm::Constant *
 CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
                                          QualType BaseTy) {
+  if (!getContext().getLangOpts().RTTI)
+    return llvm::Constant::getNullValue(Int8PtrTy);
   return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
 }
 
