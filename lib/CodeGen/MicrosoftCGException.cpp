@@ -163,13 +163,19 @@ void CodeGenFunction::MSEHState::SaveStackPointer() {
 void CodeGenFunction::MSEHState::ReturnFromCatch(llvm::BasicBlock *ContBB) {
   assert(ContBB);
 
+  // Second condition necessary, because
+  // EmitBlockThroughCleanup can be called for such stmt
+  // for(...)
+  //   if (...)
+  //       break;
+  if (LocalUnwindTable.empty() ||
+      GlobalUnwindTable.back().RestoreKind != RestoreOpInfo::CatchRestore)
+    return;
+
   if (!RetFromCatchIntrinsic) {
     RetFromCatchIntrinsic = 
       CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_save_ret_addr);
   }
-
-  if (LocalUnwindTable.empty())
-    return;
 
   llvm::Instruction *term = CGF.Builder.GetInsertBlock()->getTerminator();
   if (term) {
