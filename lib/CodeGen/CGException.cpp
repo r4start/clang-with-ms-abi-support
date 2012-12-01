@@ -1342,6 +1342,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     EHState.AddCatchEntryInUnwindTable(
       (*EHState.LocalUnwindTable.back().begin())->ToState);
   }
+
   // We just emitted the body of the try; jump to the continue block.
   if (HaveInsertPoint())
     Builder.CreateBr(ContBB);
