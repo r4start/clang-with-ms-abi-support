@@ -1708,9 +1708,12 @@ void FunctionDecl::setConstexpr(bool IC) {
 }
 
 // r4start
+// These function are main functions only if we use ms abi.
 bool FunctionDecl::isMSMain() const {
   IdentifierInfo *II = getIdentifier();
-  return II->isStr("wmain") || II->isStr("DllMain");
+  return (II->isStr("wmain") || II->isStr("DllMain")) &&
+         getASTContext().getTargetInfo().getCXXABI() == 
+                                          TargetCXXABI::CXXABI_Microsoft;
 }
 
 // r4start
