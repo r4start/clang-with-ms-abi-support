@@ -1712,8 +1712,7 @@ void FunctionDecl::setConstexpr(bool IC) {
 bool FunctionDecl::isMSMain() const {
   IdentifierInfo *II = getIdentifier();
   return (II->isStr("wmain") || II->isStr("DllMain")) &&
-         getASTContext().getTargetInfo().getCXXABI() == 
-                                          TargetCXXABI::CXXABI_Microsoft;
+         getASTContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
 }
 
 // r4start
