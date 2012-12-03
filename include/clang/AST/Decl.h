@@ -1555,6 +1555,9 @@ private:
 
   void setParams(ASTContext &C, llvm::ArrayRef<ParmVarDecl *> NewParamInfo);
 
+  /// r4start
+  bool isMSMain() const;
+
 protected:
   FunctionDecl(Kind DK, DeclContext *DC, SourceLocation StartLoc,
                const DeclarationNameInfo &NameInfo,

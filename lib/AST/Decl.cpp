@@ -1726,13 +1726,23 @@ void FunctionDecl::setPure(bool P) {
       Parent->markedVirtualFunctionPure();
 }
 
+// r4start
+bool FunctionDecl::isMSMain() const {
+  IdentifierInfo *II = getIdentifier();
+  return II->isStr("wmain") || II->isStr("DllMain");
+}
+
+// r4start
+// In MS ABI we shouldn`t mangle wmain function.
+// TODO: wright correct check for wmain function.
 bool FunctionDecl::isMain() const {
   const TranslationUnitDecl *tunit =
     dyn_cast<TranslationUnitDecl>(getDeclContext()->getRedeclContext());
   return tunit &&
          !tunit->getASTContext().getLangOpts().Freestanding &&
          getIdentifier() &&
-         getIdentifier()->isStr("main");
+         (getIdentifier()->isStr("main") ||
+          isMSMain());
 }
 
 bool FunctionDecl::isReservedGlobalPlacementOperator() const {
