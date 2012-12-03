@@ -6144,14 +6144,43 @@ void Sema::CheckMain(FunctionDecl* FD, const DeclSpec& DS) {
 
   QualType CharPP =
     Context.getPointerType(Context.getPointerType(Context.CharTy));
+  
+  // r4start
+  // wmain get wchar_t * pointer.
+  // TODO:  do check correct!
+  QualType WCharPP = 
+    Context.getPointerType(Context.getPointerType(Context.WCharTy));
+  
   QualType Expected[] = { Context.IntTy, CharPP, CharPP, CharPP };
+  QualType ExpectedWMain[] = { Context.IntTy, WCharPP, WCharPP, WCharPP };
+  
+  auto types = Context.getTypes();
+  QualType hinstance;
+  for (auto elem : types) {
+    if (auto rty = elem->getAsStructureType()) {
+      if (auto rdecl = rty->getDecl()) {
+        if (!rdecl->getName().compare("HINSTANCE__")) {
+          hinstance = Context.getPointerType(Context.getRecordType(rdecl));
+        }
+      }
+    }
+  }
+
+  QualType ExpectedDllMain[] = { 
+    hinstance, 
+    Context.UnsignedLongTy, 
+    Context.VoidPtrTy 
+  };
 
   for (unsigned i = 0; i < nparams; ++i) {
     QualType AT = FTP->getArgType(i);
 
     bool mismatch = true;
 
-    if (Context.hasSameUnqualifiedType(AT, Expected[i]))
+    // r4start
+    if (Context.hasSameUnqualifiedType(AT, Expected[i]) ||
+        Context.hasSameUnqualifiedType(AT, ExpectedWMain[i]) ||
+        Context.hasSameUnqualifiedType(AT, ExpectedDllMain[i]))
       mismatch = false;
     else if (Expected[i] == CharPP) {
       // As an extension, the following forms are okay:
