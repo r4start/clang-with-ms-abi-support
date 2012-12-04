@@ -477,7 +477,8 @@ static void EmitCleanup(CodeGenFunction &CGF,
       llvm::Function *retFromFunclet = 
         CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_ret);
       CGF.Builder.CreateCall(retFromFunclet);
-      Fn->toState->Funclet = funcletBlock;
+      if (Fn->toState)
+        Fn->toState->Funclet = funcletBlock;
     } else {
       CGF.EHState.CreateStateStore(Fn->toState->ToState);
     }
