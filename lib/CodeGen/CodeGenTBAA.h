@@ -85,12 +85,13 @@ public:
   /// getTBAAInfoForVTablePtr - Get the TBAA MDNode to be used for a
   /// dereference of a vtable pointer.
   llvm::MDNode *getTBAAInfoForVTablePtr();
-
-  /// getTBAAStructInfo - Get the TBAAStruct MDNode to be used for a memcpy of
-  /// the given type.
+  /// getTBAAStructInfo - Get the TBAAStruct MDNode to be used for a memcpy of  /// the given type.
   llvm::MDNode *getTBAAStructInfo(QualType QTy);
-};
 
+  /// getTBAAInfoForVBTablePtr - Get the TBAA MDNode to be used for a
+  /// dereference of a vbtable pointer.
+  llvm::MDNode *getTBAAInfoForVBTablePtr();
+};
 }  // end namespace CodeGen
 }  // end namespace clang
 

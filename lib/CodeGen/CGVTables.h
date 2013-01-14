@@ -135,7 +135,8 @@ public:
                                          const CXXRecordDecl *Base);
 
   llvm::GlobalVariable *GetAddrOfVBTable(const CXXRecordDecl *RD,
-                                         const CXXRecordDecl *Base);
+                                         const CXXRecordDecl *Base,
+                                         size_t VBTableSize);
 
   /// r4start
   void EmitVFTableDefinition(llvm::GlobalVariable *VFTable,

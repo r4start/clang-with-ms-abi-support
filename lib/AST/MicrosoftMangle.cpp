@@ -71,8 +71,8 @@ public:
                                    StringRef Prefix = "?");
   void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
                                         int64_t MemberDisplacement,
-                                        int64_t VBTableDisplacement,
-                                        int64_t IndexInVBTable,
+                                        int64_t VBPtrOffset,
+                                        int64_t OffsetInVBTable,
                                         int64_t Attributes,
                                         StringRef Prefix = "?");
   void mangleCXXRTTIVBTable(const CXXRecordDecl *RD,
@@ -568,8 +568,8 @@ void MicrosoftCXXNameMangler::mangleCXXRTTITypeDescriptor(
 void MicrosoftCXXNameMangler::mangleCXXRTTIBaseClassDescriptor(
                                         const CXXRecordDecl *RD,
                                         int64_t MemberDisplacement,
-                                        int64_t VBTableDisplacement,
-                                        int64_t IndexInVBTable,
+                                        int64_t VBPtrOffset,
+                                        int64_t OffsetInVBTable,
                                         int64_t Attributes,
                                         StringRef Prefix)
 {
@@ -585,17 +585,17 @@ void MicrosoftCXXNameMangler::mangleCXXRTTIBaseClassDescriptor(
     mangleNumber(MemberDisplacement);
   }
 
-  if (VBTableDisplacement == -1)
+  if (VBPtrOffset == -1)
   {
     Out << "?0";
   } else {
-    mangleNumber(VBTableDisplacement);
+    mangleNumber(VBPtrOffset);
   }
 
-  if (IndexInVBTable == 0) {
+  if (OffsetInVBTable == 0) {
     Out << "A@";
   } else {
-    mangleNumber(IndexInVBTable);
+    mangleNumber(OffsetInVBTable);
   }
     
   mangleNumber(Attributes);
@@ -2217,15 +2217,15 @@ void MicrosoftMangleContext::mangleCXXRTTIBaseClassArray(
 void MicrosoftMangleContext::mangleCXXRTTIBaseClassDescriptor(
                                         const CXXRecordDecl *RD,
                                         int64_t MemberOffset,
+                                        int64_t VBPtrOffset,
                                         int64_t OffsetInVBTable,
-                                        int64_t IndexInVBTable,
                                         int64_t Attributes,
                                         raw_ostream &Out) {
   MicrosoftCXXNameMangler mangler(*this, Out);
 
   mangler.mangleCXXRTTIBaseClassDescriptor(RD, MemberOffset,
+                                           VBPtrOffset,
                                            OffsetInVBTable,
-                                           IndexInVBTable,
                                            Attributes);
 }
 

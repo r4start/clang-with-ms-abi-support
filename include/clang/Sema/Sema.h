@@ -3876,7 +3876,7 @@ public:
                                        bool addMallocAttr = false);
 
   bool FindDeallocationFunction(SourceLocation StartLoc, CXXRecordDecl *RD,
-                                DeclarationName Name, FunctionDecl* &Operator,
+                                bool ArrayForm, FunctionDecl* &Operator,
                                 bool Diagnose = true);
 
   /// ActOnCXXDelete - Parsed a C++ 'delete' expression

@@ -470,6 +470,7 @@ public:
   llvm::MDNode *getTBAAInfo(QualType QTy);
   llvm::MDNode *getTBAAInfoForVTablePtr();
   llvm::MDNode *getTBAAStructInfo(QualType QTy);
+  llvm::MDNode *getTBAAInfoForVBTablePtr();
 
   bool isTypeConstant(QualType QTy, bool ExcludeCtorDtor);
 

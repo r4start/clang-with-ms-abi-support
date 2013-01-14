@@ -1489,9 +1489,25 @@ llvm::Value *
 CodeGenFunction::GetVirtualBaseClassOffset(llvm::Value *This,
                                            const CXXRecordDecl *ClassDecl,
                                            const CXXRecordDecl *BaseClassDecl) {
-  llvm::Value *VTablePtr = GetVTablePtr(This, Int8PtrTy);
-  CharUnits VBaseOffsetOffset = 
-    CGM.getVTableContext().getVirtualBaseOffsetOffset(ClassDecl, BaseClassDecl);
+  llvm::Value *VTablePtr;
+  CharUnits VBaseOffsetOffset;
+  bool isMSABI = 
+    CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft;
+
+  if (isMSABI) {
+    VTablePtr = GetVBTablePtr(This, ClassDecl, Int8PtrTy);
+    const VBTableContext::VBTableEntry &Entry = 
+      CGM.getVBTableContext().getEntryFromPrimaryVBTable(ClassDecl, 
+                                                         BaseClassDecl);
+    uint64_t Offset = Entry.index * PtrDiffTy->getPrimitiveSizeInBits() / 8;
+    VBaseOffsetOffset = 
+      CharUnits::fromQuantity(Offset);
+  } else {
+    VTablePtr = GetVTablePtr(This, Int8PtrTy);
+    VBaseOffsetOffset = 
+      CGM.getVTableContext().getVirtualBaseOffsetOffset(ClassDecl,
+                                                        BaseClassDecl);
+  }
   
   llvm::Value *VBaseOffsetPtr = 
     Builder.CreateConstGEP1_64(VTablePtr, VBaseOffsetOffset.getQuantity(), 
@@ -1502,7 +1518,18 @@ CodeGenFunction::GetVirtualBaseClassOffset(llvm::Value *This,
   VBaseOffsetPtr = Builder.CreateBitCast(VBaseOffsetPtr, 
                                          PtrDiffTy->getPointerTo());
                                          
-  llvm::Value *VBaseOffset = Builder.CreateLoad(VBaseOffsetPtr, "vbase.offset");
+  llvm::Value *VBaseOffset = 
+    Builder.CreateLoad(VBaseOffsetPtr, "vbase.offset");
+
+  // In Microsoft ABI VBTable contain offsets from vbptr                                       
+  if (isMSABI) {
+    CharUnits VBPtrOffset = 
+      CGM.getVBTableContext().getPrimaryVBPtrOffset(ClassDecl);
+    llvm::Constant *Offset = 
+      llvm::ConstantInt::get(PtrDiffTy, VBPtrOffset.getQuantity());
+    VBaseOffset = 
+      Builder.CreateNSWAdd(VBaseOffset, Offset);
+  }
   
   return VBaseOffset;
 }
@@ -1670,8 +1697,6 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
 
   CharUnits vbTableOffset = L.getVBPtrOffset();
   
-  llvm::GlobalVariable *vbTable = 0;
-  
   VBTableContext& vbContext = CGM.getVBTableContext();
 
   for (CXXRecordDecl::base_class_const_iterator I = ClassDecl->vbases_begin(),
@@ -1684,10 +1709,6 @@ void CodeGenFunction::MSInitilizeVtordisps(const CXXRecordDecl *ClassDecl) {
 
     if (!vbaseOffset->second.hasVtorDisp())
       continue;
-
-    if (!vbTable) {
-      vbTable = CGM.getVTables().GetAddrOfVBTable(ClassDecl, ClassDecl);
-    }
 
     const VBTableContext::VBTableEntry vbEntry = 
       vbContext.getEntryFromPrimaryVBTable(ClassDecl, vbaseOffset->first);
@@ -1742,7 +1763,7 @@ CodeGenFunction::MSInsertVBtableInitializationBlock(const CXXRecordDecl *Class,
   llvm::BasicBlock *VBTableSkipInit = 
     llvm::BasicBlock::Create(CGM.getLLVMContext(), "skip.vbtable.init");
 
-  Builder.CreateCondBr(Condition, VBTableInit, VBTableSkipInit);
+  Builder.CreateCondBr(Condition, VBTableSkipInit, VBTableInit);
 
   Builder.SetInsertPoint(VBTableInit);
 
@@ -1790,26 +1811,29 @@ void CodeGenFunction::MSInitializeVBTablePointer(llvm::Constant *VBTable,
 }
 
 // r4start
-void CodeGenFunction::MSInitializeVBTablePointers(const CXXRecordDecl *Class) {
-  assert(Class && "Can not generate vb-table for null class!");
+void CodeGenFunction::MSInitializeVBTablePointers(const CXXRecordDecl *RD) {
+  assert(RD && "Can not generate vb-table for null class!");
 
-  if (!Class->getNumVBases())
+  if (!RD->getNumVBases())
     return;
   
   VBTableContext& Context = CGM.getVBTableContext();
-  const VBTableContext::VBTableTy VBTables = Context.getVBTables(Class);
+  const VBTableContext::VBTableTy &VBTables = Context.getVBTables(RD);
   for (VBTableContext::VBTableTy::const_iterator I = VBTables.begin(),
        E = VBTables.end(); I != E; ++I) {
+    const CXXRecordDecl *OwnerRD = 0;
+    if (I != VBTables.begin())
+      OwnerRD = I->OwnerRD;
     llvm::GlobalVariable *VBTable = 
-      CGM.getVTables().GetAddrOfVBTable(Class, I->first);
+      CGM.getVTables().GetAddrOfVBTable(RD, OwnerRD, I->VBTable.size());
 
-    const VBTableContext::BaseVBTableTy &Table = I->second;
+    const VBTableContext::BaseVBTableTy &Table = I->VBTable;
 
     llvm::SmallVector<llvm::Constant *, 32> Offsets;
 
-    for (VBTableContext::BaseVBTableTy::const_iterator I = Table.begin(),
-         E = Table.end(); I != E; ++I) {
-      VBTableContext::VBTableEntry Entry = I->first;
+   for (VBTableContext::BaseVBTableTy::const_iterator II = Table.begin(),
+         EE = Table.end(); II != EE; ++II) {
+      VBTableContext::VBTableEntry Entry = II->first;
 
       Offsets.push_back(llvm::ConstantInt::get(Int32Ty, Entry.offset));
     }
@@ -1818,8 +1842,7 @@ void CodeGenFunction::MSInitializeVBTablePointers(const CXXRecordDecl *Class) {
     llvm::Constant *Init = llvm::ConstantArray::get(VBTableType, Offsets);
 
     VBTable->setInitializer(Init);
-    MSInitializeVBTablePointer(VBTable, 
-                       CharUnits::fromQuantity(-(Table.begin()->first.offset)));
+    MSInitializeVBTablePointer(VBTable, I->VBPtrOffset);
   }
 }
 
@@ -1881,7 +1904,8 @@ static CharUnits GetClassOffset(const ASTContext &Ctx,
 }
 
 // r4start
-void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *MostDerived, 
+void 
+CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *MostDerived, 
                                                   const CXXRecordDecl *RD, 
                                                   const CXXRecordDecl *Base) {
   for (CXXRecordDecl::base_class_const_iterator I = Base->bases_begin(),
@@ -1902,8 +1926,7 @@ void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *MostDeriv
     CGM.getVTables().GetAddrOfVFTable(MostDerived, Base);
 
   CharUnits VFPtrOffset = 
-    GetClassOffset(CGM.getContext(), MostDerived, Base) /*+ 
-                                                        Layout.getVFPtrOffset()*/;
+    GetClassOffset(CGM.getContext(), MostDerived, Base);
 
   MSInitializeVFTablePointer(VFTable, VFPtrOffset);
 }
@@ -1912,7 +1935,7 @@ void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *MostDeriv
 void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *RD) {
   if (!RD->getNumBases()) {
     // At now only build vftable
-    llvm::Constant *VFTable = CGM.getVTables().GetAddrOfVFTable(RD, 0);
+    llvm::Constant *VFTable = CGM.getVTables().GetAddrOfVFTable(RD, RD);
     MSInitializeVFTablePointer(VFTable, CharUnits::fromQuantity(0));
     return;
   }
@@ -1921,7 +1944,7 @@ void CodeGenFunction::MSInitializeVFTablePointers(const CXXRecordDecl *RD) {
 
   if (Layout.hasOwnVFPtr()) {
     llvm::Constant *VFTable = 
-      CGM.getVTables().GetAddrOfVFTable(RD, 0);
+      CGM.getVTables().GetAddrOfVFTable(RD, RD);
 
     MSInitializeVFTablePointer(VFTable, CharUnits::fromQuantity(0));
   }
@@ -1943,6 +1966,19 @@ llvm::Value *CodeGenFunction::GetVTablePtr(llvm::Value *This,
   llvm::Instruction *VTable = Builder.CreateLoad(VTablePtrSrc, "vtable");
   CGM.DecorateInstruction(VTable, CGM.getTBAAInfoForVTablePtr());
   return VTable;
+}
+
+llvm::Value *CodeGenFunction::GetVBTablePtr(llvm::Value *This, 
+                                            const CXXRecordDecl *ClassDecl,
+                                            llvm::Type *Ty) {
+  CharUnits VBPtrOffset = 
+    CGM.getVBTableContext().getPrimaryVBPtrOffset(ClassDecl);
+  llvm::Value* Ptr = Builder.CreateBitCast(This, Int8PtrTy);
+  Ptr = Builder.CreateConstGEP1_64(Ptr, VBPtrOffset.getQuantity());
+  llvm::Value *VBPtrSrc = Builder.CreateBitCast(Ptr, Ty->getPointerTo());
+  llvm::Instruction *VBTable = Builder.CreateLoad(VBPtrSrc, "vbtable");
+  CGM.DecorateInstruction(VBTable, CGM.getTBAAInfoForVBTablePtr());
+  return VBTable;
 }
 
 static const CXXRecordDecl *getMostDerivedClassDecl(const Expr *Base) {

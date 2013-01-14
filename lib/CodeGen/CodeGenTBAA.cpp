@@ -225,3 +225,7 @@ CodeGenTBAA::getTBAAStructInfo(QualType QTy) {
   // For now, handle any other kind of type conservatively.
   return StructMetadataCache[Ty] = NULL;
 }
+
+llvm::MDNode *CodeGenTBAA::getTBAAInfoForVBTablePtr() {
+  return MDHelper.createTBAANode("vbtable pointer", getRoot());
+}
