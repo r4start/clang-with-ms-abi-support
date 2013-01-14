@@ -41,9 +41,8 @@ class RTTIBuilder {
   /// Fields - The fields of the RTTI descriptor currently being built.
   SmallVector<llvm::Constant *, 16> Fields;
 
-  /// r4start
-  /// AmbiguousBases - Set of bases that in MSVC is ambiguous subobjects.
-  llvm::SmallSet<const CXXRecordDecl *, 8> AmbiguousBases;
+  bool HaveMultipleInheritance;
+  bool HaveAmbigousInheritance;
 
   /// GetAddrOfTypeName - Returns the mangled type name of the given type.
   llvm::GlobalVariable *
@@ -78,24 +77,21 @@ class RTTIBuilder {
   void BuildPointerToMemberTypeInfo(const MemberPointerType *Ty);
   
   /// r4start
-  void GetAmbiguousSubobjects(const CXXRecordDecl *RD);
-
-  /// r4start
-  int32_t GetMemberDisplacement(const CXXRecordDecl *RD, CXXRecordDecl *Base);
-
-  /// r4start
   uint32_t GetAttributesField(const CXXRecordDecl *RD,
-                              CXXRecordDecl *Base);
-
-  /// r4start
-  VBTableContext::VBTableEntry GetVBaseDisplacement(const CXXRecordDecl *RD,
-                                                    CXXRecordDecl *Base);
+                              const CXXRecordDecl *Base,
+                              AccessSpecifier AS,
+                              AccessSpecifier MostStrictAS);
 
   /// r4start
   /// Microsoft specific.
-  llvm::Constant* 
-  BuildRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
-                               CXXRecordDecl *Base);
+  typedef llvm::SmallVector<llvm::Constant*, 64> BaseClassDescriptors;
+  void BuildRTTIBaseClassDescriptor(BaseClassDescriptors &BCD,
+                                    const CXXRecordDecl *RD,
+                                    const CXXRecordDecl *Base,
+                                    CharUnits BaseOffset,
+                                    CharUnits BaseVBOff,
+                                    AccessSpecifier AS,
+                                    AccessSpecifier MostStrictAS);
 
   /// r4start
   /// Build Microsoft specific structure Base Class Array.
@@ -126,7 +122,7 @@ class RTTIBuilder {
   ///   //displacement inside vbtable
   ///   int vdisp;
   /// };
-  llvm::Constant *BuildRTTIBaseClassArray(const CXXRecordDecl* RD);
+  llvm::Constant *BuildRTTIBaseClassArray(const CXXRecordDecl* RD, size_t & BCASize);
 
   /// r4start
   /// Build Microsoft specific structure Class Hierarchy Descriptor.
@@ -186,7 +182,10 @@ public:
   RTTIBuilder(CodeGenModule &CGM) : CGM(CGM), 
     VMContext(CGM.getModule().getContext()),
     Int8PtrTy(llvm::Type::getInt8PtrTy(VMContext)),
-    Int32Ty(llvm::Type::getInt32Ty(VMContext)){ }
+    Int32Ty(llvm::Type::getInt32Ty(VMContext)),
+    HaveMultipleInheritance(false),
+    HaveAmbigousInheritance(false)
+  { }
 
   // Pointer type info flags.
   enum {
@@ -698,208 +697,100 @@ maybeUpdateRTTILinkage(CodeGenModule &CGM, llvm::GlobalVariable *GV,
   // And update its linkage.
   TypeNameGV->setLinkage(Linkage);
 }
-
-// r4start
-static llvm::StructType* GetBaseClassDescriptorType(CodeGenModule& CGM)
+static bool isAmbigous(ASTContext& Context, const CXXRecordDecl *MostDerived,
+                                            const CXXRecordDecl *RD)
 {
-  llvm::SmallVector<llvm::Type*, 4> BaseClassDescrFieldTypes;
+  CXXBasePaths Paths(/*FindAmbiguities=*/true, /*RecordPaths=*/false,
+                     /*DetectVirtual=*/false);
+  bool DerivationOkay = MostDerived->isDerivedFrom(RD, Paths);
+  assert(DerivationOkay &&
+         "Can only be used with a derived-to-base");
+  (void)DerivationOkay;
 
-  BaseClassDescrFieldTypes.push_back(llvm::Type::getInt8PtrTy(CGM.getLLVMContext()));
-
-  // Push numContainedBases, PMD fields and attributes.
-  for (int i = 0; i < 5; ++i)
-  {
-    BaseClassDescrFieldTypes.push_back(llvm::Type::getInt32Ty(CGM.getLLVMContext()));
+  QualType RDTy = Context.getTagDeclType(RD);
+  return Paths.isAmbiguous(Context.getCanonicalType(RDTy).getUnqualifiedType());
   }
 
-  return llvm::StructType::get(CGM.getLLVMContext(), BaseClassDescrFieldTypes);
-}
-
-// r4start
-// Need to rewrite this!!!!!!!!!!!!
-static uint32_t GetBasesCount(const CXXRecordDecl *RD) {
-  if (!RD->getNumBases() && !RD->getNumVBases())
-    return 0;
-
-  uint32_t BasesCount = 0;
-  llvm::SmallVector<const CXXRecordDecl *, 16> Bases;
-
-  Bases.push_back(RD);
-
-  while (!Bases.empty()) {
-    
-    const CXXRecordDecl *Derived = Bases.back();
-    Bases.pop_back();
-
-    for (CXXRecordDecl::base_class_const_iterator I = Derived->bases_begin(),
-         E = Derived->bases_end(); I != E; ++I, ++BasesCount) {
-      const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
-
-      if (Base->getNumBases() ||
-          Base->getNumVBases())
-        Bases.push_back(Base);
-    }
-  }
-
-  return BasesCount;
-}
-
-uint32_t RTTIBuilder::GetAttributesField(const CXXRecordDecl *RD, 
-                                         CXXRecordDecl *Base) {
+uint32_t RTTIBuilder::GetAttributesField(const CXXRecordDecl *MostDerived, 
+                                         const CXXRecordDecl *Base,
+                                         AccessSpecifier AS,
+                                         AccessSpecifier MostStrictAS) {
   // At now we know that only first byte uses from attr field.
-  // 7 bit sets always (counting from 1).
-  // 5 bit sets if Base is virtually derived from RD.
-  // 4 bit sets always with 1 bit, at now I don`t know this bit meaning.
-  // 3 bit sets if Base is not directly public. 
-  // 2 bit sets if Base ambiguous subobject.
-  // 1 bit sets if down cast not allowed.
+  // 0 bit is set if downcast not allowed(have non-publics on inheritance path)
+  // 1 bit is set if Base ambigous subobject.
+  // 2 bit is set if Base is not directly public from his parent. 
+  // 3 bit is always equal to 0 bit, at now I don`t know this bit meaning.
+  // 4 bit is set if MostDerived is virtually derived from Base.
+  // 5 bit is always clear.
+  // 6 bit is always set.
   // Other bits are unknown.
-  uint32_t Attr = 64;
+  uint32_t Attr = 1 << 6;
 
-  if (RD == Base)
+  if (MostDerived == Base)
     return Attr;
 
-  if (RD->isVirtuallyDerivedFrom(Base))
-    Attr |= 16;
+  if (MostStrictAS != AS_public)
+    Attr |= (1 << 0) | (1 << 3);
 
-  bool BaseWasVisited = false;
-  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
-       E = RD->bases_end(); I != E; ++I) {
-    const CXXRecordDecl *BaseDecl = I->getType()->getAsCXXRecordDecl();
-    if (BaseDecl == Base) {
-      BaseWasVisited = true;
-      if (I->getAccessSpecifier() != AS_public) {
-        Attr |= 4;
-      }
-      break;
-    }
+  if (isAmbigous(CGM.getContext(), MostDerived, Base)) {
+    HaveAmbigousInheritance = true;
+    Attr |= 1 << 1;
   }
 
-  CXXBasePaths Paths;
-  Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
-  RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
-                    Base->getCanonicalDecl(), Paths);
+  if (AS != AS_public)
+      Attr |= 1 << 2;
 
-  QualType BaseTy = CGM.getContext().getTagDeclType(Base);
-
-  if (Paths.isAmbiguous(CGM.getContext().getCanonicalType(BaseTy)))
-    Attr |= 2;
-
-  // What we must do with ambiguous subobjects?
-  if (!BaseWasVisited) {
-    CXXBasePath& Path = Paths.front();
-    if (Path.Access != AS_public)
-      Attr |= 4;
-  }
-
-  // Down cast not allowed by default.
-  uint32_t DownCastAllowed = 9;
-
-  if (!(Attr & 4))
-    DownCastAllowed = 0;
-  
-  Attr |= DownCastAllowed;
+  if (MostDerived->isVirtuallyDerivedFrom(Base))
+    Attr |= 1 << 4;
 
   return Attr;
 }
 
-int32_t RTTIBuilder::GetMemberDisplacement(const CXXRecordDecl *RD,
-                                           CXXRecordDecl *Base) {
-  assert(!RD->isVirtuallyDerivedFrom(Base) && 
-         "Unable get member displacement for virtual base!");
+void RTTIBuilder::BuildRTTIBaseClassDescriptor(BaseClassDescriptors &BCD,
+                                               const CXXRecordDecl *MostDerived,
+                                               const CXXRecordDecl *RD,
+                                               CharUnits RDOffset,
+                                               CharUnits RDVBOff,
+                                               AccessSpecifier AS,
+                                               AccessSpecifier MostStrictAS) {
+  ASTContext& Context = CGM.getContext();
+  VBTableContext& VBTContext = CGM.getVBTableContext();
+  BCD.push_back(0);
+  llvm::Constant *&RDDescriptor = BCD.back();
 
-  CXXBasePaths Paths;
-  Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
-  RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
-                    Base->getCanonicalDecl(), Paths);
+  if (!HaveMultipleInheritance && RD->getNumBases() > 1)
+    HaveMultipleInheritance = true;
+  if (AS > AS_public)
+    MostStrictAS = AS;
 
-  if (Paths.getDetectedVirtual())
-    return 0;
-
-  QualType BaseTy = CGM.getContext().getTagDeclType(Base);
-  CanQualType BaseCanQualTy = CGM.getContext().getCanonicalType(BaseTy);
-  assert(!Paths.isAmbiguous(BaseCanQualTy) && 
-         "At now we can't work with ambiguous bases!");
-
-  CXXBasePath& Path = Paths.front();
-
-  ASTContext &Ctx = CGM.getContext();
-
-  if (Path.size() ==  1) {
-    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
-    return Layout.getBaseClassOffset(Base).getQuantity();
+  size_t ContainedBases = BCD.size();
+  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(), 
+       E = RD->bases_end(); I != E; ++I) {
+    CXXRecordDecl *Base
+      = cast<CXXRecordDecl>(I->getType()->getAs<RecordType>()->getDecl());
+    CharUnits BaseOffset = RDOffset;
+    CharUnits BaseVBOff = RDVBOff;
+    if (MostDerived->isVirtuallyDerivedFrom(Base)) {
+      BaseOffset = CharUnits::Zero();
+      uint32_t Idx = VBTContext.getEntryFromPrimaryVBTable(MostDerived, Base).index;
+      BaseVBOff = CharUnits::fromQuantity(Idx * CGM.PtrDiffTy->getPrimitiveSizeInBits() / 8);
   }
-
-  int32_t MemberDisplacement = 0;
-  for (CXXBasePathElement *I = Path.begin(), *E = Path.end(); I != E; ++I) {
-    const ASTRecordLayout &MostDerivedLayout = Ctx.getASTRecordLayout(I->Class);
-    const CXXRecordDecl *BaseDecl = I->Base->getType()->getAsCXXRecordDecl();
-
-    MemberDisplacement += 
-      MostDerivedLayout.getBaseClassOffset(BaseDecl).getQuantity();
-  }
-
-  return MemberDisplacement;
+    else {
+      const ASTRecordLayout& Layout = Context.getASTRecordLayout(RD);
+      BaseOffset += Layout.getBaseClassOffset(Base);
 }
-
-VBTableContext::VBTableEntry 
-RTTIBuilder::GetVBaseDisplacement(const CXXRecordDecl *RD,
-                                  CXXRecordDecl *Base) {
-  VBTableContext::VBTableEntry result(0, -1);
-
-  if (RD->isVirtuallyDerivedFrom(Base)) {
-    const VBTableContext::VBTableEntry &RDEntry = 
-      CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, RD);
-
-    result.offset = -RDEntry.offset;
-
-    const VBTableContext::VBTableEntry &BaseEntry = 
-      CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, Base);
-
-    // Maybe not 4 but Int size.
-    result.index = BaseEntry.index * 4;
-    
-    return result;
+    BuildRTTIBaseClassDescriptor(BCD, MostDerived, Base, BaseOffset, BaseVBOff,
+                                 I->getAccessSpecifier(), MostStrictAS);
   }
+  ContainedBases = BCD.size() - ContainedBases;
 
-  CXXBasePaths Paths;
-  Paths.setOrigin(const_cast<CXXRecordDecl *>(RD));
-  RD->lookupInBases(&CXXRecordDecl::FindBaseClass,
-                    Base->getCanonicalDecl(), Paths);
-
-  if (!Paths.getDetectedVirtual())
-    return result;
-
-  const CXXRecordDecl *VirtBase = 
-    Paths.getDetectedVirtual()->getAsCXXRecordDecl();
-
-  if (!VirtBase)
-    return result;
-
-  const VBTableContext::VBTableEntry &RDEntry = 
-    CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, RD);
-
-  result.offset = -RDEntry.offset;
-
-  const VBTableContext::VBTableEntry &BaseEntry = 
-    CGM.getVBTableContext().getEntryFromPrimaryVBTable(RD, VirtBase);
-
-  // Maybe not 4 but Int size.
-  result.index = BaseEntry.index * 4;
-
-  return result;
-}
-
-llvm::Constant* 
-RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD, 
-                                          CXXRecordDecl *Base) {
   llvm::SmallVector<llvm::Constant*, 6> BaseClassDescrVals;
 
   // Get ptr to RTTI Type descriptor.
   llvm::SmallString<256> TypeDescrBuff;
   llvm::raw_svector_ostream OutType(TypeDescrBuff);
   CGM.getCXXABI().getMangleContext().
-    getMsExtensions()->mangleCXXRTTITypeDescriptor(Base, OutType);
+    getMsExtensions()->mangleCXXRTTITypeDescriptor(RD, OutType);
   OutType.flush();
   llvm::StringRef TypeDescriptorName = TypeDescrBuff.str();
 
@@ -907,7 +798,7 @@ RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD,
     CGM.getModule().getGlobalVariable(TypeDescriptorName);
 
   if (!TypeDescr) {
-    BuildRTTITypeDescriptor(CGM.getContext().getTagDeclType(Base));
+    BuildRTTITypeDescriptor(CGM.getContext().getTagDeclType(RD));
     TypeDescr = 
       CGM.getModule().getGlobalVariable(TypeDescriptorName);
     
@@ -917,103 +808,61 @@ RTTIBuilder::BuildRTTIBaseClassDescriptor(const CXXRecordDecl* RD,
   BaseClassDescrVals.push_back(llvm::ConstantExpr::getBitCast(TypeDescr,
                                                               Int8PtrTy));
   // Number contained bases.
-  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, 
-                                                      GetBasesCount(Base)));
-
-  int32_t MemberDisplacement = 0;
-  if (Base != RD && 
-      !RD->isVirtuallyDerivedFrom(Base))
-    MemberDisplacement = GetMemberDisplacement(RD, Base);
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, ContainedBases));
 
   // Member displacement.
-  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty,
-                                                      MemberDisplacement));
-
-  VBTableContext::VBTableEntry VBTableDisps = GetVBaseDisplacement(RD, Base);
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, RDOffset.getQuantity()));
 
   // Vbtable displacement.
-  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty,
-                                                      VBTableDisps.offset));
+  CharUnits VBPtrOffset = CharUnits::fromQuantity(-1);
+  if (!RDVBOff.isZero())
+    VBPtrOffset = VBTContext.getPrimaryVBPtrOffset(MostDerived);
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, VBPtrOffset.getQuantity()));
 
   // Displacement inside vbtable.
-  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, 
-                                                      VBTableDisps.index));
+  BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, RDVBOff.getQuantity()));
 
   // Attributes.
-  uint32_t Attributes = GetAttributesField(RD, Base);
+  uint32_t Attributes = GetAttributesField(MostDerived, RD, AS, MostStrictAS);
 
   BaseClassDescrVals.push_back(llvm::ConstantInt::get(Int32Ty, Attributes));
 
-  llvm::StructType* BaseClassDescrTy = GetBaseClassDescriptorType(CGM);
-
-  llvm::Constant* Init = 
-    llvm::ConstantStruct::get(BaseClassDescrTy, BaseClassDescrVals);
+  llvm::Constant* Init = llvm::ConstantStruct::getAnon(BaseClassDescrVals);
   
   llvm::SmallString<256> Name;
   llvm::raw_svector_ostream Out(Name);
 
   CGM.getCXXABI().getMangleContext().
     getMsExtensions()->
-      mangleCXXRTTIBaseClassDescriptor(Base, MemberDisplacement, 
-                                       VBTableDisps.offset, VBTableDisps.index,
+    mangleCXXRTTIBaseClassDescriptor(RD, RDOffset.getQuantity(), 
+                                     VBPtrOffset.getQuantity(), RDVBOff.getQuantity(),
                                        Attributes, Out);
   Out.flush();
 
   llvm::StringRef DescrName = Name.str();
 
-  llvm::GlobalVariable *BaseClassDescr = 
-    CGM.getModule().getGlobalVariable(DescrName);
+  RDDescriptor = CGM.getModule().getGlobalVariable(DescrName);
 
-  if (!BaseClassDescr)
-    BaseClassDescr = 
-      new llvm::GlobalVariable(CGM.getModule(), Init->getType(), false,
+  if (!RDDescriptor)
+    RDDescriptor = 
+      new llvm::GlobalVariable(CGM.getModule(), Init->getType(), true,
                                CurLinkage, Init, DescrName);
-
-  return BaseClassDescr;
 }
 
 // r4start
-llvm::Constant* RTTIBuilder::BuildRTTIBaseClassArray(const CXXRecordDecl* RD) {
-  llvm::SmallVector<llvm::Constant*, 64> BaseClassDescriptors;
+llvm::Constant* RTTIBuilder::BuildRTTIBaseClassArray(const CXXRecordDecl* RD, size_t& BCASize) {
+  BaseClassDescriptors BCD;
 
-  std::deque<CXXRecordDecl *> Bases;
-  
-  Bases.push_front(const_cast<CXXRecordDecl *>(RD));
-
-  while (!Bases.empty()) {
-    CXXRecordDecl *Derived = Bases.front();
-    Bases.pop_front();
-
-    BaseClassDescriptors.push_back(
-       BuildRTTIBaseClassDescriptor(RD, Derived));
-
-    bool Generate = true;
-
-    for (CXXRecordDecl::base_class_const_iterator I = Derived->bases_begin(),
-         E = Derived->bases_end(); I != E; ++I) {
-      CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
-
-      if (Base->getNumBases() ||
-          Base->getNumVBases()) {
-        Generate = false;
-      }
-
-      if (Generate) {
-        BaseClassDescriptors.push_back(
-          BuildRTTIBaseClassDescriptor(RD, Base));
-        continue;
-      }
-
-      Bases.push_back(Base);
-    }
-  }
+  BuildRTTIBaseClassDescriptor(BCD, RD, RD, 
+    CharUnits::Zero(), CharUnits::Zero(), AS_public, AS_public);
+  BCASize = BCD.size();
 
   llvm::ArrayType* BaseClassArrayType = 
-    llvm::ArrayType::get(BaseClassDescriptors[0]->getType(),
-                         BaseClassDescriptors.size());
+    llvm::ArrayType::get(BCD[0]->getType(),
+                         BCD.size());
 
   llvm::Constant* BaseClassArrayInit = 
-    llvm::ConstantArray::get(BaseClassArrayType, BaseClassDescriptors);
+    llvm::ConstantArray::get(BaseClassArrayType, BCD);
 
   llvm::SmallString<256> Name;
   llvm::raw_svector_ostream Out(Name);
@@ -1029,48 +878,10 @@ llvm::Constant* RTTIBuilder::BuildRTTIBaseClassArray(const CXXRecordDecl* RD) {
   if (!BaseClassArray)
     BaseClassArray = 
       new llvm::GlobalVariable(CGM.getModule(), BaseClassArrayInit->getType(),
-                               false, CurLinkage, 
-                               BaseClassArrayInit, ArrayName);
+                              true, CurLinkage, BaseClassArrayInit, ArrayName);
 
   return BaseClassArray;
 }
-
-// r4start
-// TODO: rewrite this.
-void RTTIBuilder::GetAmbiguousSubobjects(const CXXRecordDecl *RD) {
-  std::list<const CXXRecordDecl *> Bases;
-  std::set<const CXXRecordDecl *> VisitedBases;
-  std::set<const CXXRecordDecl *> VisitedVirtualBases;
-
-  Bases.push_back(RD);
-
-  while (!Bases.empty()) {
-    const CXXRecordDecl *Derived = Bases.back();
-    Bases.pop_back();
-
-    for (CXXRecordDecl::base_class_const_iterator I = Derived->bases_begin(),
-      E = Derived->bases_end(); I != E; ++I) {
-      const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
-
-      if (I->isVirtual()) {
-        VisitedVirtualBases.insert(Base);
-      }
-
-      if (VisitedBases.find(Base) != VisitedBases.end()) {
-        AmbiguousBases.insert(Base);
-      } else if (VisitedVirtualBases.find(Base) != 
-                      VisitedVirtualBases.end()) {
-        AmbiguousBases.insert(Base);
-        VisitedBases.insert(Base);
-      } else {
-        VisitedBases.insert(Base);
-      }
-
-      Bases.push_back(Base);
-    }
-  }
-}
-
 // r4start
 llvm::Constant * 
 RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD) {
@@ -1096,27 +907,25 @@ RTTIBuilder::BuildRTTIClassHierarchyDescriptor(const CXXRecordDecl* RD) {
   // Signature always 0?
   CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, 0));
   
-  GetAmbiguousSubobjects(RD);
+  size_t BCASize;
+  llvm::Constant* BaseClassArray = BuildRTTIBaseClassArray(RD, BCASize);
 
   uint32_t AttributeVal = 0;
-  if (RD->getNumBases() > 1) {
+  if (HaveMultipleInheritance) {
     AttributeVal |= 0x01;
-
     if (RD->getNumVBases())
       AttributeVal |= 0x02;
-
-    if (!AmbiguousBases.empty()) {
+    if (HaveAmbigousInheritance)
       AttributeVal |= 0x04;
     }
-  }
 
   CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, AttributeVal));
 
-  CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, GetBasesCount(RD) + 1));
+  CHDFieldVals.push_back(llvm::ConstantInt::get(Int32Ty, BCASize));
 
-  llvm::Constant* BaseClassArray = BuildRTTIBaseClassArray(RD);
   CHDFieldTypes.push_back(Int8PtrTy);
-  CHDFieldVals.push_back(llvm::ConstantExpr::getBitCast(BaseClassArray, Int8PtrTy));
+  CHDFieldVals.push_back(llvm::ConstantExpr::getBitCast(BaseClassArray, 
+                                                        Int8PtrTy));
 
   llvm::StructType* CHDType = 
     llvm::StructType::get(CGM.getLLVMContext(), CHDFieldTypes);
@@ -1242,7 +1051,7 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   CXXRecordDecl *Base = 0;
   CXXRecordDecl *LayoutClass = Ty->getAsCXXRecordDecl();
 
-  if (LayoutClass != BaseTy->getAsCXXRecordDecl())
+  if (Ty != BaseTy)
     Base = BaseTy->getAsCXXRecordDecl();
 
   const ASTRecordLayout &Layout =

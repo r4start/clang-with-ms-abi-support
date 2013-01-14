@@ -158,6 +158,8 @@ static llvm::Value *PerformTypeAdjustmentMS(CodeGenFunction &CGF,
   }
 
   if (IsVtordispEx) {
+    assert(0 && "TODO: Add handling here!");
+#if 0
     assert(MostDerived && "Can not build vtordispex thunk!");
 
     VBTableContext &VBTableCtx = CGF.CGM.getVBTableContext();
@@ -179,6 +181,7 @@ static llvm::Value *PerformTypeAdjustmentMS(CodeGenFunction &CGF,
       CGF.Builder.CreateLoad(VBPtr, "vbase.offset");
 
     V = CGF.Builder.CreateGEP(V, OffsetFromVBTable, "this.plus.vb.offset");
+#endif
   }
 
   if (NonVirtualAdjustment) {
@@ -790,14 +793,16 @@ CodeGenVTables::CreateVFTableInitializer(const CXXRecordDecl *RD,
     Inits.push_back(Init);
   }
 
-  llvm::ArrayType *ArrayType = llvm::ArrayType::get(CGM.Int8PtrTy, NumComponents);
+  llvm::ArrayType *ArrayType = 
+    llvm::ArrayType::get(CGM.Int8PtrTy, NumComponents);
   return llvm::ConstantArray::get(ArrayType, Inits);
 }
 
 // r4start
 llvm::GlobalVariable *
 CodeGenVTables::GetAddrOfVBTable(const CXXRecordDecl *RD,
-                                 const CXXRecordDecl *Base) {
+                                 const CXXRecordDecl *Base,
+                                 size_t VBTableSize) {
   llvm::GlobalVariable *&VBTable = MSVBTables[RD][Base];
   if (VBTable)
     return VBTable;
@@ -810,16 +815,12 @@ CodeGenVTables::GetAddrOfVBTable(const CXXRecordDecl *RD,
   llvm::raw_svector_ostream Out(Name);
 
   CGM.getCXXABI().getMangleContext().
-    getMsExtensions()->mangleCXXVBTable(RD, BaseDecl, Out);
+    getMsExtensions()->mangleCXXVBTable(RD, Base == RD ? 0 : Base, Out);
   Out.flush();
-
   llvm::StringRef VBTableName = Name.str();
 
-  VBTableContext& Context = CGM.getVBTableContext();
-  const VBTableContext::BaseVBTableTy &Table = Context.getVBTable(RD, Base);
-
   llvm::ArrayType *VBTableType = 
-    llvm::ArrayType::get(CGM.Int32Ty, Table.size());
+    llvm::ArrayType::get(CGM.Int32Ty, VBTableSize);
 
   VBTable = 
     CGM.CreateOrReplaceCXXRuntimeVariable(Name, VBTableType, 
@@ -834,15 +835,9 @@ CodeGenVTables::GetAddrOfVBTable(const CXXRecordDecl *RD,
 llvm::GlobalVariable *
 CodeGenVTables::GetAddrOfVFTable(const CXXRecordDecl *RD,
                                  const CXXRecordDecl *Base) {
-  const CXXRecordDecl *BaseDecl;
   const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
 
-  if (!Base)
-    BaseDecl = RD;
-  else
-    BaseDecl = Base;
-
-  llvm::GlobalVariable *&VFTable = MSVFTables[RD][BaseDecl];
+  llvm::GlobalVariable *&VFTable = MSVFTables[RD][Base];
   if (VFTable) {
     return VFTable;
   }
@@ -853,14 +848,14 @@ CodeGenVTables::GetAddrOfVFTable(const CXXRecordDecl *RD,
   SmallString<256> OutName;
   llvm::raw_svector_ostream Out(OutName);
 
-  CGM.getCXXABI().getMangleContext().mangleCXXVTable(RD, BaseDecl, Out);
+  CGM.getCXXABI().getMangleContext().mangleCXXVTable(RD, Base, Out);
   
   Out.flush();
   StringRef Name = OutName.str();
 
   llvm::ArrayType *ArrayType = 
     llvm::ArrayType::get(CGM.Int8PtrTy,
-             VTContext.getVFTableLayout(RD, BaseDecl).getNumVTableComponents());
+             VTContext.getVFTableLayout(RD, Base).getNumVTableComponents());
 
   VFTable =
     CGM.CreateOrReplaceCXXRuntimeVariable(Name, ArrayType, 
@@ -876,16 +871,12 @@ CodeGenVTables::EmitVFTableDefinition(llvm::GlobalVariable *VFTable,
                                     llvm::GlobalVariable::LinkageTypes Linkage,
                                       const CXXRecordDecl *RD, 
                                       const CXXRecordDecl *Base) {
-  const CXXRecordDecl *BaseDecl = Base;
-  if (!Base)
-    BaseDecl = RD;
-
-  const VTableLayout &VTLayout = VTContext.getVFTableLayout(RD, BaseDecl);
+  const VTableLayout &VTLayout = VTContext.getVFTableLayout(RD, Base);
 
   // Create and set the initializer.
   llvm::Constant *Init = 
     CreateVFTableInitializer(RD,
-                             BaseDecl,
+                             Base,
                              VTLayout.vtable_component_begin(),
                              VTLayout.getNumVTableComponents(),
                              VTLayout.vtable_thunk_begin(),
@@ -1025,15 +1016,9 @@ CodeGenVTables::MSGenerateClassData(llvm::GlobalVariable::LinkageTypes Linkage,
                                     const CXXRecordDecl *RD) {
   const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
 
-  if (!RD->getNumBases()) {
-    llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);
-    EmitVFTableDefinition(VFTable, llvm::GlobalValue::WeakAnyLinkage, RD, 0);
-    return;
-  }
-
   if (Layout.hasOwnVFPtr()) {
-    llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, 0);
-    EmitVFTableDefinition(VFTable, llvm::GlobalValue::WeakAnyLinkage, RD, 0);
+    llvm::GlobalVariable *VFTable = GetAddrOfVFTable(RD, RD);
+    EmitVFTableDefinition(VFTable, llvm::GlobalValue::WeakAnyLinkage, RD, RD);
   }
   for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
         E = RD->bases_end(); I != E; ++I) {

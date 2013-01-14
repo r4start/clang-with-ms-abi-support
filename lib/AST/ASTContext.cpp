@@ -2503,8 +2503,17 @@ ASTContext::getFunctionType(QualType ResultTy,
     if (!ArgArray[i].isCanonicalAsParam())
       isCanonical = false;
 
+  
+  // DAEMON! StdCall can't support variadic functions because
+  // function must pop it's arguments from the stack (not caller)
+  // but in variadic function we can't do that properly.
+  // So StdCall on variadic affects only decoration.
   const CallingConv DefaultCC = EPI.ExtInfo.getCC();
-  const CallingConv CallConv = (LangOpts.MRTD && DefaultCC == CC_Default) ?
+  CallingConv CallConv;
+  if (getTargetInfo().getCXXABI() == CXXABI_Microsoft)
+    CallConv = DefaultCC;
+  else
+    CallConv = (LangOpts.MRTD && DefaultCC == CC_Default) ?
                                CC_X86StdCall : DefaultCC;
 
   // If this type isn't canonical, get the canonical version of it.

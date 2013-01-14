@@ -1470,6 +1470,11 @@ public:
   /// to by This.
   llvm::Value *GetVTablePtr(llvm::Value *This, llvm::Type *Ty);
 
+  /// r4start
+  llvm::Value *GetVBTablePtr(llvm::Value *This, 
+                             const CXXRecordDecl *ClassDecl,
+                             llvm::Type *Ty);
+
   /// EnterDtorCleanups - Enter the cleanups necessary to complete the
   /// given phase of destruction for a destructor.  The end result
   /// should call destructors on members and base classes in reverse

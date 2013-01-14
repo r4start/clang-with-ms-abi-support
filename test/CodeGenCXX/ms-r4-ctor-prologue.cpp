@@ -57,7 +57,7 @@ void test() { B b; }
 // CHECK-NEXT:   %this1 = load %"struct.test2::B"** %this.addr
 // CHECK-NEXT:   store %"struct.test2::B"* %this1, %"struct.test2::B"** %retval
 // CHECK-NEXT:   %ctor.flag.cmp = icmp eq i32 0, %ctor.flag
-// CHECK-NEXT:   br i1 %ctor.flag.cmp, label %vbtable.init, label %skip.vbtable.init
+// CHECK-NEXT:   br i1 %ctor.flag.cmp, label %skip.vbtable.init, label %vbtable.init
 // CHECK: vbtable.init:                                     ; preds = %entry
 // CHECK-NEXT:   %0 = bitcast %"struct.test2::B"* %this1 to i8*
 // CHECK-NEXT:   %vbptr.field = getelementptr inbounds i8* %0, i64 0

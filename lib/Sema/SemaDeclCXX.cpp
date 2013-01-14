@@ -4603,9 +4603,7 @@ bool Sema::ShouldDeleteSpecialMember(CXXMethodDecl *MD, CXXSpecialMember CSM,
   //    results in an ambiguity or in a function that is deleted or inaccessible
   if (CSM == CXXDestructor && MD->isVirtual()) {
     FunctionDecl *OperatorDelete = 0;
-    DeclarationName Name =
-      Context.DeclarationNames.getCXXOperatorName(OO_Delete);
-    if (FindDeallocationFunction(MD->getLocation(), MD->getParent(), Name,
+    if (FindDeallocationFunction(MD->getLocation(), MD->getParent(), false,
                                  OperatorDelete, false)) {
       if (Diagnose)
         Diag(RD->getLocation(), diag::note_deleted_dtor_no_operator_delete);
@@ -5041,9 +5039,7 @@ bool Sema::CheckDestructor(CXXDestructorDecl *Destructor) {
     
     // If we have a virtual destructor, look up the deallocation function
     FunctionDecl *OperatorDelete = 0;
-    DeclarationName Name = 
-    Context.DeclarationNames.getCXXOperatorName(OO_Delete);
-    if (FindDeallocationFunction(Loc, RD, Name, OperatorDelete))
+    if (FindDeallocationFunction(Loc, RD, false, OperatorDelete))
       return true;
 
     MarkFunctionReferenced(Loc, OperatorDelete);

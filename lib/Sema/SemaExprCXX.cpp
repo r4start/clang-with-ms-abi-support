@@ -1539,13 +1539,43 @@ bool Sema::FindAllocationFunctions(SourceLocation StartLoc, SourceRange Range,
       return true;
   }
   if (!OperatorNew) {
+    //DAEMON! Look at comment above /\
+    //                              ||
+    // 2) If an array size is given, look for operator new[], else look for
+    //   operator new.
+    // Microsoft prefer Explicit OO_New to Implicit OO_Array_New
+
     // Didn't find a member overload. Look for a global one.
     DeclareGlobalNewDelete();
     DeclContext *TUDecl = Context.getTranslationUnitDecl();
-    if (FindAllocationOverload(StartLoc, Range, NewName, &AllocArgs[0],
-                          AllocArgs.size(), TUDecl, /*AllowMissing=*/false,
-                          OperatorNew))
-      return true;
+    if (IsArray) {
+      FindAllocationOverload(StartLoc, Range, NewName, 
+                                    &AllocArgs[0], AllocArgs.size(), TUDecl, 
+                                    /*AllowMissing=*/true, OperatorNew, false);
+      if (!OperatorNew || OperatorNew->isImplicit()) {
+        DeclarationName NoArrNewName = 
+                        Context.DeclarationNames.getCXXOperatorName(OO_New);
+        DeclarationName NoArrDeleteName = 
+                        Context.DeclarationNames.getCXXOperatorName(OO_Delete);
+        FunctionDecl *NoArrOperatorNew = 0;
+        if (FindAllocationOverload(StartLoc, Range, NoArrNewName, &AllocArgs[0],
+                      AllocArgs.size(), TUDecl, /*AllowMissing=*/!OperatorNew,
+                      NoArrOperatorNew, !OperatorNew) && !OperatorNew)
+          return true;
+        if (NoArrOperatorNew && !NoArrOperatorNew->isImplicit()) {
+          OperatorNew = NoArrOperatorNew;
+          NewName = NoArrNewName;
+          DeleteName = NoArrDeleteName;
+        }
+      }
+    } 
+    if (!OperatorNew) {
+      if (FindAllocationOverload(StartLoc, Range, NewName, &AllocArgs[0],
+                            AllocArgs.size(), TUDecl, /*AllowMissing=*/false,
+                            OperatorNew))
+        return true;
+    }
+
   }
 
   // We don't need an operator delete if we're running under
@@ -1948,8 +1978,10 @@ void Sema::DeclareGlobalAllocationFunction(DeclarationName Name,
 }
 
 bool Sema::FindDeallocationFunction(SourceLocation StartLoc, CXXRecordDecl *RD,
-                                    DeclarationName Name,
+                                    bool ArrayForm,
                                     FunctionDecl* &Operator, bool Diagnose) {
+  DeclarationName Name = Context.DeclarationNames.getCXXOperatorName(
+                                      ArrayForm ? OO_Array_Delete : OO_Delete);
   LookupResult Found(*this, Name, StartLoc, LookupOrdinaryName);
   // Try to find operator delete/operator delete[] in class scope.
   LookupQualifiedName(Found, RD);
@@ -2027,10 +2059,31 @@ bool Sema::FindDeallocationFunction(SourceLocation StartLoc, CXXRecordDecl *RD,
   CXXNullPtrLiteralExpr Null(Context.VoidPtrTy, SourceLocation());
   Expr* DeallocArgs[1];
   DeallocArgs[0] = &Null;
-  if (FindAllocationOverload(StartLoc, SourceRange(), Name,
-                             DeallocArgs, 1, TUDecl, !Diagnose,
-                             Operator, Diagnose))
-    return true;
+
+  // DAEMON!
+  // Microsoft prefer Explicit OO_Delete to Implicit OO_Array_Delete
+  if (ArrayForm) {
+    FindAllocationOverload(StartLoc, SourceRange(), Name, 
+                           DeallocArgs, 1, TUDecl, /*AllowMissing=*/true, 
+                           Operator, false);
+    if (!Operator || Operator->isImplicit()) {
+      DeclarationName NoArrName = 
+                  Context.DeclarationNames.getCXXOperatorName(OO_Delete);
+      FunctionDecl *NoArrOperator = 0;
+      if (FindAllocationOverload(StartLoc, SourceRange(), NoArrName, 
+                  DeallocArgs, 1, TUDecl, /*AllowMissing=*/!Operator,
+                  NoArrOperator, !Operator) && !Operator)
+        return true;
+      if (NoArrOperator && !NoArrOperator->isImplicit())
+        Operator = NoArrOperator;
+    }
+  }
+  if (!Operator) {
+    if (FindAllocationOverload(StartLoc, SourceRange(), Name,
+                               DeallocArgs, 1, TUDecl, !Diagnose,
+                               Operator, Diagnose))
+      return true;
+  }
 
   assert(Operator && "Did not find a deallocation function!");
   return false;
@@ -2151,12 +2204,9 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
       ArrayForm = true;
     }
 
-    DeclarationName DeleteName = Context.DeclarationNames.getCXXOperatorName(
-                                      ArrayForm ? OO_Array_Delete : OO_Delete);
-
     if (PointeeRD) {
       if (!UseGlobal &&
-          FindDeallocationFunction(StartLoc, PointeeRD, DeleteName,
+          FindDeallocationFunction(StartLoc, PointeeRD, ArrayForm,
                                    OperatorDelete))
         return ExprError();
 
@@ -2216,6 +2266,10 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
     }
 
     if (!OperatorDelete) {
+      DeclarationName DeleteName = 
+          Context.DeclarationNames.getCXXOperatorName(
+                                      ArrayForm ? OO_Array_Delete : OO_Delete);
+
       // Look for a global declaration.
       DeclareGlobalNewDelete();
       DeclContext *TUDecl = Context.getTranslationUnitDecl();
@@ -2223,10 +2277,30 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
       if (!Context.hasSameType(Arg->getType(), Context.VoidPtrTy))
         Arg = ImplicitCastExpr::Create(Context, Context.VoidPtrTy,
                                        CK_BitCast, Arg, 0, VK_RValue);
-      if (FindAllocationOverload(StartLoc, SourceRange(), DeleteName,
-                                 &Arg, 1, TUDecl, /*AllowMissing=*/false,
-                                 OperatorDelete))
-        return ExprError();
+      // DAEMON!
+      // Microsoft prefer Explicit OO_Delete to Implicit OO_Array_Delete
+      if (ArrayForm) {
+        FindAllocationOverload(StartLoc, SourceRange(), DeleteName, 
+                                      &Arg, 1, TUDecl, /*AllowMissing=*/true, 
+                                      OperatorDelete, false);
+        if (!OperatorDelete || OperatorDelete->isImplicit()) {
+          DeclarationName NoArrDeleteName = 
+                      Context.DeclarationNames.getCXXOperatorName(OO_Delete);
+          FunctionDecl *NoArrOperatorDelete = 0;
+          if (FindAllocationOverload(StartLoc, SourceRange(), NoArrDeleteName, 
+                      &Arg, 1, TUDecl, /*AllowMissing=*/!OperatorDelete,
+                      NoArrOperatorDelete, !OperatorDelete) && !OperatorDelete)
+            return true;
+          if (NoArrOperatorDelete && !NoArrOperatorDelete->isImplicit())
+            OperatorDelete = NoArrOperatorDelete;
+        }
+      }
+      if (!OperatorDelete) {
+        if (FindAllocationOverload(StartLoc, SourceRange(), DeleteName,
+                                   &Arg, 1, TUDecl, /*AllowMissing=*/false,
+                                   OperatorDelete))
+          return ExprError();
+      }
     }
 
     MarkFunctionReferenced(StartLoc, OperatorDelete);

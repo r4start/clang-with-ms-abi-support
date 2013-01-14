@@ -41,7 +41,16 @@ public:
   };
   
   typedef std::map<VBTableEntry, const CXXRecordDecl *, VBTableEntry> BaseVBTableTy;
-  typedef llvm::DenseMap<const CXXRecordDecl *, BaseVBTableTy > VBTableTy;
+  struct VBTableHolder {
+    BaseVBTableTy VBTable;
+    CharUnits VBPtrOffset;
+    CharUnits HolderOffset;
+    bool VirtualHolder;
+    const CXXRecordDecl *EnumeratorRD;
+    const CXXRecordDecl *HolderRD;
+    const CXXRecordDecl *OwnerRD;
+  };
+  typedef llvm::SmallVector<VBTableHolder, 3> VBTableTy;
 
 private:
 
@@ -52,41 +61,31 @@ private:
   /// (4)Base class offset from vbtable position.
   llvm::DenseMap<const CXXRecordDecl *, VBTableTy > VBTables;
 
-  void ComputeVBTable(const CXXRecordDecl *RD, 
-                      const CXXRecordDecl *Base,
-                      bool IsPrimaryTable = false);
+  VBTableHolder ComputeVBTable(VBTableTy& VBTableMap,
+                      const ASTRecordLayout& MDLayout,
+                      const CXXRecordDecl *EnumeratorRD,
+                      const CXXRecordDecl *OwnerRD,
+                      const CXXRecordDecl *Holder,
+                      bool VirtualHolder,
+                      CharUnits HolderOffset);
+
+  void RecomputeBaseVBTables(VBTableTy& VBTableMap, 
+                             const ASTRecordLayout& MDLayout,
+                             const CXXRecordDecl *Base,
+                             bool VirtualHolder);
   void ComputeVBTables(const CXXRecordDecl *RD);
 
-  struct PrimaryVBTableHolder {
-    const CXXRecordDecl *Class;
-    const CXXRecordDecl *Holder;
-
-    PrimaryVBTableHolder(const CXXRecordDecl *C, const CXXRecordDecl *H)
-     : Class(C), Holder(H) {}
-  };
-
-  typedef llvm::SmallVector<PrimaryVBTableHolder, 8> PrimaryTablesVector;
-  PrimaryTablesVector PrimaryTables; 
-
 public:
-
-  const BaseVBTableTy &getVBTable(const CXXRecordDecl *RD,
-                                  const CXXRecordDecl *Base) {
-    ComputeVBTable(RD, Base);
-    return VBTables[RD][Base];
-  }
 
   const VBTableTy &getVBTables(const CXXRecordDecl *RD) {
     ComputeVBTables(RD);
     return VBTables[RD];
   }
 
-  const VBTableEntry &getEntryFromVBTable(const CXXRecordDecl *RD,
-                                          const CXXRecordDecl *LayoutClass,
-                                          const CXXRecordDecl *Base);
-  
   const VBTableEntry &getEntryFromPrimaryVBTable(const CXXRecordDecl *RD, 
-                                                 const CXXRecordDecl *Base);
+                                                 const CXXRecordDecl *VBase);
+  CharUnits getPrimaryVBPtrOffset(const CXXRecordDecl* RD);
+  CharUnits getPrimaryHolderOffset(const CXXRecordDecl* RD);
 };
 
 }

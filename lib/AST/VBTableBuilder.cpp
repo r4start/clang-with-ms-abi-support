@@ -20,222 +20,70 @@
 
 using namespace clang;
 
-namespace {
-
-typedef llvm::SmallSet<const CXXRecordDecl *, 8> ClassesContainerTy;
-
-class VBTableBuilder {
-  VBTableContext::BaseVBTableTy VBTable;
-
-  const CXXRecordDecl *MostDerived;
-  const CXXRecordDecl *LayoutClass;
-
-  bool IsTablePrimary;
-
-  ASTContext &Ctx;
-
-  void Layout();
-  void LayoutSingleVBTable();
-  void LayoutForMultiplyVBTables();
-
-public:
-  VBTableBuilder(ASTContext &C, const CXXRecordDecl *MostDerived,
-                 const CXXRecordDecl *LayoutClass, 
-                 bool IsPrimary = false);
-
-  const VBTableContext::BaseVBTableTy &getVBTable() const {
-    return VBTable;
-  }
-};
-
-}
-
-VBTableBuilder::VBTableBuilder(ASTContext &C, const CXXRecordDecl *MostDerived,
-                               const CXXRecordDecl *LayoutClass, 
-                               bool IsPrimary)
-  : Ctx(C), MostDerived(MostDerived), LayoutClass(LayoutClass), 
-    IsTablePrimary(IsPrimary) {
-  Layout();
-}
-
-static CharUnits GetClassOffset(const ASTContext &Ctx,
-                                const CXXRecordDecl *RD,
-                                const CXXRecordDecl *Base) {
-  assert(RD != Base && 
-         "GetClassOffset can`t work if RD equal Base");
-
-  CharUnits BaseOffset;
-
-  if (RD->isVirtuallyDerivedFrom(const_cast<CXXRecordDecl *>(Base))) {
-    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(RD);
-    return Layout.getVBaseClassOffset(Base);
-  }
-
-  CXXBasePaths InhPaths;
-  InhPaths.setOrigin(const_cast<CXXRecordDecl *>(RD));
-  RD->lookupInBases(&CXXRecordDecl::FindBaseClass, 
-                 const_cast<CXXRecordDecl *>(Base), InhPaths);
-
-  assert(InhPaths.begin() != InhPaths.end() &&
-         "Can`t find inheritance path from RD to Base!");
-  
-  CXXBasePath& Path = InhPaths.front();
-
-  for (CXXBasePath::const_iterator I = Path.begin(),
-       E = Path.end(); I != E; ++I) {
-    const CXXRecordDecl *BaseElem = I->Base->getType()->getAsCXXRecordDecl();
-    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(I->Class);
-
-    if (I->Base->isVirtual())
-      BaseOffset += Layout.getVBaseClassOffset(BaseElem);
-    else
-      BaseOffset += Layout.getBaseClassOffset(BaseElem);
-  }
-
-  return BaseOffset;
-}
-
-static uint32_t GetVBTableOffset(ASTContext &C, const CXXRecordDecl *RD,
-                                int64_t StartOffset) {
-  const ASTRecordLayout &Layout = C.getASTRecordLayout(RD);
-
-  if (!RD->getNumVBases())
-    return -1;
-  if (Layout.getVBPtrOffset().getQuantity() != -1)
-    return Layout.getVBPtrOffset().getQuantity() + StartOffset;
-
-  uint32_t Offset = -1;
-  for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
-    E = RD->bases_end(); I != E; ++I) {
-      CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
-
-      if (I->isVirtual())
-        StartOffset += Layout.getVBaseClassOffset(Base).getQuantity();
-      else
-        StartOffset += Layout.getBaseClassOffset(Base).getQuantity();
-
-      Offset = GetVBTableOffset(C, Base, StartOffset);
-      if (Offset != -1)
-        return Offset;
-  }
-
-  return Offset;
-}
-
-void VBTableBuilder::LayoutSingleVBTable() {
-  uint32_t offset = GetVBTableOffset(Ctx, MostDerived, 0);
-
-  uint32_t offsetInHolder;
-  if (MostDerived == LayoutClass) {
-    offsetInHolder = offset;
-  } else {
-    offsetInHolder = GetVBTableOffset(Ctx, LayoutClass, 0);
-  }
-
-  VBTable.insert(std::make_pair(
-                              VBTableContext::VBTableEntry(0, -offsetInHolder),
-                              MostDerived));
-
-  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(MostDerived);
+VBTableContext::VBTableHolder 
+     VBTableContext::ComputeVBTable(VBTableTy& VBTableMap,
+                                    const ASTRecordLayout& MostDerivedLayout,
+                                    const CXXRecordDecl *EnumeratorRD,
+                                    const CXXRecordDecl *OwnerRD,
+                                    const CXXRecordDecl *HolderRD,
+                                    bool VirtualHolder,
+                                    CharUnits HolderOffset) {
+  VBTableHolder VBTHolder;
+  ASTContext& Context = HolderRD->getASTContext();
+  const ASTRecordLayout& HolderLayout = Context.getASTRecordLayout(HolderRD);
+  CharUnits VBPtrOffset = HolderLayout.getVBPtrOffset();
+  CharUnits VBPtrOffsetInRD = VBPtrOffset + HolderOffset;
+  VBTHolder.VBTable.insert(std::make_pair(
+    VBTableContext::VBTableEntry(0, -VBPtrOffset.getQuantity()), HolderRD));
 
   int idx = 1;
-  for (CXXRecordDecl::base_class_const_iterator I = MostDerived->vbases_begin(),
-       E = MostDerived->vbases_end(); I != E; ++I, ++idx) {
+  for (CXXRecordDecl::base_class_const_iterator I = EnumeratorRD->vbases_begin(),
+       E = EnumeratorRD->vbases_end(); I != E; ++I, ++idx) {
     const CXXRecordDecl *VBase = I->getType()->getAsCXXRecordDecl();
 
-    int32_t BaseOffset = Layout.getVBaseClassOffset(VBase).getQuantity();
+    CharUnits VBaseOffset = MostDerivedLayout.getVBaseClassOffset(VBase) - VBPtrOffsetInRD;
 
-    VBTable.insert(std::make_pair(
-                      VBTableContext::VBTableEntry(idx, BaseOffset - offset),
+    VBTHolder.VBTable.insert(std::make_pair(
+      VBTableContext::VBTableEntry(idx, VBaseOffset.getQuantity()),
                       VBase));
   }
+
+  VBTHolder.EnumeratorRD = EnumeratorRD;
+  VBTHolder.HolderRD = HolderRD;
+  VBTHolder.OwnerRD = OwnerRD;
+  VBTHolder.VirtualHolder = VirtualHolder;
+  VBTHolder.VBPtrOffset = VBPtrOffsetInRD;
+  VBTHolder.HolderOffset = HolderOffset;
+  return VBTHolder;
 }
 
-void VBTableBuilder::LayoutForMultiplyVBTables() {
-  uint32_t Offset = GetVBTableOffset(Ctx, LayoutClass, 0);
-  uint32_t ClassOffset = GetClassOffset(MostDerived->getASTContext(),
-                                        MostDerived, LayoutClass).getQuantity();
-
-  VBTable.insert(std::make_pair(VBTableContext::VBTableEntry(0, -Offset),
-                                MostDerived));
-
-  Offset += ClassOffset;
-  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(MostDerived);
-  int idx = 1;
-  
-  for (CXXRecordDecl::base_class_const_iterator I = LayoutClass->vbases_begin(),
-       E = LayoutClass->vbases_end(); I != E; ++I, ++idx) {
-    const CXXRecordDecl *VBase = I->getType()->getAsCXXRecordDecl();
-
-    int32_t BaseOffset = Layout.getVBaseClassOffset(VBase).getQuantity();
-
-    VBTable.insert(std::make_pair(
-                        VBTableContext::VBTableEntry(idx, BaseOffset - Offset),
-                        VBase));
-  }
-}
-
-void VBTableBuilder::Layout() {
-  if (MostDerived == LayoutClass || IsTablePrimary)
-    LayoutSingleVBTable();
+void VBTableContext::RecomputeBaseVBTables(VBTableTy& VBTableMap, 
+                                   const ASTRecordLayout& MDLayout,
+                                   const CXXRecordDecl *Base,
+                                   bool VirtualHolder) 
+{
+  if (Base->getNumVBases() == 0)
+    return;
+  CharUnits BaseOffset;
+  if (VirtualHolder)
+    BaseOffset = MDLayout.getVBaseClassOffset(Base);
   else
-    LayoutForMultiplyVBTables();
-}
-
-void VBTableContext::ComputeVBTable(const CXXRecordDecl *RD,
-                                    const CXXRecordDecl *Base,
-                                    bool IsPrimaryTable) {
-  if (VBTables.count(RD))
-    if (VBTables[RD].count(Base))
-      return;
-  VBTableBuilder Builder(RD->getASTContext(), RD, Base, IsPrimaryTable);
-  
-  VBTables.insert(std::make_pair(RD, VBTableTy()));
-  VBTables[RD].insert(std::make_pair(Base, Builder.getVBTable()));
-}
-
-static void TraverseBases(ASTContext &Ctx, const CXXRecordDecl *Class,
-                          ClassesContainerTy &DefferredClasses) {
-  for (CXXRecordDecl::base_class_const_iterator I = Class->bases_begin(),
-       E = Class->bases_end(); I != E; ++I) {
-    const CXXRecordDecl *BaseDecl = I->getType()->getAsCXXRecordDecl();
-    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(BaseDecl);
-    if (Layout.getVBPtrOffset() != CharUnits::fromQuantity(-1))
-      DefferredClasses.insert(BaseDecl);
-    TraverseBases(Ctx, BaseDecl, DefferredClasses);
-  }
-
-  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(Class);
-  if (Layout.getVBPtrOffset() != CharUnits::fromQuantity(-1))
-    DefferredClasses.insert(Class);
-}
-
-static const CXXRecordDecl *
-getSharedVBTableHolder(ASTContext &Ctx, const CXXRecordDecl *Class,
-                       ClassesContainerTy &DefferredClasses) {
-  const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(Class);
-  if (Layout.getVBPtrOffset().getQuantity() != -1) {
-    return 0;
-  }
-
-  const CXXRecordDecl *sharedHolder = 0;
-  CharUnits offset;
-  CharUnits holderOffset;
-
-  for (ClassesContainerTy::iterator i = DefferredClasses.begin(), 
-       e = DefferredClasses.end(); i != e; ++i) {
-    if (Class->isVirtuallyDerivedFrom(*i)) {
+    BaseOffset = MDLayout.getBaseClassOffset(Base);
+  ComputeVBTables(Base);
+  for (VBTableTy::const_iterator I = VBTables[Base].begin(), 
+        E = VBTables[Base].end(); I != E; ++I) {
+    if (I->VirtualHolder)
       continue;
-    }
-
-    offset = GetClassOffset(Ctx, Class, *i);
-    if (!sharedHolder || offset < holderOffset) {
-      sharedHolder = *i;
-      holderOffset = offset;
-    }
+    CharUnits VBTableOffset = BaseOffset + I->HolderOffset;
+    VBTableMap.push_back(ComputeVBTable(VBTableMap, MDLayout, 
+                         I->EnumeratorRD, I->OwnerRD, 
+                         I->HolderRD, VirtualHolder, VBTableOffset));
   }
+}
 
-  return sharedHolder;
+static bool VBTableOrder(const VBTableContext::VBTableHolder& lhs, 
+                         const VBTableContext::VBTableHolder& rhs) {
+  return lhs.VBPtrOffset < rhs.VBPtrOffset;
 }
 
 void VBTableContext::ComputeVBTables(const CXXRecordDecl *RD) {
@@ -243,73 +91,69 @@ void VBTableContext::ComputeVBTables(const CXXRecordDecl *RD) {
   if (VBTables.count(RD))
     return;
 
-  ClassesContainerTy ClassWithVBTables;
-  TraverseBases(RD->getASTContext(), RD, ClassWithVBTables);
+  VBTableTy &VBTableMap = VBTables[RD];
+  const ASTRecordLayout& RDLayout = RD->getASTContext().getASTRecordLayout(RD);
+  bool HaveVBTable = RDLayout.getVBPtrOffset() != CharUnits::fromQuantity(-1);
 
-  const CXXRecordDecl *sharedVBTableHolder = 
-    getSharedVBTableHolder(RD->getASTContext(), RD, ClassWithVBTables);
-
-  if (sharedVBTableHolder) {
-    PrimaryTables.push_back(PrimaryVBTableHolder(RD, sharedVBTableHolder));
+  if (!HaveVBTable) {
+    // if class have it's own vbtable it can't be non-virtually derivered from
+    // any class with vbtable, because it's vbtable will be shared in this case
+    for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
+         E = RD->bases_end(); I != E; ++I) {
+      // We handle all vbase vbtables separatly because vbase offset in base class
+      // can be different from same vbase offset in derived class
+      // In fact, vbases are transparently projected in derived layout
+      if (I->isVirtual())
+        continue;
+      const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+      RecomputeBaseVBTables(VBTableMap, RDLayout, Base, false);
+    }
+  }
+  for (CXXRecordDecl::base_class_const_iterator I = RD->vbases_begin(),
+       E = RD->vbases_end(); I != E; ++I) {
+    const CXXRecordDecl *Base = I->getType()->getAsCXXRecordDecl();
+    RecomputeBaseVBTables(VBTableMap, RDLayout, Base, true);
   }
 
-  for (ClassesContainerTy::iterator I = ClassWithVBTables.begin(), 
-       E = ClassWithVBTables.end(); I != E; ++I) {
-    const CXXRecordDecl *Class = *I;
-
-    if (Class == RD)
-      ComputeVBTable(Class, Class);
-    else if (Class == sharedVBTableHolder)
-      ComputeVBTable(RD, Class, true);
-    else
-      ComputeVBTable(RD, Class);
+  if (HaveVBTable) {
+    VBTableMap.insert(VBTableMap.begin(), ComputeVBTable(VBTableMap, RDLayout, 
+                                        RD, RD, RD,
+                                        false, CharUnits::Zero()));
+  } else {
+    assert(!VBTableMap.empty() && "Class don't have vbtable");
+    std::sort(VBTableMap.begin(), VBTableMap.end(), VBTableOrder);
+    VBTableHolder& PrimaryVBT = *VBTableMap.begin();
+    const CXXRecordDecl *OwnerRD = RD;
+    if (VBTableMap.size() != 1)
+      OwnerRD = PrimaryVBT.OwnerRD;
+    PrimaryVBT = ComputeVBTable(VBTableMap, RDLayout, 
+                                RD, OwnerRD, PrimaryVBT.HolderRD,
+                                false, PrimaryVBT.HolderOffset);
   }
-}
-
-const VBTableContext::VBTableEntry &
-VBTableContext::getEntryFromVBTable(const CXXRecordDecl *RD,
-                                    const CXXRecordDecl *LayoutClass,
-                                    const CXXRecordDecl *Base) {
-  assert(RD->getNumVBases() && "Class must have virtual bases!");
-  assert((RD != LayoutClass) &&
-         "You should use getEntryFromPrimaryVBTable!");
-  ComputeVBTables(RD);
-  const BaseVBTableTy &Table = VBTables[RD][LayoutClass];
-
-  for (BaseVBTableTy::const_iterator I = Table.begin(),
-       E = Table.end(); I != E; ++I) {
-    if (I->second == Base)
-      return I->first;
-  }
-
-  llvm_unreachable("Can not find entry for base in vbtable!");
 }
 
 const VBTableContext::VBTableEntry &
 VBTableContext::getEntryFromPrimaryVBTable(const CXXRecordDecl *RD,
-                                           const CXXRecordDecl *Base) {
+                                    const CXXRecordDecl *Base) {
   assert(RD->getNumVBases() && "Class must have virtual bases!");
   ComputeVBTables(RD);
+  const BaseVBTableTy &VBTable = VBTables[RD].begin()->VBTable;
 
-  const CXXRecordDecl *layoutClass = RD;
-  if (!VBTables[RD].count(layoutClass)) {
-    // Must find primary vbtable.
-    PrimaryTablesVector::iterator I = PrimaryTables.begin();
-    while (I != PrimaryTables.end()) {
-      if (I->Class == RD)
-        break;
-    }
-    assert(I != PrimaryTables.end());
-    layoutClass = I->Holder;
-  }
-
-  const BaseVBTableTy &Table = VBTables[RD][layoutClass];
-
-  for (BaseVBTableTy::const_iterator I = Table.begin(),
-       E = Table.end(); I != E; ++I) {
+  for (BaseVBTableTy::const_iterator I = VBTable.begin(),
+       E = VBTable.end(); I != E; ++I) {
     if (I->second == Base)
       return I->first;
   }
 
   llvm_unreachable("Can not find entry for base in vbtable!");
+}
+
+CharUnits VBTableContext::getPrimaryVBPtrOffset(const CXXRecordDecl* RD) {
+  ComputeVBTables(RD);
+  return VBTables[RD].begin()->VBPtrOffset;
+  }
+
+CharUnits VBTableContext::getPrimaryHolderOffset(const CXXRecordDecl* RD) {
+  ComputeVBTables(RD);
+  return VBTables[RD].begin()->HolderOffset;
 }

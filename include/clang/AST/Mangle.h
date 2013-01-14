@@ -84,8 +84,8 @@ public:
 
   virtual void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *RD,
                                                 int64_t MemberOffset,
+                                                int64_t VBPtrOffset,
                                                 int64_t OffsetInVBTable,
-                                                int64_t IndexInVBTable,
                                                 int64_t Attributes,
                                                 raw_ostream &Out) = 0;
 

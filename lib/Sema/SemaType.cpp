@@ -2458,6 +2458,22 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
                     : FTI.RefQualifierIsLValueRef? RQ_LValue
                     : RQ_RValue;
 
+        bool FreeFunction = true;
+        // DAEMON! Microsoft don't set CC_X86StdCall for member functions
+        if (Context.getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
+            LangOpts.CPlusPlus) {
+          if (!D.getCXXScopeSpec().isSet()) {
+           FreeFunction = ((D.getContext() != Declarator::MemberContext &&
+                            D.getContext() != Declarator::LambdaExprContext) ||
+                            D.getDeclSpec().isFriendSpecified());
+          } else {
+            DeclContext *DC = S.computeDeclContext(D.getCXXScopeSpec());
+            FreeFunction = (DC && !DC->isRecord());
+          }
+        }
+        if (FreeFunction && LangOpts.MRTD)
+          EPI.ExtInfo = EPI.ExtInfo.withCallingConv(CC_X86StdCall);
+
         // Otherwise, we have a function with an argument list that is
         // potentially variadic.
         SmallVector<QualType, 16> ArgTys;

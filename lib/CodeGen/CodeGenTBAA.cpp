@@ -167,3 +167,7 @@ CodeGenTBAA::getTBAAInfo(QualType QTy) {
 llvm::MDNode *CodeGenTBAA::getTBAAInfoForVTablePtr() {
   return MDHelper.createTBAANode("vtable pointer", getRoot());
 }
+
+llvm::MDNode *CodeGenTBAA::getTBAAInfoForVBTablePtr() {
+  return MDHelper.createTBAANode("vbtable pointer", getRoot());
+}
