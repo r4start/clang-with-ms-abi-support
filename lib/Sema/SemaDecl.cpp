@@ -6076,6 +6076,45 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
   return Redeclaration;
 }
 
+// r4start
+static void getExpectedTypes(ASTContext &Context,
+                             Sema &S,
+                             FunctionDecl *FD, 
+                             llvm::SmallVector<QualType, 4> &Types) {
+  if (!FD->getName().compare("main")) {
+    QualType CharPP =
+      Context.getPointerType(Context.getPointerType(Context.CharTy));
+    QualType Expected[] = { Context.IntTy, CharPP, CharPP, CharPP };
+    Types.insert(Types.end(), Expected, Expected + 4);
+  } else if (!FD->getName().compare("wmain")) {
+    // r4start
+    QualType WCharPP = 
+      Context.getPointerType(Context.getPointerType(Context.WCharTy));
+    QualType Expected[] = { Context.IntTy, WCharPP, WCharPP, WCharPP };
+    Types.insert(Types.end(), Expected, Expected + 4);
+  } else if (!FD->getName().compare("DllMain")) {
+    std::vector<Type*> CtxTypes = Context.getTypes();
+    QualType hinstance;
+
+    for (std::vector<Type*>::iterator I = CtxTypes.begin(), E = CtxTypes.end();
+         I != E; ++I) {
+      if (const RecordType *rty = (*I)->getAsStructureType())
+        if (RecordDecl *rdecl = rty->getDecl())
+          if (!rdecl->getName().compare("HINSTANCE__")) {
+            hinstance = Context.getPointerType(Context.getRecordType(rdecl));
+            break;
+          }
+    }
+
+    QualType Expected[] = { 
+      hinstance, 
+      Context.UnsignedLongTy, 
+      Context.VoidPtrTy 
+    };
+    Types.insert(Types.end(), Expected, Expected + 3);
+  }
+}
+
 void Sema::CheckMain(FunctionDecl* FD, const DeclSpec& DS) {
   // C++11 [basic.start.main]p3:  A program that declares main to be inline,
   //   static or constexpr is ill-formed.
@@ -6142,9 +6181,15 @@ void Sema::CheckMain(FunctionDecl* FD, const DeclSpec& DS) {
   // FIXME: a lot of the following diagnostics would be improved
   // if we had some location information about types.
 
+  // r4start
   QualType CharPP =
-    Context.getPointerType(Context.getPointerType(Context.CharTy));
-  QualType Expected[] = { Context.IntTy, CharPP, CharPP, CharPP };
+      Context.getPointerType(Context.getPointerType(Context.CharTy));
+  llvm::SmallVector<QualType, 4> Expected;
+  getExpectedTypes(Context, *this, FD, Expected);
+
+  if (Expected.empty()) {
+    return;
+  }
 
   for (unsigned i = 0; i < nparams; ++i) {
     QualType AT = FTP->getArgType(i);
