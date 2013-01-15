@@ -794,7 +794,8 @@ void RTTIBuilder::BuildRTTIBaseClassDescriptor(BaseClassDescriptors &BCD,
   llvm::SmallString<256> TypeDescrBuff;
   llvm::raw_svector_ostream OutType(TypeDescrBuff);
   CGM.getCXXABI().getMangleContext().
-    getMsExtensions()->mangleCXXRTTITypeDescriptor(RD, OutType);
+    getMsExtensions()->mangleCXXRTTITypeDescriptor(Context.getTagDeclType(RD),
+                                                   OutType);
   OutType.flush();
   llvm::StringRef TypeDescriptorName = TypeDescrBuff.str();
 
@@ -802,7 +803,7 @@ void RTTIBuilder::BuildRTTIBaseClassDescriptor(BaseClassDescriptors &BCD,
     CGM.getModule().getGlobalVariable(TypeDescriptorName);
 
   if (!TypeDescr) {
-    BuildRTTITypeDescriptor(CGM.getContext().getTagDeclType(RD));
+    BuildRTTITypeDescriptor(Context.getTagDeclType(RD));
     TypeDescr = 
       CGM.getModule().getGlobalVariable(TypeDescriptorName);
     
@@ -1050,15 +1051,6 @@ llvm::Constant *RTTIBuilder::BuildMSTypeInfo(QualType Ty,
   
   MangleContext& Ctx = CGM.getCXXABI().getMangleContext();
   MSMangleContextExtensions* CtxExt = Ctx.getMsExtensions();
-
-  // For exception handling we need only type descritpor.
-  if (IsForEH) {
-    CurLinkage = llvm::GlobalValue::ExternalLinkage;
-
-    llvm::Constant* TypeDescriptor = BuildRTTITypeDescriptor(Ty);
-
-    return llvm::ConstantExpr::getBitCast(TypeDescriptor, Int8PtrTy);
-  }
 
   CXXRecordDecl *Base = 0;
   CXXRecordDecl *LayoutClass = Ty->getAsCXXRecordDecl();
@@ -1582,7 +1574,7 @@ llvm::GlobalValue *CodeGenModule::GetTypeDescriptor(QualType ObjectType) {
 
   MangleContext& Ctx = getCXXABI().getMangleContext();
 
-  Ctx.getMsExtensions()->mangleCXXRTTITypeDescriptor(RD, Out);
+  Ctx.getMsExtensions()->mangleCXXRTTITypeDescriptor(ObjectType, Out);
   Out.flush();
 
   StringRef DescrName = Name.str();
@@ -1597,7 +1589,7 @@ llvm::GlobalValue *CodeGenModule::GetTypeDescriptor(QualType ObjectType) {
   SmallString<256> Spare;
   llvm::raw_svector_ostream OutSpare(Spare);
   // Last field of type descriptor contains mangled name of class
-  Ctx.getMsExtensions()->mangleSpareForTypeDescriptor(RD, OutSpare);
+  Ctx.getMsExtensions()->mangleSpareForTypeDescriptor(ObjectType, OutSpare);
 
   OutSpare.flush();
 
@@ -1626,6 +1618,20 @@ llvm::GlobalValue *CodeGenModule::GetTypeDescriptor(QualType ObjectType) {
                                   Init, DescrName);
 }
 
+llvm::StructType *CodeGenModule::GetPMDtype() {
+  if (llvm::StructType *pmd = getModule().getTypeByName("pmd.type")) {
+    return pmd;
+  }
+
+  llvm::SmallVector<llvm::Type*, 3> types;
+
+  for (unsigned I = 0; I != 3; ++I) {
+    types.push_back(Int32Ty);
+  }
+
+  return llvm::StructType::create(getLLVMContext(), types, "pmd.type");
+}
+
 llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
                                                        bool ForEH) {
   // Return a bogus pointer if RTTI is disabled, unless it's for EH.
@@ -1647,7 +1653,7 @@ CodeGenModule::GetAddrOfMSRTTIDescriptor(QualType Ty,
                                          QualType BaseTy) {
   if (!getContext().getLangOpts().RTTI)
     return llvm::Constant::getNullValue(Int8PtrTy);
-  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy, ForEH);
+  return RTTIBuilder(*this).BuildMSTypeInfo(Ty, BaseTy);
 }
 
 llvm::Constant *

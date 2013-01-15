@@ -890,7 +890,8 @@ public:
   llvm::Type *GetDescriptorPtrType(llvm::Type *TypeInfo);
   llvm::StructType *GetTypeDescriptorType(llvm::Type *TypeInfo,
                                           uint64_t NameLength);
-  
+  llvm::GlobalValue *GetTypeDescriptor(QualType ObjectType);
+
   /// r4start
   /// Specific for MS C++ ABI.
   /// Generate PMD struct type.
