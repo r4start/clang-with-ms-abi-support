@@ -73,7 +73,7 @@ public:
                                                   StringRef ,
                                                   raw_ostream &) = 0;
 
-  virtual void mangleCXXRTTITypeDescriptor(const CXXRecordDecl *,
+  virtual void mangleCXXRTTITypeDescriptor(QualType ,
                                            raw_ostream &) = 0;
 
   virtual void mangleCXXRTTIClassHierarhyDescriptor(const CXXRecordDecl *,
@@ -93,8 +93,41 @@ public:
                                 const CXXRecordDecl *,
                                 raw_ostream &) = 0;
 
-  virtual void mangleSpareForTypeDescriptor(const CXXRecordDecl *,
+  virtual void mangleSpareForTypeDescriptor(QualType ,
                                             raw_ostream &) = 0;
+
+  virtual void mangleEHFuncInfo(const FunctionDecl *, raw_ostream &) = 0;
+
+  virtual void mangleThrowInfo(QualType , 
+                               uint8_t, raw_ostream &) = 0;
+
+  virtual void mangleCatchTypeArray(QualType , 
+                                    uint8_t, raw_ostream &) = 0;
+
+  virtual void mangleCatchTypeElement(QualType , 
+                                      raw_ostream &) = 0;
+
+  virtual void mangleEHHandlerFunction(const FunctionDecl *, raw_ostream &) = 0;
+
+  virtual void mangleEHCatchFunction(const FunctionDecl *,
+                                     uint8_t ,
+                                     raw_ostream &) = 0;
+  
+  virtual void mangleEHUnwindTable(const FunctionDecl *, raw_ostream &) = 0;
+
+  virtual void mangleEHUnwindFunclet(const FunctionDecl *,
+                                     uint8_t ,
+                                     raw_ostream &) = 0;
+
+  virtual void mangleEHTryBlockTable(const FunctionDecl *, raw_ostream &) = 0;
+
+  virtual void mangleEHTryEnd(const FunctionDecl *,
+                              uint8_t , 
+                              raw_ostream &) = 0;
+
+  virtual void mangleEHCatchHandlersArray(const FunctionDecl *,
+                                          uint8_t , 
+                                          raw_ostream &) = 0;
 };
 
 /// MangleContext - Context for tracking state which persists across multiple

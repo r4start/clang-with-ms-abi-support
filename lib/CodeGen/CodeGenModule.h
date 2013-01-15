@@ -556,6 +556,10 @@ public:
   llvm::Constant *
   GetAddrOfMSRTTIDescriptor(QualType Ty, QualType BaseTy);
 
+  /// r4start
+  llvm::Constant *
+  GetAddrOfMSTypeDescriptor(QualType Type);
+
   /// GetAddrOfThunk - Get the address of the thunk for the given global decl.
   llvm::Constant *GetAddrOfThunk(GlobalDecl GD, const ThunkInfo &Thunk);
 
@@ -886,7 +890,11 @@ public:
   llvm::Type *GetDescriptorPtrType(llvm::Type *TypeInfo);
   llvm::StructType *GetTypeDescriptorType(llvm::Type *TypeInfo,
                                           uint64_t NameLength);
-  llvm::GlobalValue *GetTypeDescriptor(QualType ObjectType);
+  
+  /// r4start
+  /// Specific for MS C++ ABI.
+  /// Generate PMD struct type.
+  llvm::StructType *GetPMDtype();
 
 private:
   llvm::GlobalValue *GetGlobalValue(StringRef Ref);

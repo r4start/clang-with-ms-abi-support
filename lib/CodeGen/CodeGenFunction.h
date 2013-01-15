@@ -136,6 +136,8 @@ enum CleanupKind {
   InactiveNormalAndEHCleanup = NormalAndEHCleanup | InactiveCleanup
 };
 
+struct MsUnwindInfo;
+
 /// A stack of scopes which respond to exceptions, including cleanups
 /// and catch blocks.
 class EHScopeStack {
@@ -185,7 +187,15 @@ public:
   class Cleanup {
     // Anchor the construction vtable.
     virtual void anchor();
+
   public:
+    // r4start
+    MsUnwindInfo *toState;
+    
+    // r4start
+    // -2 is default unknown state in MS SEH.
+    Cleanup() : toState(0) {}
+
     /// Generation flags.
     class Flags {
       enum {
@@ -347,14 +357,21 @@ private:
   ///     bar();
   SmallVector<BranchFixup, 8> BranchFixups;
 
+  /// r4start
+  CodeGenFunction &CGF;
+
   char *allocate(size_t Size);
 
   void *pushCleanup(CleanupKind K, size_t DataSize);
 
+  void memorizeState(CleanupKind K, Cleanup *Obj);
+
 public:
-  EHScopeStack() : StartOfBuffer(0), EndOfBuffer(0), StartOfData(0),
-                   InnermostNormalCleanup(stable_end()),
-                   InnermostEHScope(stable_end()) {}
+  EHScopeStack(CodeGenFunction &CGF) 
+    : StartOfBuffer(0), EndOfBuffer(0), StartOfData(0),
+      InnermostNormalCleanup(stable_end()),
+      InnermostEHScope(stable_end()),
+      CGF(CGF) {}
   ~EHScopeStack() { delete[] StartOfBuffer; }
 
   // Variadic templates would make this not terrible.
@@ -364,6 +381,7 @@ public:
   void pushCleanup(CleanupKind Kind) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T();
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -372,6 +390,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -380,6 +399,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -388,6 +408,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -396,6 +417,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2, A3 a3) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2, a3);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -404,6 +426,7 @@ public:
   void pushCleanup(CleanupKind Kind, A0 a0, A1 a1, A2 a2, A3 a3, A4 a4) {
     void *Buffer = pushCleanup(Kind, sizeof(T));
     Cleanup *Obj = new(Buffer) T(a0, a1, a2, a3, a4);
+    memorizeState(Kind, Obj);
     (void) Obj;
   }
 
@@ -529,6 +552,57 @@ public:
   void clearFixups() { BranchFixups.clear(); }
 };
 
+/// r4start
+/// This structure holds information about unwind table entry
+/// and associated with this entry store operation.
+struct RestoreOpInfo {
+  enum RestoreOpKind {
+    Undef,
+    DtorRestore,
+    CatchRestore,
+    TryEndRestore
+  };
+
+  RestoreOpKind Kind;
+  llvm::StoreInst *RestoreOp;
+  int Index;
+};
+
+struct MsUnwindInfo {
+  int ToState;
+  int StoreValue;
+  llvm::Value *ThisPtr;
+  llvm::Value *ReleaseFunc;
+  RestoreOpInfo::RestoreOpKind RestoreKind;
+  llvm::StoreInst *Store;
+  int StoreInstTryLevel;
+  int TryNumber;
+  int StoreIndex;
+
+  // This block is necessary for correct state store/restore.
+  llvm::BasicBlock *DestLpad;
+
+  // Basic block with unwinding code.
+  llvm::BasicBlock *Funclet;
+
+  typedef std::list<RestoreOpInfo> RestoreList;
+  RestoreList RestoreOps;
+
+  class StoreOpFinder {
+    int State;
+  public:
+    StoreOpFinder(int state) : State(state) {}
+    bool operator()(const MsUnwindInfo &info) {
+      return State == info.StoreValue;
+    }
+  };
+
+  MsUnwindInfo(int State) 
+    : ToState(State), ThisPtr(0), ReleaseFunc(0), StoreValue(-2),
+      RestoreKind(RestoreOpInfo::Undef), Store(0), 
+      StoreInstTryLevel(-1), DestLpad(0), Funclet(0) {}
+};
+
 /// CodeGenFunction - This class organizes the per-function state that is used
 /// while generating LLVM code.
 class CodeGenFunction : public CodeGenTypeCache {
@@ -556,6 +630,122 @@ public:
     EHScopeStack::stable_iterator ScopeDepth;
     unsigned Index;
   };
+
+  /// r4start
+  class MSEHState {
+    CodeGenFunction &CGF;
+
+    llvm::Function *SaveSPIntrinsic;
+    llvm::Function *RetFromCatchIntrinsic;
+    llvm::Function *ReserveStackIntrinsic;
+    llvm::Function *FreeStackIntrinsic;
+
+  public:
+    typedef std::list< MsUnwindInfo > UnwindTableTy;
+    typedef UnwindTableTy::iterator UnwindEntryPtr;
+    typedef UnwindTableTy::reverse_iterator UnwindEntryReversePtr;
+
+    typedef std::list< UnwindEntryPtr > UnwindEntryRefList;
+    typedef std::list< UnwindEntryRefList > TryStates;
+
+    struct CatchHandler {
+      int Index;
+      const VarDecl *ExceptionObject;
+      llvm::GlobalVariable *Handlers;
+      UnwindTableTy::iterator ParentTry;
+
+      CatchHandler() 
+       : Index(-2), ExceptionObject(0), Handlers(0) {}
+      CatchHandler(llvm::GlobalVariable *CatchesTable) 
+       : Index(-2), ExceptionObject(0), Handlers(CatchesTable) {}
+      CatchHandler(int Idx, UnwindTableTy::iterator Parent) 
+       : Index(Idx), ExceptionObject(0), Handlers(0), ParentTry(Parent) {}
+    };
+
+    typedef llvm::SmallVector<CatchHandler, 4> HandlersArray;
+    typedef std::list< llvm::SmallVector<llvm::Constant *, 4> > 
+                                                  CatchHandlersList;
+
+    /// MS C++ EH specific.
+    /// State of current try level.
+    llvm::Value *MSTryState;
+
+    /// Indicates that current try is nested.
+    int TryLevel;
+
+    /// This field tracks count of tries.
+    int TryNumber;
+
+    int StoreIndex;
+
+    /// This counter increments each time when we mangle some eh symbol.
+    /// Also it passes to mangler.
+    int EHManglingCounter;
+
+    /// Unwind table necessary for correct unwinding.
+    /// It has 2 fields: action(what we must do in this state)
+    /// and in which state we must go after all work at this state.
+    
+    /// GlobalUnwindTable hold unwind table for current function.
+    UnwindTableTy GlobalUnwindTable;
+
+    /// LocalUnwindTable holds refs to
+    /// unwind entries in this try block.
+    TryStates LocalUnwindTable;
+
+    /// Try block table.
+    llvm::SmallVector<llvm::Constant *, 4> TryBlockTableEntries;
+
+    /// Catch handlers for current try.
+    CatchHandlersList TryHandlers;
+    HandlersArray CatchHandlers;
+
+    // Address of eh-handler block.
+    // Necessary for deferred block body generation.
+    llvm::BasicBlock *EHHandler;
+
+    llvm::BasicBlock::iterator FunctioPrologueEndPoint;
+
+    llvm::Constant *ESTypeList;
+
+    MSEHState(CodeGenFunction &cgf) 
+     : MSTryState(0), EHManglingCounter(0), TryLevel(0), CGF(cgf),
+       ESTypeList(0), StoreIndex(0), TryNumber(0), 
+       EHHandler(0), SaveSPIntrinsic(0), RetFromCatchIntrinsic(0),
+       ReserveStackIntrinsic(0), FreeStackIntrinsic(0) {}
+
+    ~MSEHState() {}
+    
+    void SetMSTryState();
+
+    /// This function opposite to SetMSTrystate
+    /// does not change unwind table.
+    /// It just generates store instruction and return it.
+    llvm::StoreInst *CreateStateStore(uint32_t State);
+    llvm::StoreInst *CreateStateStore(llvm::Value* State);
+    llvm::StoreInst *CreateStateStoreWithoutEmit(llvm::Value* State);
+
+    void InitMSTryState();
+
+    void AddCatchEntryInUnwindTable(int State);
+
+    llvm::BasicBlock *GenerateTryEndBlock(const FunctionDecl *FD, 
+                                          MSMangleContextExtensions *Mangler);
+
+    bool IsInited() const { return MSTryState != 0; }
+
+    void InitNewCatchHandlers(llvm::GlobalVariable *HandlersArray);
+    void InitOffsetInCatchHandlers();
+
+    void SaveStackPointer();
+    void ReturnFromCatch(llvm::BasicBlock *ContBB);
+    void ReserveStack();
+    void FreeReservedStack();
+  };
+
+  /// r4start
+  typedef MSEHState::UnwindTableTy::iterator UnwindEntryPtr;
+  typedef MSEHState::UnwindTableTy::reverse_iterator UnwindEntryReversePtr;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
@@ -611,6 +801,12 @@ public:
   llvm::DenseMap<const VarDecl *, llvm::Value *> NRVOFlags;
 
   EHScopeStack EHStack;
+
+  /// r4start
+  bool IsMSExceptions;
+
+  /// r4start
+  MSEHState EHState;
 
   /// i32s containing the indexes of the cleanup destinations.
   llvm::AllocaInst *NormalCleanupDest;
@@ -1246,7 +1442,8 @@ public:
     return UnreachableBlock;
   }
 
-  llvm::BasicBlock *getInvokeDest() {
+  llvm::BasicBlock *getInvokeDest(const Decl *FuncDecl = 0,
+                                  llvm::Value *ThisPtr = 0) {
     if (!EHStack.requiresLandingPad()) return 0;
     return getInvokeDestImpl();
   }
@@ -2520,6 +2717,9 @@ public:
 
   void EmitCXXThrowExpr(const CXXThrowExpr *E);
 
+  // r4start
+  void EmitMSCXXThrowExpr(const CXXThrowExpr *E);
+
   void EmitLambdaExpr(const LambdaExpr *E, AggValueSlot Dest);
 
   RValue EmitAtomicExpr(AtomicExpr *E, llvm::Value *Dest = 0);
@@ -2670,6 +2870,29 @@ private:
   }
 
   void EmitDeclMetadata();
+
+  /// r4start
+  void EmitESTypeList(const FunctionProtoType *FuncProto);
+
+  /// r4start
+  llvm::GlobalValue *EmitUnwindTable();
+
+  /// r4start
+  void GenerateTryBlockTableEntry();
+
+  /// r4start
+  void GenerateCatchHandler(const QualType &CaughtType,
+                            llvm::BlockAddress *HandlerAddress,
+                            int HandlerIdx);
+
+  /// r4start
+  llvm::GlobalValue *EmitTryBlockTable();
+
+  /// r4start
+  llvm::GlobalValue *EmitMSFuncInfo();
+
+  /// r4start
+  void EmitEHInformation();
 
   CodeGenModule::ByrefHelpers *
   buildByrefHelpers(llvm::StructType &byrefType,

@@ -39,11 +39,16 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     IndirectBranch(0), SwitchInsn(0), CaseRangeBlock(0), UnreachableBlock(0),
     CXXABIThisDecl(0), CXXABIThisValue(0), CXXThisValue(0), CXXVTTDecl(0),
     CXXVTTValue(0), OutermostConditional(0), TerminateLandingPad(0),
-    TerminateHandler(0), TrapBB(0) {
+    TerminateHandler(0), TrapBB(0), EHState(*this), IsMSExceptions(false),
+    EHStack(*this) {
 
   CatchUndefined = getContext().getLangOpts().CatchUndefined;
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
+
+  IsMSExceptions = 
+            CGM.getContext().getTargetInfo().getCXXABI() == CXXABI_Microsoft &&
+            CGM.getLangOpts().CXXExceptions;
 }
 
 CodeGenFunction::~CodeGenFunction() {
@@ -211,6 +216,12 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
 
   if (CGM.getCodeGenOpts().EmitDeclMetadata)
     EmitDeclMetadata();
+
+  // r4start
+  if (IsMSExceptions && CGM.getLangOpts().CXXExceptions) {
+    EmitEHInformation();
+  }
+
 }
 
 /// ShouldInstrumentFunction - Return true if the current function should be
@@ -421,6 +432,13 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
   PrologueCleanupDepth = EHStack.stable_begin();
   EmitFunctionProlog(*CurFnInfo, CurFn, Args);
+
+  // r4start
+  // Necessary for correct inserting
+  // SEH structures initialization.
+  if (IsMSExceptions) {
+    EHState.FunctioPrologueEndPoint = Builder.GetInsertPoint();
+  }
 
   if (D && isa<CXXMethodDecl>(D) && cast<CXXMethodDecl>(D)->isInstance()) {
     CGM.getCXXABI().EmitInstanceFunctionProlog(*this);

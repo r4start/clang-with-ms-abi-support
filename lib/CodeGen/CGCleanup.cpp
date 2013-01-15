@@ -19,6 +19,8 @@
 
 #include "CodeGenFunction.h"
 #include "CGCleanup.h"
+// r4start
+#include "llvm/Intrinsics.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -145,7 +147,15 @@ EHScopeStack::stable_iterator EHScopeStack::getInnermostActiveEHScope() const {
   return stable_end();
 }
 
+// r4start
+void EHScopeStack::memorizeState(CleanupKind K, Cleanup *Obj) {
+  /// r4start
+  if (CGF.IsMSExceptions && (K & EHCleanup)) {
+    Obj->toState = &CGF.EHState.GlobalUnwindTable.back();
+  }
+}
 
+// r4start
 void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
   assert(((Size % sizeof(void*)) == 0) && "cleanup type is misaligned");
   char *Buffer = allocate(EHCleanupScope::getSizeForCleanupSize(Size));
@@ -162,9 +172,15 @@ void *EHScopeStack::pushCleanup(CleanupKind Kind, size_t Size) {
                                 InnermostEHScope);
   if (IsNormalCleanup)
     InnermostNormalCleanup = stable_begin();
-  if (IsEHCleanup)
+  
+  // r4start
+  if (IsEHCleanup) {
     InnermostEHScope = stable_begin();
-
+    if (CGF.IsMSExceptions) {
+      CGF.EHState.SetMSTryState();
+    }
+  }
+  
   return Scope->getCleanupBuffer();
 }
 
@@ -450,8 +466,23 @@ static void EmitCleanup(CodeGenFunction &CGF,
     CGF.EmitBlock(CleanupBB);
   }
 
+  llvm::BasicBlock *funcletBlock = CGF.Builder.GetInsertBlock();
+
   // Ask the cleanup to emit itself.
   Fn->Emit(CGF, flags);
+
+  // r4start
+  if (CGF.IsMSExceptions) {
+    if (flags.isForEHCleanup()) {
+      llvm::Function *retFromFunclet = 
+        CGF.CGM.getIntrinsic(llvm::Intrinsic::seh_ret);
+      CGF.Builder.CreateCall(retFromFunclet);
+      if (Fn->toState)
+        Fn->toState->Funclet = funcletBlock;
+    } else {
+      CGF.EHState.CreateStateStore(Fn->toState->ToState);
+    }
+  }
   assert(CGF.HaveInsertPoint() && "cleanup ended with no insertion point?");
 
   // Emit the continuation block if there was an active flag.
@@ -811,8 +842,10 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
 
       // Check whether we can merge NormalEntry into a single predecessor.
       // This might invalidate (non-IR) pointers to NormalEntry.
-      llvm::BasicBlock *NewNormalEntry =
-        SimplifyCleanupEntry(*this, NormalEntry);
+      // DAEMON! Disable merging of cleanup and lpad blocks
+      if (!IsMSExceptions) {
+        llvm::BasicBlock *NewNormalEntry =
+          SimplifyCleanupEntry(*this, NormalEntry);
 
       // If it did invalidate those pointers, and NormalEntry was the same
       // as NormalExit, go back and patch up the fixups.
@@ -821,6 +854,7 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
                I < E; ++I)
           EHStack.getBranchFixup(I).OptimisticBranchBlock = NewNormalEntry;
     }
+  }
   }
 
   assert(EHStack.hasNormalCleanups() || EHStack.getNumBranchFixups() == 0);
@@ -842,7 +876,9 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
 
     Builder.restoreIP(SavedIP);
 
-    SimplifyCleanupEntry(*this, EHEntry);
+    // DAEMON! Disable merging of cleanup and lpad blocks
+    if (!IsMSExceptions)
+      SimplifyCleanupEntry(*this, EHEntry);
   }
 }
 
@@ -893,6 +929,10 @@ void CodeGenFunction::EmitBranchThroughCleanup(JumpDest Dest) {
   // scope, we don't need to worry about fixups.
   if (TopCleanup == EHStack.stable_end() ||
       TopCleanup.encloses(Dest.getScopeDepth())) { // works for invalid
+    // r4start
+    if (IsMSExceptions) {
+      EHState.ReturnFromCatch(Dest.getBlock());
+    }
     Builder.ClearInsertionPoint();
     return;
   }

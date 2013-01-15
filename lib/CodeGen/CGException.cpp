@@ -413,6 +413,12 @@ llvm::Value *CodeGenFunction::getSelectorFromSlot() {
 }
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
+  // r4start
+  if (IsMSExceptions) {
+    EmitMSCXXThrowExpr(E);
+    return;
+  }
+
   if (!E->getSubExpr()) {
     if (getInvokeDest()) {
       Builder.CreateInvoke(getReThrowFn(*this),
@@ -447,8 +453,9 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
   EmitAnyExprToExn(*this, E->getSubExpr(), ExceptionPtr);
 
   // Now throw the exception.
-  llvm::Constant *TypeInfo = CGM.GetAddrOfRTTIDescriptor(ThrowType, 
-                                                         /*ForEH=*/true);
+  // r4start
+  llvm::Constant *TypeInfo = 
+    CGM.GetAddrOfRTTIDescriptor(ThrowType, /*ForEH=*/true);
 
   // The address of the destructor.  If the exception type has a
   // trivial destructor (or isn't a record), we just pass null.
@@ -475,7 +482,6 @@ void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E) {
     ThrowCall->setDoesNotReturn();
     Builder.CreateUnreachable();
   }
-
   // throw is an expression, and the expression emitters expect us
   // to leave ourselves at a valid insertion point.
   EmitBlock(createBasicBlock("throw.cont"));
@@ -491,6 +497,12 @@ void CodeGenFunction::EmitStartEHSpec(const Decl *D) {
   const FunctionProtoType *Proto = FD->getType()->getAs<FunctionProtoType>();
   if (Proto == 0)
     return;
+
+  // r4start
+  if (IsMSExceptions) {
+    EmitESTypeList(Proto);
+    return;
+  }
 
   ExceptionSpecificationType EST = Proto->getExceptionSpecType();
   if (isNoexceptExceptionSpec(EST)) {
@@ -550,7 +562,8 @@ static void emitFilterDispatchBlock(CodeGenFunction &CGF,
 }
 
 void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
-  if (!CGM.getLangOpts().CXXExceptions)
+  // r4start
+  if (!CGM.getLangOpts().CXXExceptions || IsMSExceptions)
     return;
   
   const FunctionDecl* FD = dyn_cast_or_null<FunctionDecl>(D);
@@ -575,17 +588,24 @@ void CodeGenFunction::EmitEndEHSpec(const Decl *D) {
 void CodeGenFunction::EmitCXXTryStmt(const CXXTryStmt &S) {
   EnterCXXTryStmt(S);
   EmitStmt(S.getTryBlock());
-  ExitCXXTryStmt(S);
+  ExitCXXTryStmt(S); 
 }
 
 void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   unsigned NumHandlers = S.getNumHandlers();
   EHCatchScope *CatchScope = EHStack.pushCatch(NumHandlers);
-
+  
+  // Generate id in start of try block.
+  if (IsMSExceptions) {
+    EHState.LocalUnwindTable.push_back(MSEHState::UnwindEntryRefList());
+    EHState.TryHandlers.push_back(llvm::SmallVector<llvm::Constant *, 4>());
+    EHState.SetMSTryState();
+  } 
+  
   for (unsigned I = 0; I != NumHandlers; ++I) {
     const CXXCatchStmt *C = S.getHandler(I);
-
     llvm::BasicBlock *Handler = createBasicBlock("catch");
+    
     if (C->getExceptionDecl()) {
       // FIXME: Dropping the reference type on the type into makes it
       // impossible to correctly implement catch-by-reference
@@ -599,8 +619,14 @@ void CodeGenFunction::EnterCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
       llvm::Value *TypeInfo = 0;
       if (CaughtType->isObjCObjectPointerType())
         TypeInfo = CGM.getObjCRuntime().GetEHType(CaughtType);
-      else
-        TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
+      else {
+        // r4start
+        if (!IsMSExceptions) {
+          TypeInfo = CGM.GetAddrOfRTTIDescriptor(CaughtType, /*ForEH=*/true);
+        } else {
+          TypeInfo = CGM.GetAddrOfMSTypeDescriptor(CaughtType);
+        }
+      }
       CatchScope->setHandler(I, TypeInfo, Handler);
     } else {
       // No exception decl indicates '...', a catch-all.
@@ -670,11 +696,11 @@ static bool isNonEHScope(const EHScope &S) {
 }
 
 llvm::BasicBlock *CodeGenFunction::getInvokeDestImpl() {
-  assert(EHStack.requiresLandingPad());
-  assert(!EHStack.empty());
-
   if (!CGM.getLangOpts().Exceptions)
     return 0;
+
+  assert(EHStack.requiresLandingPad());
+  assert(!EHStack.empty());
 
   // Check the innermost scope for a cached landing pad.  If this is
   // a non-EH cleanup, we'll check enclosing scopes in EmitLandingPad.
@@ -769,14 +795,21 @@ llvm::BasicBlock *CodeGenFunction::EmitLandingPad() {
   llvm::BasicBlock *lpad = createBasicBlock("lpad");
   EmitBlock(lpad);
 
-  llvm::LandingPadInst *LPadInst =
-    Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
+  // r4start
+  llvm::LandingPadInst *LPadInst = 0;
+  if (!IsMSExceptions) {
+      LPadInst = Builder.CreateLandingPad(
+                             llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
                              getOpaquePersonalityFn(CGM, personality), 0);
 
-  llvm::Value *LPadExn = Builder.CreateExtractValue(LPadInst, 0);
-  Builder.CreateStore(LPadExn, getExceptionSlot());
-  llvm::Value *LPadSel = Builder.CreateExtractValue(LPadInst, 1);
-  Builder.CreateStore(LPadSel, getEHSelectorSlot());
+    llvm::Value *LPadExn = Builder.CreateExtractValue(LPadInst, 0);
+    Builder.CreateStore(LPadExn, getExceptionSlot());
+    llvm::Value *LPadSel = Builder.CreateExtractValue(LPadInst, 1);
+    Builder.CreateStore(LPadSel, getEHSelectorSlot());
+  } else {
+      LPadInst = Builder.CreateLandingPad(Int32Ty,
+                                 getOpaquePersonalityFn(CGM, personality), 0);
+  }
 
   // Save the exception pointer.  It's safe to use a single exception
   // pointer per function because EH cleanups can never have nested
@@ -879,8 +912,16 @@ llvm::BasicBlock *CodeGenFunction::EmitLandingPad() {
          "landingpad instruction has no clauses!");
 
   // Tell the backend how to generate the landing pad.
-  Builder.CreateBr(getEHDispatchBlock(EHStack.getInnermostEHScope()));
-
+  // r4start
+  if (!IsMSExceptions) {
+    Builder.CreateBr(getEHDispatchBlock(EHStack.getInnermostEHScope()));
+  } else {
+    llvm::SwitchInst *SI = 
+      Builder.CreateSwitch(LPadInst, 
+            getEHDispatchBlock(EHStack.getInnermostEHScope()));
+    SI->addCase(llvm::ConstantInt::get(Int32Ty, -2), EHState.EHHandler);
+  }
+  
   // Restore the old IR generation state.
   Builder.restoreIP(savedIP);
 
@@ -905,6 +946,10 @@ namespace {
     bool MightThrow;
 
     void Emit(CodeGenFunction &CGF, Flags flags) {
+      // r4start
+      if (CGF.IsMSExceptions)
+        return;
+
       if (!MightThrow) {
         CGF.Builder.CreateCall(getEndCatchFn(CGF))->setDoesNotThrow();
         return;
@@ -1139,6 +1184,38 @@ static void BeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
   CGF.EmitAutoVarCleanups(var);
 }
 
+// r4start
+static void MSBeginCatch(CodeGenFunction &CGF, const CXXCatchStmt *S) {
+  VarDecl *catchParam = S->getExceptionDecl();
+  if (!catchParam) {
+    CGF.EHState.ReserveStack();
+    return;
+  }
+  
+  // Emit the local.
+  CodeGenFunction::AutoVarEmission var = CGF.EmitAutoVarAlloca(*catchParam);
+  CGF.EHState.CatchHandlers.back().ExceptionObject = catchParam;
+  CGF.EHState.ReserveStack();
+}
+
+// r4start
+static void emitMSCatchDispatchBlock(CodeGenFunction &CGF,
+                                     EHCatchScope &catchScope,
+                                     llvm::BasicBlock *dispatchBlock) {
+  llvm::SwitchInst *si = 
+    CGF.Builder.CreateSwitch(CGF.Builder.CreateLoad(CGF.EHState.MSTryState),
+                             CGF.EHState.EHHandler);
+  for (unsigned i = 0, e = catchScope.getNumHandlers(); i !=e; ++i) {
+    si->addCase(llvm::ConstantInt::get(CGF.Int32Ty, i),
+                catchScope.getHandler(i).Block);
+  }
+
+  // This is necessary because we need cleanup objects before try-block
+  // if we can not handle exception.
+  si->addCase(llvm::ConstantInt::get(CGF.Int32Ty, -1),
+              CGF.getEHDispatchBlock(catchScope.getEnclosingEHScope()));
+}
+
 /// Emit the structure of the dispatch block for the given catch scope.
 /// It is an invariant that the dispatch block already exists.
 static void emitCatchDispatchBlock(CodeGenFunction &CGF,
@@ -1156,6 +1233,13 @@ static void emitCatchDispatchBlock(CodeGenFunction &CGF,
 
   CGBuilderTy::InsertPoint savedIP = CGF.Builder.saveIP();
   CGF.EmitBlockAfterUses(dispatchBlock);
+
+  // r4start
+  if (CGF.IsMSExceptions) {
+    emitMSCatchDispatchBlock(CGF, catchScope, dispatchBlock);
+    CGF.Builder.restoreIP(savedIP);
+    return;
+  }
 
   // Select the right handler.
   llvm::Value *llvm_eh_typeid_for =
@@ -1244,7 +1328,18 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
   EHStack.popCatch();
 
   // The fall-through block.
-  llvm::BasicBlock *ContBB = createBasicBlock("try.cont");
+  llvm::BasicBlock *ContBB = 0;
+
+  if (!IsMSExceptions) {
+    ContBB = createBasicBlock("try.cont");
+  } else {
+    ContBB = createBasicBlock("try.cont", CurFn);
+    // Catch handlers have entry in unwind table,
+    // so generate it.
+    // Also push new local table for catch scope.
+    EHState.AddCatchEntryInUnwindTable(
+      (*EHState.LocalUnwindTable.back().begin())->ToState);
+  }
 
   // We just emitted the body of the try; jump to the continue block.
   if (HaveInsertPoint())
@@ -1271,12 +1366,22 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // Catch the exception if this isn't a catch-all.
     const CXXCatchStmt *C = S.getHandler(I-1);
 
+    // r4start
+    if (IsMSExceptions) {
+      GenerateCatchHandler(C->getCaughtType(), 
+                           llvm::BlockAddress::get(CurFn, CatchBlock),
+                           NumHandlers - I);
+    }
+
     // Enter a cleanup scope, including the catch variable and the
     // end-catch.
     RunCleanupsScope CatchScope(*this);
 
     // Initialize the catch variable and set up the cleanups.
-    BeginCatch(*this, C);
+    if (!IsMSExceptions)
+      BeginCatch(*this, C);
+    else
+      MSBeginCatch(*this, C);
 
     // Perform the body of the catch.
     EmitStmt(C->getHandlerBlock());
@@ -1300,11 +1405,39 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     CatchScope.ForceCleanup();
 
     // Branch out of the try.
-    if (HaveInsertPoint())
+    if (HaveInsertPoint()) {
+      // r4start
+      if (IsMSExceptions) {
+        // restore state.
+        EHState.ReturnFromCatch(ContBB);
+      }
       Builder.CreateBr(ContBB);
+    }
   }
 
-  EmitBlock(ContBB);
+  if (!IsMSExceptions) {
+    EmitBlock(ContBB);
+  } else {
+    EmitBranch(ContBB);
+    Builder.SetInsertPoint(ContBB);
+      
+    // Popup catch local table.
+    EHState.LocalUnwindTable.pop_back();
+
+    GenerateTryBlockTableEntry();
+
+    // Popup try local table.
+    EHState.LocalUnwindTable.pop_back();
+
+    // After try-block state must be restored.
+    if (EHState.LocalUnwindTable.empty()) {
+      // Exit from top level try-block.
+      EHState.CreateStateStore(-1);
+    } else {
+      EHState.CreateStateStore(
+        (*EHState.LocalUnwindTable.back().rbegin())->StoreValue);
+    }
+  }
 }
 
 namespace {
@@ -1507,16 +1640,22 @@ llvm::BasicBlock *CodeGenFunction::getTerminateLandingPad() {
   TerminateLandingPad = createBasicBlock("terminate.lpad");
   Builder.SetInsertPoint(TerminateLandingPad);
 
-  // Tell the backend that this is a landing pad.
   const EHPersonality &Personality = EHPersonality::get(CGM.getLangOpts());
-  llvm::LandingPadInst *LPadInst =
-    Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
-                             getOpaquePersonalityFn(CGM, Personality), 0);
-  LPadInst->addClause(getCatchAllValue(*this));
+  // r4start
+  if (!IsMSExceptions) {
+    // Tell the backend that this is a landing pad.
+    llvm::LandingPadInst *LPadInst =
+      Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty, NULL),
+                               getOpaquePersonalityFn(CGM, Personality), 0);
+    LPadInst->addClause(getCatchAllValue(*this));
 
-  llvm::CallInst *TerminateCall = Builder.CreateCall(getTerminateFn(*this));
-  TerminateCall->setDoesNotReturn();
-  TerminateCall->setDoesNotThrow();
+    llvm::CallInst *TerminateCall = Builder.CreateCall(getTerminateFn(*this));
+    TerminateCall->setDoesNotReturn();
+    TerminateCall->setDoesNotThrow(); 
+  } else {
+    Builder.CreateLandingPad(Int32Ty,
+                getOpaquePersonalityFn(CGM, Personality), 0)->setCleanup(true);
+  }
   Builder.CreateUnreachable();
 
   // Restore the saved insertion state.
@@ -1576,18 +1715,22 @@ llvm::BasicBlock *CodeGenFunction::getEHResumeBlock() {
       break;
     case CHL_MandatoryCleanup: {
       // In mandatory-cleanup mode, we should use 'resume'.
+      // r4start
+      if (!IsMSExceptions) {
+        // Recreate the landingpad's return value for the 'resume' instruction.
+        llvm::Value *Exn = getExceptionFromSlot();
+        llvm::Value *Sel = getSelectorFromSlot();
 
-      // Recreate the landingpad's return value for the 'resume' instruction.
-      llvm::Value *Exn = getExceptionFromSlot();
-      llvm::Value *Sel = getSelectorFromSlot();
+        llvm::Type *LPadType = llvm::StructType::get(Exn->getType(),
+                                                     Sel->getType(), NULL);
+        llvm::Value *LPadVal = llvm::UndefValue::get(LPadType);
+        LPadVal = Builder.CreateInsertValue(LPadVal, Exn, 0, "lpad.val");
+        LPadVal = Builder.CreateInsertValue(LPadVal, Sel, 1, "lpad.val");
 
-      llvm::Type *LPadType = llvm::StructType::get(Exn->getType(),
-                                                   Sel->getType(), NULL);
-      llvm::Value *LPadVal = llvm::UndefValue::get(LPadType);
-      LPadVal = Builder.CreateInsertValue(LPadVal, Exn, 0, "lpad.val");
-      LPadVal = Builder.CreateInsertValue(LPadVal, Sel, 1, "lpad.val");
-
-      Builder.CreateResume(LPadVal);
+        Builder.CreateResume(LPadVal);
+      } else {
+        Builder.CreateResume(llvm::Constant::getNullValue(Int8PtrTy));
+      }
       Builder.restoreIP(SavedIP);
       return EHResumeBlock;
     }

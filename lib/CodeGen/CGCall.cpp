@@ -2127,6 +2127,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
     EmitBlock(Cont);
   }
+
   if (callOrInvoke)
     *callOrInvoke = CS.getInstruction();
 
