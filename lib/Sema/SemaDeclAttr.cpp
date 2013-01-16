@@ -25,6 +25,7 @@
 #include "clang/Sema/DelayedDiagnostic.h"
 #include "clang/Sema/Lookup.h"
 #include "llvm/ADT/StringExtras.h"
+
 using namespace clang;
 using namespace sema;
 
@@ -4280,7 +4281,6 @@ static void handleForceInlineAttr(Sema &S, Decl *D, const AttributeList &Attr) {
 }
 
 // DAEMON
-#if 0
 enum MsAttributeValidOn
 {
     MsAttr_All = 0x7FFF,
@@ -4302,7 +4302,7 @@ enum MsAttributeValidOn
 };
 
 // DAEMON
-
+#if 0
 static int getValidOn(const AttributeList &Attr)
 {
     RecordDecl* RD = Attr.getMsAttributeRecordDecl();
@@ -4362,7 +4362,7 @@ static bool checkValidOn(Sema& S, const AttributeList &Attr, Decl* D)
     }
     return false;
 }
-
+#endif
 static bool getNamedArg(Sema &S, const char* ArgName, const AttributeList &Attr, Expr*& E, bool Optional = false)
 {
     for (size_t i = 0; i != Attr.getNumArgs(); ++i)
@@ -4426,7 +4426,7 @@ static StringRef getAttrScope(const AttributeList &Attr) {
         return StringRef();
     return I->getName();
 }
-#endif
+
 // DAEMON
 #if 0
 static void handleMsDefaultValueAttr(Sema &S, Decl *D, const AttributeList &Attr) {
@@ -5179,7 +5179,6 @@ static void handleDelayedForbiddenType(Sema &S, DelayedDiagnostic &diag,
     << diag.getForbiddenTypeOperand() << diag.getForbiddenTypeArgument();
   diag.Triggered = true;
 }
-
 void Sema::PopParsingDeclaration(ParsingDeclState state, Decl *decl) {
   assert(DelayedDiagnostics.getCurrentPool());
   DelayedDiagnosticPool &poppedPool = *DelayedDiagnostics.getCurrentPool();
