@@ -18,9 +18,10 @@
 #include "TargetInfo.h"
 #include "CGCXXABI.h"
 #include "clang/AST/StmtCXX.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/CallSite.h"
-#include "llvm/InlineAsm.h"
+#include "llvm/IR/InlineAsm.h"
+//#include "llvm/IR/Attributes.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -306,7 +307,12 @@ static llvm::Function *getMSFrameHandlerFunction(CodeGenFunction &CGF,
                                              llvm::GlobalValue::ExternalLinkage, 
                                              "__CxxFrameHandler3",
                                              &CGF.CGM.getModule());
-  F->addAttribute(1, llvm::Attribute::InReg | llvm::Attribute::NoCapture);
+  llvm::AttrBuilder builder;
+  F->addAttribute(1, 
+                  llvm::Attribute::get(CGF.CGM.getLLVMContext(), 
+                                    builder.
+                                    addAttribute(llvm::Attribute::InReg).
+                                    addAttribute(llvm::Attribute::NoCapture)));
   return F;
 }
 

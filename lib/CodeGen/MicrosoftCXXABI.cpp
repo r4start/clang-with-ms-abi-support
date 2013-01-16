@@ -138,7 +138,7 @@ void MicrosoftCXXABI::BuildInstanceFunctionParams(CodeGenFunction &CGF,
                                                   QualType &ResTy,
                                                   FunctionArgList &Params) {
   BuildThisParam(CGF, Params);
-  if (NeedThisReturn(CGF.CurGD)) {
+  if (needThisReturn(CGF.CurGD)) {
     ResTy = Params[0]->getType();
   }
 
@@ -155,7 +155,7 @@ void MicrosoftCXXABI::BuildInstanceFunctionParams(CodeGenFunction &CGF,
 void MicrosoftCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
   EmitThisParam(CGF);
 
-  if (NeedThisReturn(CGF.CurGD)) {
+  if (needThisReturn(CGF.CurGD)) {
     CGF.Builder.CreateStore(getThisValue(CGF), CGF.ReturnValue);
   }
   // TODO: 'for base' flag

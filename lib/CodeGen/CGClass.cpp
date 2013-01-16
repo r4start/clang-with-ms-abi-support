@@ -412,7 +412,7 @@ static void EmitBaseInitializer(CodeGenFunction &CGF,
                           AggValueSlot::DoesNotNeedGCBarriers,
                           AggValueSlot::IsNotAliased);
 
-  CGF.EmitAggExpr(BaseInit->getInit(), AggSlot, false);
+  CGF.EmitAggExpr(BaseInit->getInit(), AggSlot);
   
   if (CGF.CGM.getLangOpts().Exceptions && 
       !BaseClassDecl->hasTrivialDestructor())

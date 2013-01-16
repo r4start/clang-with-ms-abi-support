@@ -2238,7 +2238,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                                                    AttributeList);
 
   llvm::BasicBlock *InvokeDest = 0;
-  if (!(Attrs.getFnAttributes() & llvm::Attribute::NoUnwind))
+  if (!Attrs.hasAttribute(llvm::AttributeSet::FunctionIndex,
+                          llvm::Attribute::NoUnwind))
     InvokeDest = getInvokeDest();
 
   llvm::CallSite CS;
@@ -2249,7 +2250,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     CS = Builder.CreateInvoke(Callee, Cont, InvokeDest, Args);
     EmitBlock(Cont);
   }
-
   if (callOrInvoke)
     *callOrInvoke = CS.getInstruction();
 

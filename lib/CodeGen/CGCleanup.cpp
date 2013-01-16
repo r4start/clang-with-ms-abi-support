@@ -20,7 +20,7 @@
 #include "CodeGenFunction.h"
 #include "CGCleanup.h"
 // r4start
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/Intrinsics.h"
 
 using namespace clang;
 using namespace CodeGen;

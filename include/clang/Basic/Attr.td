@@ -684,16 +684,11 @@ def VecTypeHint : Attr {
   let Ignored = 1;
 }
 
-def UnknownDeclspec : InheritableAttr {
-  let Spellings = [Declspec<"unknown_declspec">];
-  let Args = [StringArgument<"Name">];
-}
-
-def MsAttributeAttribute : InheritableAttr {
-  let Spellings = [Declspec<"attribute">];
-  let Args = [IntArgument<"ValidOn">,
-			  BoolArgument<"AllowMultiple">];
-}
+//def MsAttributeAttribute : InheritableAttr {
+//  let Spellings = [Declspec<"attribute">];
+//  let Args = [IntArgument<"ValidOn">,
+//			  BoolArgument<"AllowMultiple">];
+//}
 
 //def MsSourceAnnotationAttributeAttribute : InheritableAttr {
 //  let Spellings = [Declspec<"source_annotation_attribute">];
